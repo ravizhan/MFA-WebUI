@@ -103,11 +103,11 @@ function getDevices() {
         return
       }
       const devices_data = data['devices']
-      for (let i = 0; i < devices_data.length; i++) {
+      for (let device of devices_data) {
         console.log(devices_data)
         devices_list.value.push({
-          label: devices_data[i]['name'] + ' ' + devices_data[i]['address'],
-          value: devices_data[i],
+          label: device['name'] + ' ' + device['address'],
+          value: device,
         })
       }
       loading.value = false
