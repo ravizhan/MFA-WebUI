@@ -309,3 +309,4 @@ coverage
 *.tsbuildinfo
 page
 test.html
+resource
