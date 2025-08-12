@@ -22,15 +22,18 @@ jobs:
         uses: pnpm/action-setup@v4
         with:
           version: 10
+          run_install: false
+          package_json_file: 'front/package.json'
 
       - name: Use Node.js 22
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: "pnpm"
+          cache-dependency-path: 'front/pnpm-lock.yaml'
 
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
 
       - name: Build Executable
         run: pnpm run build
