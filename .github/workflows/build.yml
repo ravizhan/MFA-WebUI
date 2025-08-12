@@ -121,11 +121,11 @@ jobs:
         if: ${{ matrix.os == 'windows-latest' }}
         env:
           NUITKA_CCACHE_BINARY: ${{ env.ccache_symlinks_path }}
-        run: uv run python -m nuitka --standalone --mingw64 --windows-icon-from-ico=logo.png --windows-console-mode=force --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --remove-output --lto=yes --output-dir=build -o MFA-WebUI main.py
+        run: uv run python -m nuitka --standalone --mingw64 --windows-icon-from-ico=logo.jpg --windows-console-mode=force --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --remove-output --lto=yes --output-dir=build -o MFA-WebUI main.py
 
       - name: Build Executable
         if: ${{ matrix.os != 'windows-latest' }}
-        run: uv run python -m nuitka --standalone --macos-app-icon=logo.png --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --remove-output --lto=yes --output-dir=build -o MFA-WebUI main.py
+        run: uv run python -m nuitka --standalone --macos-app-icon=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --remove-output --lto=yes --output-dir=build -o MFA-WebUI main.py
 
       - name: Copy Resource for Linux and Macos
         if: ${{ matrix.os == 'macos-latest' || matrix.os == 'ubuntu-latest' }}
