@@ -8,10 +8,9 @@ from maa.resource import Resource
 from maa.tasker import Tasker
 from maa.toolkit import Toolkit
 from models import InterfaceModel
+
 resource = Resource()
 resource.set_cpu()
-resource.post_bundle("./resource").wait()
-
 
 class MaaWorker:
     def __init__(self, queue: SimpleQueue, interface: InterfaceModel):
@@ -85,6 +84,15 @@ class MaaWorker:
             self.send_log(conn_fail_msg)
         return self.connected
 
+    def set_resource(self, resource_name):
+        for i in self.interface.resource:
+            if i.name == resource_name:
+                resource.post_bundle(i.path[0]).wait()
+                if len(i.path) > 1:
+                    resource.post_bundle(i.path[1]).wait()
+                self.send_log(f"资源设置为: {i.name}")
+        return None
+
     def run(self, tasks):
         self.stop_flag = False
         self.send_log("任务开始")
@@ -93,7 +101,7 @@ class MaaWorker:
                 if self.stop_flag:
                     self.send_log("任务已终止")
                     return
-                #TODO
+                self.tasker.post_task(task).wait()
             if self.stop_flag:
                 self.send_log("任务已终止")
                 return

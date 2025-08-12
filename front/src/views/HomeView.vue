@@ -1,23 +1,21 @@
 <template>
-  <n-layout>
-    <n-message-provider>
-      <n-dialog-provider>
-        <n-layout class="px-0 xl:px-25">
-          <n-grid x-gap="36" cols="1 m:3" responsive="screen">
-            <n-grid-item>
-              <left></left>
-            </n-grid-item>
-            <n-grid-item>
-              <medium></medium>
-            </n-grid-item>
-            <n-grid-item>
-              <right></right>
-            </n-grid-item>
-          </n-grid>
-        </n-layout>
-      </n-dialog-provider>
-    </n-message-provider>
-  </n-layout>
+  <n-message-provider>
+    <n-dialog-provider>
+      <n-layout class="m-5 m:m-10">
+        <n-grid x-gap="36" cols="1 m:3" responsive="screen">
+          <n-grid-item>
+            <left></left>
+          </n-grid-item>
+          <n-grid-item>
+            <medium></medium>
+          </n-grid-item>
+          <n-grid-item>
+            <right></right>
+          </n-grid-item>
+        </n-grid>
+      </n-layout>
+    </n-dialog-provider>
+  </n-message-provider>
 </template>
 <script setup>
 import left from '@/components/left.vue'

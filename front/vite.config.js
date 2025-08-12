@@ -15,12 +15,6 @@ export default defineConfig({
     AutoImport({
       imports: [
         'vue',
-        {
-          'naive-ui': [
-            'useMessage',
-            'useNotification',
-          ]
-        }
       ]
     }),
     Components({

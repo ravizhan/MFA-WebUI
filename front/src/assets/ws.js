@@ -2,7 +2,7 @@
 let Socket = ''
 
 export const createSocket = () => {
-  Socket?.close()
+  Socket && Socket.close()
   if (!Socket) {
     console.log('建立websocket连接')
     Socket = new WebSocket('ws://' + window.location.host + '/api/ws')

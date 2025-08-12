@@ -21,7 +21,7 @@ class AppState:
     def __init__(self):
         self.message_conn = SimpleQueue()
         self.child_process = None
-        self.worker = None
+        self.worker: MaaWorker|None = None
         self.history_message = []
         self.current_status = None
 
@@ -31,7 +31,8 @@ app_state = AppState()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app_state.worker = MaaWorker(app_state.message_conn)
+    app_state.worker = MaaWorker(app_state.message_conn, interface)
+    await asyncio.sleep(1.0)
     webbrowser.open_new("http://127.0.0.1:55666")
     yield
 
@@ -62,8 +63,6 @@ def get_info():
 
 @app.get("/api/get_device")
 def get_device():
-    if app_state.worker is None:
-        return {"status": "failed", "message": "MAA未初始化，请先保存设置"}
     devices = app_state.worker.get_device()
     return {"devices": devices}
 
@@ -74,17 +73,19 @@ def connect_device(device: DeviceModel):
         return {"status": "success"}
     return {"status": "failed"}
 
+@app.post("/api/resource")
+def set_resource(name: str):
+    app_state.worker.set_resource(name)
+    return {"status": "success"}
 
 @app.post("/api/start")
 def start(tasks: PostTaskModel):
-    if app_state.worker is None:
-        return {"status": "failed", "message": "MAA未初始化，请先保存设置"}
     if app_state.child_process is not None:
         return {"status": "failed", "message": "任务已开始"}
     if not app_state.worker.connected:
         return {"status": "failed", "message": "请先连接设备"}
     app_state.child_process = threading.Thread(
-        target=app_state.worker.task,
+        target=app_state.worker.run,
         args=(tasks.tasklist,),
         daemon=True
     )
