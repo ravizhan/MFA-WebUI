@@ -1,0 +1,136 @@
+name: Release Build
+run-name: Building for ${{ github.ref_name }}
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+jobs:
+  vite-build:
+    runs-on: ubuntu-latest
+    outputs:
+      cache-key: ${{ steps.Store-Cache-Key.outputs.cache-key }}
+    defaults:
+      run:
+        working-directory: ./front
+    steps:
+      - name: Check-out repository
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: "pnpm"
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build Executable
+        run: pnpm run build
+
+      - name: Store Cache Key
+        id: Store-Cache-Key
+        run: echo "cache-key=frontpage-dist-${{ hashFiles('page/**') }}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache
+        uses: actions/cache@v4.2.1
+        with:
+          path: page
+          key: ${{ steps.Store-Cache-Key.outputs.cache-key }}
+
+  build:
+    env:
+      UV_INDEX: https://pypi.org/simple
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            arch: x64
+
+          - os: ubuntu-latest
+            platform: linux
+            arch: arm64
+
+          - os: macos-latest
+            platform: osx
+            arch: x64
+
+          - os: macos-latest
+            platform: osx
+            arch: arm64
+
+          - os: windows-latest
+            platform: win
+            arch: x64
+
+          - os: windows-latest
+            platform: win
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    name: Build (${{ matrix.platform }}-${{ matrix.arch }})
+    needs: vite-build
+
+    steps:
+      - name: Check-out repository
+        uses: actions/checkout@v4
+
+      - name: Restore cached frontend artifacts
+        uses: actions/cache@v4.2.1
+        with:
+          path: page
+          key: ${{ needs.vite-build.outputs.cache-key }}
+          enableCrossOsArchive: true
+          fail-on-cache-miss: true
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: "pyproject.toml"
+
+      - name: Install Dependencies
+        run: uv sync --dev
+
+      - name: Build Executable
+        run: uv run python -m nuitka --standalone --windows-console-mode=force --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --remove-output --lto=yes --output-dir=build -o MFA-WebUI main.py
+
+      - name: Copy Resource Linux Macos
+        if: ${{ matrix.os == 'macos-latest' || matrix.os == 'ubuntu-latest' }}
+        run: |
+          cp -r resource build/main.dist/resource
+          cp -r config build/main.dist/config
+          cp -r page build/main.dist/page
+
+      - name: Copy Resource Windows
+        if: ${{ matrix.os == 'windows-latest'}}
+        run: |
+          xcopy .\resource\ build\main.dist\resource\ /S /I
+          xcopy .\config\ build\main.dist\config\ /S /I
+          xcopy .\page\ build\main.dist\page\ /S /I
+
+      - name: Create Version file
+        run: echo "${{ github.ref_name }}" >> build/main.dist/version
+
+      - name: Compress Build
+        run: 7z a -t7z -mx=9 -mmt -ms -r MFA-WebUI-${{ github.ref_name }}-${{ matrix.platform }}-${{ matrix.arch }}.7z "./build/main.dist/*"
+
+      - name: Release
+        uses: ncipollo/release-action@v1.16.0
+        with:
+          draft: true
+          allowUpdates: true
+          artifacts: |
+            MFA-WebUI-${{ github.ref_name }}-${{ matrix.platform }}-${{ matrix.arch }}.7z

@@ -56,7 +56,7 @@ class InterfaceModel(BaseModel):
     mirrorchyan_multiplatform: Optional[bool] = None
     controller: List[Controller]
     resource: List[Resource]
-    agent: Agent = None
+    agent: Optional[Agent] = None
     task: List[Task]
     option: Dict[str, Option]
     version: str
@@ -65,7 +65,6 @@ class DeviceModel(BaseModel):
     name: str
     adb_path: str
     address: str
-    # 会自动转换为int，不用处理
     screencap_methods: int
     input_methods: int
     config: dict
