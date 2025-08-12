@@ -51,7 +51,6 @@ jobs:
   build:
     env:
       UV_INDEX: https://pypi.org/simple
-      NUITKA_CACHE_DIR: ${{ github.action_path }}/nuitka/cache
     strategy:
       fail-fast: false
       matrix:
@@ -121,7 +120,7 @@ jobs:
       - name: Cache Nuitka cache directory
         uses: actions/cache@v4
         with:
-          path: ${{ env.NUITKA_CACHE_DIR }}
+          path: ${{ runner.temp }}/nuitka/cache
           key: nuitka-${{ runner.os }}-${{ runner.arch }}-python-${{ env.PYTHON_VERSION }}-${{ github.sha }}
           restore-keys: |
             nuitka-${{ runner.os }}-${{ runner.arch }}-python-${{ env.PYTHON_VERSION }}-
@@ -131,10 +130,13 @@ jobs:
         if: ${{ matrix.os == 'windows-latest' }}
         env:
           NUITKA_CCACHE_BINARY: ${{ env.ccache_symlinks_path }}
+          NUITKA_CACHE_DIR: ${{ runner.temp }}/nuitka/cache
         run: uv run python -m nuitka --standalone --mingw64 --windows-icon-from-ico=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --remove-output --lto=yes --output-dir=build -o MFA-WebUI main.py
 
       - name: Build Executable
         if: ${{ matrix.os != 'windows-latest' }}
+        env:
+          NUITKA_CACHE_DIR: ${{ runner.temp }}/nuitka/cache
         run: uv run python -m nuitka --standalone --macos-app-icon=logo.jpg --linux-icon=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --remove-output --lto=yes --output-dir=build -o MFA-WebUI main.py
 
       - name: Copy Resource for Linux and Macos
