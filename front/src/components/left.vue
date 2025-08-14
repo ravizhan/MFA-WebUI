@@ -1,5 +1,5 @@
 <template>
-  <n-card content-style="padding: 0;">
+  <n-card content-style="padding: 0;" hoverable>
     <n-tabs type="segment" animated>
       <n-tab-pane name="device" tab="设备连接">
         <div class="select-border">
@@ -37,13 +37,38 @@
   </n-card>
   <div class="col-name">任务列表</div>
   <n-card hoverable>
-    <n-list>
-      <VueDraggable v-model="task_list">
-        <n-list-item v-for="item in task_list" :key="item.id">
-          <n-checkbox size="large" :label="item.name" />
-        </n-list-item>
-      </VueDraggable>
-    </n-list>
+        <n-list hoverable bordered>
+          <template v-if="scroll_show">
+            <n-scrollbar class="max-h-80">
+              <VueDraggable v-model="task_list">
+                <n-list-item v-for="item in task_list" :key="item.id">
+                  <n-checkbox size="large" :label="item.name" />
+                  <template #suffix>
+                    <n-button quaternary circle>
+                      <template #icon>
+                        <n-icon><div class="i-mdi-cog-outline"></div></n-icon>
+                      </template>
+                    </n-button>
+                  </template>
+                </n-list-item>
+              </VueDraggable>
+            </n-scrollbar>
+          </template>
+          <template v-else>
+            <VueDraggable v-model="task_list">
+              <n-list-item v-for="item in task_list" :key="item.id">
+                <n-checkbox size="large" :label="item.name" />
+                <template #suffix>
+                  <n-button quaternary circle>
+                    <template #icon>
+                      <n-icon><div class="i-mdi-cog-outline"></div></n-icon>
+                    </template>
+                  </n-button>
+                </template>
+              </n-list-item>
+            </VueDraggable>
+          </template>
+        </n-list>
     <n-flex class="form-btn" justify="center">
       <n-button strong secondary type="info" size="large" @click="startTask"> 开始任务</n-button>
       <n-button strong secondary type="info" size="large" @click="stopTask"> 中止任务</n-button>
@@ -51,17 +76,31 @@
   </n-card>
 </template>
 <script setup>
-import { onMounted, ref } from 'vue'
+import { watch, onMounted, ref } from 'vue'
 import { getDevices } from '@/assets/api'
 import { VueDraggable } from 'vue-draggable-plus'
 import { useMessage } from 'naive-ui'
+import { useInterfaceStore } from '@/stores/index.js'
+
 const message = useMessage()
+const interfaceStore = useInterfaceStore()
+const task_list = ref([])
 
-const task_list = ref(null)
-task_list.value = ['1', '2', '3', '4'].map((name, index) => {
-  return { name, order: index + 1 }
-})
+const scroll_show = ref(window.innerWidth > 768)
 
+// 监听 store 中的变化并更新本地数据
+watch(
+  () => interfaceStore.getTaskList,
+  (newList) => {
+    task_list.value = [...newList]
+  },
+  { immediate: true },
+)
+
+// 同步回store
+// watch(task_list, (newList) => {
+//   interfaceStore.updateTaskList(newList)
+// }, { deep: true })
 const model = ref({
   device: null,
   api_key: '',
@@ -105,6 +144,7 @@ onMounted(() => {
 .list-group-item i {
   cursor: pointer;
 }
+
 .select-border {
   padding: 0 12px 12px 12px;
 }

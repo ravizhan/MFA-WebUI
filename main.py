@@ -46,28 +46,18 @@ async def serve_homepage():
     return FileResponse("page/index.html")
 
 
-@app.get("/api/info")
-def get_info():
-    data = {
-        "basic": {
-            "name": interface.name,
-            "version": interface.version,
-            "url": interface.url
-        },
-        "settings": {
-            "resource": interface.resource
-        }
-    }
-    return data
+@app.get("/api/interface")
+def get_interface():
+    return interface.model_dump()
 
 
-@app.get("/api/get_device")
+@app.get("/api/device")
 def get_device():
     devices = app_state.worker.get_device()
     return {"devices": devices}
 
 
-@app.post("/api/connect_device")
+@app.post("/api/device")
 def connect_device(device: DeviceModel):
     if app_state.worker.connect_device(device):
         return {"status": "success"}

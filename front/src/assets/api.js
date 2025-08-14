@@ -64,8 +64,6 @@ export function connectDevices() {
   }
 }
 
-export function getInfo() {
-  return fetch('/api/info', {
-    method: 'GET',
-  }).then((res) => res.json())
+export function getInterface() {
+  return fetch('/api/interface', { method: 'GET' }).then((res) => res.json())
 }

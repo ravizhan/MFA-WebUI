@@ -93,14 +93,15 @@ class MaaWorker:
                 self.send_log(f"资源设置为: {i.name}")
         return None
 
-    def run(self, tasks):
+    def run(self, task_list):
         self.stop_flag = False
         self.send_log("任务开始")
         try:
-            for task in tasks:
+            for task in task_list:
                 if self.stop_flag:
                     self.send_log("任务已终止")
                     return
+                self.prepare_task(task)
                 self.tasker.post_task(task).wait()
             if self.stop_flag:
                 self.send_log("任务已终止")
@@ -117,3 +118,6 @@ class MaaWorker:
             self.send_log(f"请将日志反馈至 {self.interface.url}/issues")
         self.send_log("所有任务完成")
         time.sleep(0.5)
+
+    def prepare_task(self,task_config):
+        pass

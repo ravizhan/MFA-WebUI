@@ -36,11 +36,19 @@ export default defineConfig({
     outDir:'../page',
     rollupOptions:{
       output:{
-        manualChunks:(id)=>{
-          if(id.includes("node_modules")){
-            return "vendor";
-          }
+        manualChunks: {
+          'vue-vendor': ['vue', 'vue-router'],
+          'naive-ui': ['naive-ui'],
         }
+      }
+    }
+  },
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:55666',
+        changeOrigin: true,
+        ws: true
       }
     }
   }
