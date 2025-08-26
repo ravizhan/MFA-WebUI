@@ -9,11 +9,15 @@ from fastapi import FastAPI, websockets
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from models import InterfaceModel, DeviceModel, PostTaskModel
 from utils import MaaWorker
 
 with open("interface.json", "r", encoding="utf-8") as f:
     json_data = json.load(f)
+if json_data.get("interface_version") == "2":
+    # from models.interfaceV2 import InterfaceModel
+    pass
+else:
+    from models.interfaceV1 import InterfaceModel, DeviceModel, PostTaskModel
 interface = InterfaceModel(**json_data)
 
 

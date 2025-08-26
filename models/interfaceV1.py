@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict
 
 
 class Controller(BaseModel):
@@ -17,31 +17,19 @@ class Agent(BaseModel):
     child_args: List[str]
 
 
-class TaskPipelineOverride(BaseModel):
-    input_text: Optional[str] = None
-    template: Optional[str] = None
-
-
 class Task(BaseModel):
     name: str
     entry: str
     doc: Optional[str | List[str]] = None
     option: Optional[List[str]] = None
-    pipeline_override: Optional[Dict[str, TaskPipelineOverride]] = None
+    pipeline_override: Optional[Dict[str, dict]] = None
     repeatable: Optional[bool] = None
     repeat_count: Optional[int] = None
 
 
-class OptionCasePipelineOverride(BaseModel):
-    enabled: Optional[bool] = None
-    next: Optional[str] = None
-    expected: Optional[List[str] | str] = None
-    custom_action_param: Optional[Dict[str, Any]] = None
-
-
 class OptionCase(BaseModel):
     name: str
-    pipeline_override: Dict[str, OptionCasePipelineOverride]
+    pipeline_override: Dict[str, dict]
 
 
 class Option(BaseModel):
