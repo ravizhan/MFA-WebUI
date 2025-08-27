@@ -48,14 +48,3 @@ class InterfaceModel(BaseModel):
     task: List[Task]
     option: Dict[str, Option]
     version: str
-
-class DeviceModel(BaseModel):
-    name: str
-    adb_path: str
-    address: str
-    screencap_methods: int
-    input_methods: int
-    config: dict
-
-class PostTaskModel(BaseModel):
-    tasklist: List[Dict[str, str]]

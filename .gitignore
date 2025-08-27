@@ -310,3 +310,5 @@ coverage
 page
 test.html
 resource
+auto-imports.d.ts
+components.d.ts
