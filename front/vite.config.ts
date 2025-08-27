@@ -1,4 +1,3 @@
-import { fileURLToPath, URL } from 'node:url'
 import UnoCSS from 'unocss/vite'
 import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
@@ -27,13 +26,9 @@ export default defineConfig({
       filename: "test.html",
     }),
   ],
-  resolve: {
-    alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url))
-    },
-  },
   build: {
     outDir:'../page',
+    minify:'terser',
     rollupOptions:{
       output:{
         manualChunks: {

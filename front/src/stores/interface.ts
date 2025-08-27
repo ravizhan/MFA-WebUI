@@ -1,17 +1,28 @@
 import { defineStore } from 'pinia'
-import { getInterface } from '@/assets/api'
+import { getInterface } from '../script/api'
+import type { InterfaceModel } from '../types/interfaceV1'
+
+export interface TaskListItem {
+  id: string
+  name: string
+  order: number
+}
 
 export const useInterfaceStore = defineStore('interface', {
-  state: () => ({ interface: null }),
+  state: () => {
+    return {
+      interface: null as InterfaceModel | null,
+    }
+  },
   getters: {
     getTaskList: (state) => {
       if (!state.interface?.task) return []
-      const taskList = []
+      const taskList: TaskListItem[] = []
       for (const Item of state.interface.task) {
         taskList.push({
           id: Item.entry,
           name: Item.name,
-          order: state.interface.task.indexOf(Item),
+          order: state.interface.task.indexOf(Item)
         })
       }
       return taskList
@@ -19,7 +30,7 @@ export const useInterfaceStore = defineStore('interface', {
   },
   actions: {
     setInterface() {
-      getInterface().then((data) => {
+      getInterface().then((data: InterfaceModel) => {
         this.interface = data
       })
     },
