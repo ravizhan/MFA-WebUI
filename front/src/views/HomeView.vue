@@ -17,10 +17,10 @@
     </n-dialog-provider>
   </n-message-provider>
 </template>
-<script setup>
-import left from '@/components/left.vue'
-import medium from '@/components/medium.vue'
-import right from '@/components/right.vue'
+<script setup lang="ts">
+import left from '../components/left.vue'
+import medium from '../components/medium.vue'
+import right from '../components/right.vue'
 import { onMounted } from 'vue'
 onMounted(() => {
   if (Notification.permission !== 'granted') {

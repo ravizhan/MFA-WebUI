@@ -13,13 +13,13 @@
   </div>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { NIcon } from 'naive-ui'
 import { h, ref, onMounted, watch, computed } from 'vue'
 import { RouterLink } from 'vue-router'
-import { useInterfaceStore } from '@/stores/index.js'
+import { useInterfaceStore } from './stores/interface.ts'
 
-function renderIcon(icon) {
+function renderIcon(icon: string) {
   return () => h(NIcon, null, { default: () => h('div', { class: icon }) })
 }
 const interfaceStore = useInterfaceStore()

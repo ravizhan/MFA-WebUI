@@ -5,7 +5,7 @@
         <div class="select-border">
           <div style="display: flex; align-items: center; gap: 8px">
             <n-select
-              v-model:value="model.device"
+              v-model:value="device"
               placeholder="请选择一个设备"
               :options="devices_list"
               :loading="loading"
@@ -21,7 +21,7 @@
         <div class="select-border">
           <div style="display: flex; align-items: center; gap: 8px">
             <n-select
-              v-model:value="model.device"
+              v-model:value="resource"
               placeholder="请选择一个资源"
               :options="devices_list"
               :loading="loading"
@@ -37,56 +37,57 @@
   </n-card>
   <div class="col-name">任务列表</div>
   <n-card hoverable>
-        <n-list hoverable bordered>
-          <template v-if="scroll_show">
-            <n-scrollbar class="max-h-80">
-              <VueDraggable v-model="task_list">
-                <n-list-item v-for="item in task_list" :key="item.id">
-                  <n-checkbox size="large" :label="item.name" />
-                  <template #suffix>
-                    <n-button quaternary circle>
-                      <template #icon>
-                        <n-icon><div class="i-mdi-cog-outline"></div></n-icon>
-                      </template>
-                    </n-button>
+    <n-list hoverable bordered>
+      <template v-if="scroll_show">
+        <n-scrollbar class="max-h-80">
+          <VueDraggable v-model="task_list">
+            <n-list-item v-for="item in task_list" :key="item.id">
+              <n-checkbox size="large" :label="item.name" />
+              <template #suffix>
+                <n-button quaternary circle>
+                  <template #icon>
+                    <n-icon><div class="i-mdi-cog-outline"></div></n-icon>
                   </template>
-                </n-list-item>
-              </VueDraggable>
-            </n-scrollbar>
-          </template>
-          <template v-else>
-            <VueDraggable v-model="task_list">
-              <n-list-item v-for="item in task_list" :key="item.id">
-                <n-checkbox size="large" :label="item.name" />
-                <template #suffix>
-                  <n-button quaternary circle>
-                    <template #icon>
-                      <n-icon><div class="i-mdi-cog-outline"></div></n-icon>
-                    </template>
-                  </n-button>
+                </n-button>
+              </template>
+            </n-list-item>
+          </VueDraggable>
+        </n-scrollbar>
+      </template>
+      <template v-else>
+        <VueDraggable v-model="task_list">
+          <n-list-item v-for="item in task_list" :key="item.id">
+            <n-checkbox size="large" :label="item.name" />
+            <template #suffix>
+              <n-button quaternary circle>
+                <template #icon>
+                  <n-icon><div class="i-mdi-cog-outline"></div></n-icon>
                 </template>
-              </n-list-item>
-            </VueDraggable>
-          </template>
-        </n-list>
+              </n-button>
+            </template>
+          </n-list-item>
+        </VueDraggable>
+      </template>
+    </n-list>
     <n-flex class="form-btn" justify="center">
       <n-button strong secondary type="info" size="large" @click="startTask"> 开始任务</n-button>
       <n-button strong secondary type="info" size="large" @click="stopTask"> 中止任务</n-button>
     </n-flex>
   </n-card>
 </template>
-<script setup>
+<script setup lang="ts">
 import { watch, onMounted, ref } from 'vue'
-import { getDevices } from '@/assets/api'
+import { getDevices, postDevices, startTask, stopTask } from '../script/api'
 import { VueDraggable } from 'vue-draggable-plus'
-import { useMessage } from 'naive-ui'
-import { useInterfaceStore } from '@/stores/index.js'
+import { useInterfaceStore, type TaskListItem } from '../stores/interface.ts'
 
-const message = useMessage()
 const interfaceStore = useInterfaceStore()
-const task_list = ref([])
-
+const task_list = ref<TaskListItem[]>()
 const scroll_show = ref(window.innerWidth > 768)
+const device = ref<object | null>(null)
+const resource = ref<object | null>(null)
+const devices_list = ref<object[] | null>(null)
+const loading = ref(false)
 
 // 监听 store 中的变化并更新本地数据
 watch(
@@ -101,31 +102,22 @@ watch(
 // watch(task_list, (newList) => {
 //   interfaceStore.updateTaskList(newList)
 // }, { deep: true })
-const model = ref({
-  device: null,
-  api_key: '',
-  endpoint: '',
-})
-const devices_list = ref([])
-const loading = ref(false)
 
 function get_device() {
-  getDevices().then((data) => {
-    if (data['status'] === 'failed') {
-      message.error(data['message'])
-      loading.value = true
-      return
-    }
-    const devices_data = data['devices']
-    for (let device of devices_data) {
-      console.log(devices_data)
-      devices_list.value.push({
-        label: device['name'] + ' ' + device['address'],
+  getDevices().then((devices_data) => {
+    console.log(devices_data)
+    for (const device of devices_data) {
+      devices_list.value?.push({
+        label: device.name + ' ' + device.address,
         value: device,
       })
     }
     loading.value = false
   })
+}
+
+function connectDevices() {
+  postDevices(device)
 }
 
 function get_resource() {
