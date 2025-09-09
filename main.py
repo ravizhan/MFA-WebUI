@@ -8,16 +8,18 @@ from queue import SimpleQueue
 from fastapi import FastAPI, websockets
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-
+from models.api import DeviceModel, PostTaskModel
 from utils import MaaWorker
 
 with open("interface.json", "r", encoding="utf-8") as f:
     json_data = json.load(f)
 if json_data.get("interface_version") == "2":
     # from models.interfaceV2 import InterfaceModel
+    INTERFACE_VERSION = 2
     pass
 else:
-    from models.interfaceV1 import InterfaceModel, DeviceModel, PostTaskModel
+    INTERFACE_VERSION = 1
+    from models.interfaceV1 import InterfaceModel
 interface = InterfaceModel(**json_data)
 
 
@@ -35,7 +37,7 @@ app_state = AppState()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app_state.worker = MaaWorker(app_state.message_conn, interface)
+    app_state.worker = MaaWorker(app_state.message_conn, INTERFACE_VERSION, interface)
     await asyncio.sleep(1.0)
     webbrowser.open_new("http://127.0.0.1:55666")
     yield
@@ -105,6 +107,7 @@ def going_on():
 @app.websocket("/api/ws")
 async def websocket_endpoint(websocket: websockets.WebSocket):
     await websocket.accept()
+    await asyncio.sleep(0.5)
     if app_state.history_message:
         for i in app_state.history_message:
             await websocket.send_text(i)

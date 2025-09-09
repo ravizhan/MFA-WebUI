@@ -44,7 +44,7 @@
             <n-list-item v-for="item in task_list" :key="item.id">
               <n-checkbox size="large" :label="item.name" />
               <template #suffix>
-                <n-button quaternary circle>
+                <n-button quaternary circle @click="indexStore.SelectTask(item.id)">
                   <template #icon>
                     <n-icon><div class="i-mdi-cog-outline"></div></n-icon>
                   </template>
@@ -77,16 +77,18 @@
 </template>
 <script setup lang="ts">
 import { watch, onMounted, ref } from 'vue'
-import { getDevices, postDevices, startTask, stopTask } from '../script/api'
+import { getDevices, postDevices, startTask, stopTask, type Device } from '../script/api'
 import { VueDraggable } from 'vue-draggable-plus'
 import { useInterfaceStore, type TaskListItem } from '../stores/interface.ts'
+import { useIndexStore } from '../stores'
 
 const interfaceStore = useInterfaceStore()
-const task_list = ref<TaskListItem[]>()
+const indexStore = useIndexStore()
+const task_list = ref<TaskListItem[]>([])
 const scroll_show = ref(window.innerWidth > 768)
-const device = ref<object | null>(null)
+const device = ref<Device|null>(null)
 const resource = ref<object | null>(null)
-const devices_list = ref<object[] | null>(null)
+const devices_list = ref<object[]>([])
 const loading = ref(false)
 
 // 监听 store 中的变化并更新本地数据
@@ -117,7 +119,7 @@ function get_device() {
 }
 
 function connectDevices() {
-  postDevices(device)
+  postDevices(device.value as Device)
 }
 
 function get_resource() {

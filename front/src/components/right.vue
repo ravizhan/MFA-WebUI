@@ -37,42 +37,43 @@ function is_now(date_string: string) {
   return date_string === formatDate(new Date())
 }
 
-onMounted(() => {
-  const getsocketData = (i: Websocket, ev: MessageEvent) => {
-    const data: string = ev.data
-    log.value = log.value + '\n' + data
-    if (data.includes('请求接管') && is_now(data.split(' ')[0] + ' ' + data.split(' ')[1])) {
-      message.warning(data)
-      new Notification('请求接管', {
-        body: data + '\n' + '完成接管后请点击确定',
-      })
-      dialog.warning({
-        title: '请求接管',
-        content: data + '\n' + '完成接管后请点击确定',
-        positiveText: '确定',
-        closable: false,
-        maskClosable: false,
-        onPositiveClick: () => {
-          fetch('/api/continue', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-            },
+const getsocketData = (i: Websocket, ev: MessageEvent) => {
+  const data: string = ev.data
+  log.value = log.value + '\n' + data
+  if (data.includes('请求接管') && is_now(data.split(' ')[0] + ' ' + data.split(' ')[1])) {
+    message.warning(data)
+    new Notification('请求接管', {
+      body: data + '\n' + '完成接管后请点击确定',
+    })
+    dialog.warning({
+      title: '请求接管',
+      content: data + '\n' + '完成接管后请点击确定',
+      positiveText: '确定',
+      closable: false,
+      maskClosable: false,
+      onPositiveClick: () => {
+        fetch('/api/continue', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        })
+          .then((res) => res.json())
+          .then((data) => {
+            if (data['status'] === 'success') {
+              message.success('正在恢复任务')
+            } else {
+              message.error(data['message'])
+            }
           })
-            .then((res) => res.json())
-            .then((data) => {
-              if (data['status'] === 'success') {
-                message.success('正在恢复任务')
-              } else {
-                message.error(data['message'])
-              }
-            })
-        },
-      })
-    }
+      },
+    })
   }
-  ws.addEventListener(WebsocketEvent.message, getsocketData)
+}
+ws.addEventListener(WebsocketEvent.message, getsocketData)
 
+
+onMounted(() => {
   watchEffect(() => {
     if (log.value) {
       nextTick(() => {

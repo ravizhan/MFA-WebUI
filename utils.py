@@ -7,18 +7,21 @@ from maa.controller import AdbController
 from maa.resource import Resource
 from maa.tasker import Tasker
 from maa.toolkit import Toolkit
-from models import InterfaceModel
 
 resource = Resource()
 resource.set_cpu()
 
 class MaaWorker:
-    def __init__(self, queue: SimpleQueue, interface: InterfaceModel):
+    def __init__(self, queue: SimpleQueue, version: int, interface):
         user_path = "./"
         Toolkit.init_option(user_path)
-
-        self.interface = interface
-
+        if version == 2:
+            # from models.interfaceV2 import InterfaceModel
+            # self.interface: InterfaceModel = interface
+            pass
+        else:
+            from models.interfaceV1 import InterfaceModel
+            self.interface: InterfaceModel = interface
         self.queue = queue
         self.tasker = Tasker()
         self.connected = False

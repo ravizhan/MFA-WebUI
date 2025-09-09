@@ -7,7 +7,7 @@ interface ApiResponse {
   message: string
 }
 
-interface Device {
+export interface Device {
   name: string
   adb_path: string
   address: string
@@ -59,7 +59,7 @@ export function getDevices(): Promise<Device[]> {
     .then((data: DeviceResponse) => data.devices)
 }
 
-export function postDevices(devices: Device[]): void {
+export function postDevices(devices: Device): void {
   fetch('/api/device', {
     method: 'POST',
     body: JSON.stringify({ devices: devices }),
