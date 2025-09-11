@@ -59,7 +59,7 @@
           <n-list-item v-for="item in task_list" :key="item.id">
             <n-checkbox size="large" :label="item.name" />
             <template #suffix>
-              <n-button quaternary circle>
+              <n-button quaternary circle @click="indexStore.SelectTask(item.id)">
                 <template #icon>
                   <n-icon><div class="i-mdi-cog-outline"></div></n-icon>
                 </template>
@@ -76,7 +76,7 @@
   </n-card>
 </template>
 <script setup lang="ts">
-import { watch, onMounted, ref } from 'vue'
+import { watch, ref } from 'vue'
 import { getDevices, postDevices, startTask, stopTask, type Device } from '../script/api'
 import { VueDraggable } from 'vue-draggable-plus'
 import { useInterfaceStore, type TaskListItem } from '../stores/interface.ts'
@@ -86,7 +86,7 @@ const interfaceStore = useInterfaceStore()
 const indexStore = useIndexStore()
 const task_list = ref<TaskListItem[]>([])
 const scroll_show = ref(window.innerWidth > 768)
-const device = ref<Device|null>(null)
+const device = ref<Device | null>(null)
 const resource = ref<object | null>(null)
 const devices_list = ref<object[]>([])
 const loading = ref(false)
@@ -96,8 +96,8 @@ watch(
   () => interfaceStore.getTaskList,
   (newList) => {
     task_list.value = [...newList]
+    indexStore.SelectTask(task_list.value[0]!.id)
   },
-  { immediate: true },
 )
 
 // 同步回store
@@ -129,10 +129,6 @@ function get_resource() {
 function post_resource() {
   //TODO
 }
-
-onMounted(() => {
-  //TODO
-})
 </script>
 <style scoped>
 .list-group-item i {

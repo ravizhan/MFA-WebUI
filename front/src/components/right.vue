@@ -72,7 +72,6 @@ const getsocketData = (i: Websocket, ev: MessageEvent) => {
 }
 ws.addEventListener(WebsocketEvent.message, getsocketData)
 
-
 onMounted(() => {
   watchEffect(() => {
     if (log.value) {

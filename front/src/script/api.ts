@@ -27,7 +27,8 @@ export function startTask(task_list: object[]): void {
     headers: {
       'Content-Type': 'application/json',
     },
-  }).then((res) => res.json())
+  })
+    .then((res) => res.json())
     .then((data: ApiResponse) => {
       if (data.status === 'success') {
         message.success('任务开始')
@@ -43,7 +44,8 @@ export function stopTask(): void {
     headers: {
       'Content-Type': 'application/json',
     },
-  }).then((res) => res.json())
+  })
+    .then((res) => res.json())
     .then((data: ApiResponse) => {
       if (data.status === 'success') {
         message.success('正在中止任务，请稍后')
@@ -54,7 +56,7 @@ export function stopTask(): void {
 }
 
 export function getDevices(): Promise<Device[]> {
-  return fetch('/api/device', {method: 'GET',})
+  return fetch('/api/device', { method: 'GET' })
     .then((res) => res.json())
     .then((data: DeviceResponse) => data.devices)
 }
@@ -66,7 +68,8 @@ export function postDevices(devices: Device): void {
     headers: {
       'Content-Type': 'application/json',
     },
-  }).then((res) => res.json())
+  })
+    .then((res) => res.json())
     .then((data: ApiResponse) => {
       if (data.status === 'success') {
         message.success('设备连接成功')
@@ -77,6 +80,5 @@ export function postDevices(devices: Device): void {
 }
 
 export function getInterface(): Promise<InterfaceModel> {
-  return fetch('/api/interface', { method: 'GET' })
-    .then((res) => res.json())
+  return fetch('/api/interface', { method: 'GET' }).then((res) => res.json())
 }

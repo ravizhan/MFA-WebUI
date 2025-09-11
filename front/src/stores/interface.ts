@@ -22,7 +22,7 @@ export const useInterfaceStore = defineStore('interface', {
         taskList.push({
           id: Item.entry,
           name: Item.name,
-          order: state.interface.task.indexOf(Item)
+          order: state.interface.task.indexOf(Item),
         })
       }
       return taskList

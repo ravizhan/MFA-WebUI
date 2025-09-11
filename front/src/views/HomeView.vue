@@ -1,7 +1,7 @@
 <template>
   <n-message-provider>
     <n-dialog-provider>
-      <n-layout class="m-4 lg:m-6">
+      <n-layout class="m-3 lg:m-5">
         <n-grid x-gap="36" cols="1 m:3" class="p-1 lg:p-2" responsive="screen">
           <n-grid-item>
             <left></left>
