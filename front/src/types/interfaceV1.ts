@@ -23,12 +23,12 @@ export interface Task {
   repeat_count?: number
 }
 
-interface OptionCase {
+export interface OptionCase {
   name: string
   pipeline_override: Record<string, object>
 }
 
-interface Option {
+export interface Option {
   default_case?: string
   cases: OptionCase[]
 }

@@ -8,7 +8,11 @@
       <n-layout>
         <router-view></router-view>
       </n-layout>
-      <n-layout-footer bordered class="text-align-center"> Powered bt MFA-WebUI </n-layout-footer>
+      <n-layout-footer bordered class="text-align-center">
+        <a href="https://github.com/ravizhan/MFA-WebUI" target="_blank">
+          Powered by MFA-WebUI
+        </a>
+      </n-layout-footer>
     </n-layout>
   </div>
 </template>

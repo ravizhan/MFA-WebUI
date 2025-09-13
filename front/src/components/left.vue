@@ -2,36 +2,32 @@
   <n-card content-style="padding: 0;" hoverable>
     <n-tabs type="segment" animated>
       <n-tab-pane name="device" tab="设备连接">
-        <div class="select-border">
-          <div style="display: flex; align-items: center; gap: 8px">
-            <n-select
-              v-model:value="device"
-              placeholder="请选择一个设备"
-              :options="devices_list"
-              :loading="loading"
-              remote
-              @click="get_device"
-              style="flex: 1"
-            />
-            <n-button strong secondary type="info" @click="connectDevices">连接</n-button>
-          </div>
-        </div>
+        <n-flex class="px-[12px] pb-[12px]">
+          <n-select
+            v-model:value="device"
+            placeholder="请选择一个设备"
+            :options="devices_list"
+            :loading="loading"
+            remote
+            @click="get_device"
+            class="max-w-80%"
+          />
+          <n-button strong secondary type="info" @click="connectDevices">连接</n-button>
+        </n-flex>
       </n-tab-pane>
       <n-tab-pane name="resource" tab="资源选择">
-        <div class="select-border">
-          <div style="display: flex; align-items: center; gap: 8px">
-            <n-select
-              v-model:value="resource"
-              placeholder="请选择一个资源"
-              :options="devices_list"
-              :loading="loading"
-              remote
-              @click="get_resource"
-              style="flex: 1"
-            />
-            <n-button strong secondary type="info" @click="post_resource">确定</n-button>
-          </div>
-        </div>
+        <n-flex class="px-[12px] pb-[12px]">
+          <n-select
+            v-model:value="resource"
+            placeholder="请选择一个资源"
+            :options="devices_list"
+            :loading="loading"
+            remote
+            @click="get_resource"
+            class="max-w-80%"
+          />
+          <n-button strong secondary type="info" @click="post_resource">确定</n-button>
+        </n-flex>
       </n-tab-pane>
     </n-tabs>
   </n-card>
@@ -57,7 +53,7 @@
       <template v-else>
         <VueDraggable v-model="task_list">
           <n-list-item v-for="item in task_list" :key="item.id">
-            <n-checkbox size="large" :label="item.name" />
+            <n-checkbox size="large" :label="item.name" v-model:checked="item.checked" />
             <template #suffix>
               <n-button quaternary circle @click="indexStore.SelectTask(item.id)">
                 <template #icon>
@@ -95,7 +91,9 @@ const loading = ref(false)
 watch(
   () => interfaceStore.getTaskList,
   (newList) => {
-    task_list.value = [...newList]
+    for (const task of newList) {
+      task_list.value.push({ ...task, checked: true})
+    }
     indexStore.SelectTask(task_list.value[0]!.id)
   },
 )
@@ -106,8 +104,9 @@ watch(
 // }, { deep: true })
 
 function get_device() {
+  devices_list.value = []
+  loading.value = true
   getDevices().then((devices_data) => {
-    console.log(devices_data)
     for (const device of devices_data) {
       devices_list.value?.push({
         label: device.name + ' ' + device.address,
@@ -133,9 +132,5 @@ function post_resource() {
 <style scoped>
 .list-group-item i {
   cursor: pointer;
-}
-
-.select-border {
-  padding: 0 12px 12px 12px;
 }
 </style>

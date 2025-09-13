@@ -1,11 +1,12 @@
 import { defineStore } from 'pinia'
 import { getInterface } from '../script/api'
-import type { InterfaceModel } from '../types/interfaceV1'
+import type { InterfaceModel, Option } from '../types/interfaceV1'
 
 export interface TaskListItem {
   id: string
   name: string
   order: number
+  checked?: boolean
 }
 
 export const useInterfaceStore = defineStore('interface', {
@@ -33,6 +34,20 @@ export const useInterfaceStore = defineStore('interface', {
       getInterface().then((data: InterfaceModel) => {
         this.interface = data
       })
+    },
+    getOptionList(entry: string): Record<string, Option> {
+      const result: Record<string, Option> = {}
+      for (const task of this.interface?.task || []) {
+        if (task.entry === entry && task.option) {
+          task.option.forEach((optionName) => {
+            const optionValue = this.interface?.option[optionName]
+            if (optionValue !== undefined) {
+              result[optionName] = optionValue
+            }
+          })
+        }
+      }
+      return result
     },
   },
 })
