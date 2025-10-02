@@ -5,15 +5,15 @@ description = "基于 Vue 的 通用 GUI。由 MaaFramework 强力驱动！"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.116.1",
-    "maafw>=4.4.1",
+    "fastapi>=0.118",
+    "maafw>=4.5.5",
     "plyer>=2.1.0",
-    "uvicorn>=0.35.0",
+    "uvicorn>=0.37.0",
     "websockets>=15.0.1",
 ]
 
 [dependency-groups]
 dev = [
     "imageio>=2.37.0",
-    "nuitka>=2.7.12",
+    "nuitka>=2.7.16",
 ]

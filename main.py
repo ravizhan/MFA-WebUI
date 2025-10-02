@@ -8,6 +8,8 @@ from queue import SimpleQueue
 from fastapi import FastAPI, websockets
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.websockets import WebSocketState, WebSocketDisconnect
+
 from models.api import DeviceModel, PostTaskModel
 from utils import MaaWorker
 
@@ -27,7 +29,7 @@ class AppState:
     def __init__(self):
         self.message_conn = SimpleQueue()
         self.child_process = None
-        self.worker: MaaWorker|None = None
+        self.worker: MaaWorker | None = None
         self.history_message = []
         self.current_status = None
 
@@ -69,10 +71,12 @@ def connect_device(device: DeviceModel):
         return {"status": "success"}
     return {"status": "failed"}
 
+
 @app.post("/api/resource")
 def set_resource(name: str):
     app_state.worker.set_resource(name)
     return {"status": "success"}
+
 
 @app.post("/api/start")
 def start(tasks: PostTaskModel):
@@ -107,22 +111,35 @@ def going_on():
 @app.websocket("/api/ws")
 async def websocket_endpoint(websocket: websockets.WebSocket):
     await websocket.accept()
-    await asyncio.sleep(0.5)
-    if app_state.history_message:
-        for i in app_state.history_message:
-            await websocket.send_text(i)
-    while True:
-        if not app_state.message_conn.empty():
-            data = app_state.message_conn.get_nowait()
-            app_state.history_message.append(data)
-            if "所有任务完成" in data:
-                app_state.child_process.join()
-                # 重置状态
-                app_state.child_process = None
+    last_ping = asyncio.create_task(asyncio.sleep(0))
+    try:
+        await asyncio.sleep(0.5)
+        for msg in app_state.history_message:
+            await websocket.send_text(msg)
+        while websocket.client_state == WebSocketState.CONNECTED:
+            if not app_state.message_conn.empty():
+                data = app_state.message_conn.get_nowait()
+                app_state.history_message.append(data)
+                if "所有任务完成" in data:
+                    app_state.child_process.join()
+                    # 重置状态
+                    app_state.child_process = None
+                    await websocket.send_text(data)
+                    continue
                 await websocket.send_text(data)
-                continue
-            await websocket.send_text(data)
-        await asyncio.sleep(0.01)
+            if last_ping.done():
+                last_ping = asyncio.create_task(asyncio.sleep(5))
+                await websocket.send_text("ping")
+            await asyncio.sleep(0.01)
+    except WebSocketDisconnect:
+        print("WebSocket disconnect")
+        last_ping.cancel()
+    finally:
+        if websocket.client_state == WebSocketState.CONNECTED:
+            try:
+                await websocket.close()
+            except RuntimeError:
+                pass
 
 
 if __name__ == '__main__':

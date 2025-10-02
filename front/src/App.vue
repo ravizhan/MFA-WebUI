@@ -1,4 +1,5 @@
 <template>
+  <n-message-provider>
   <div class="lg:pt-10 lg:pb-10 pt-0 pb-0">
     <n-layout class="lg:shadow-3xl lg:w-[80vw] w-full m-auto m-0 pt-0">
       <n-layout-header bordered>
@@ -15,6 +16,7 @@
       </n-layout-footer>
     </n-layout>
   </div>
+  </n-message-provider>
 </template>
 
 <script setup lang="ts">

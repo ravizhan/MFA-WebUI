@@ -1,7 +1,5 @@
-import { useMessage } from 'naive-ui'
 import type { InterfaceModel } from '../types/interfaceV1'
 
-const message = useMessage()
 interface ApiResponse {
   status: string
   message: string
@@ -31,9 +29,9 @@ export function startTask(task_list: object[]): void {
     .then((res) => res.json())
     .then((data: ApiResponse) => {
       if (data.status === 'success') {
-        message.success('任务开始')
+        window.$message.success('任务开始')
       } else {
-        message.error(data.message)
+        window.$message.error(data.message)
       }
     })
 }
@@ -48,9 +46,9 @@ export function stopTask(): void {
     .then((res) => res.json())
     .then((data: ApiResponse) => {
       if (data.status === 'success') {
-        message.success('正在中止任务，请稍后')
+        window.$message.success('正在中止任务，请稍后')
       } else {
-        message.error(data.message)
+        window.$message.error(data.message)
       }
     })
 }
@@ -61,10 +59,10 @@ export function getDevices(): Promise<Device[]> {
     .then((data: DeviceResponse) => data.devices)
 }
 
-export function postDevices(devices: Device): void {
+export function postDevices(device: Device): void {
   fetch('/api/device', {
     method: 'POST',
-    body: JSON.stringify({ devices: devices }),
+    body: JSON.stringify(device),
     headers: {
       'Content-Type': 'application/json',
     },
@@ -72,9 +70,9 @@ export function postDevices(devices: Device): void {
     .then((res) => res.json())
     .then((data: ApiResponse) => {
       if (data.status === 'success') {
-        message.success('设备连接成功')
+        window.$message.success('设备连接成功')
       } else {
-        message.error('设备连接成功，请检查终端日志')
+        window.$message.error('设备连接成功，请检查终端日志')
       }
     })
 }

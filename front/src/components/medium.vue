@@ -9,7 +9,7 @@
       <n-list-item v-for="(value, k) in option_dict['checkbox']" :key="k">
         <div>{{ k }}</div>
         <template #suffix>
-          <n-switch checked-value="周末加班" unchecked-value="周末支持一下" :round="false" />
+          <n-switch checked-value="on" unchecked-value="off" :round="false" />
         </template>
       </n-list-item>
     </n-list>
@@ -73,6 +73,9 @@ watch(
     // console.log(newTaskId)
     const interface_task = interfaceStore.interface?.task
     // console.log(interface_task)
+    if (!interface_task || interface_task.length === 0) {
+      return
+    }
     for (const i of interface_task!) {
       if (i.entry === newTaskId) {
         if (Array.isArray(i.doc)) {
@@ -91,5 +94,6 @@ watch(
       }
     }
   },
+  { immediate: true }
 )
 </script>

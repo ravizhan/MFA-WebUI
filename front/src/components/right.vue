@@ -14,10 +14,13 @@ import { useMessage, useDialog } from 'naive-ui'
 import { ws } from '../script/ws.ts'
 import { ref, onMounted, watchEffect, nextTick } from 'vue'
 import { Websocket, WebsocketEvent } from 'websocket-ts'
+import { useIndexStore } from '../stores'
+import { storeToRefs } from 'pinia'
 
 const dialog = useDialog()
 const message = useMessage()
-const log = ref('')
+const indexStore = useIndexStore()
+const log = storeToRefs(indexStore).RunningLog
 const logInstRef = ref<LogInst | null>(null)
 const btnCopy = new Clipboard('#btn')
 btnCopy.on('success', () => {
@@ -39,7 +42,10 @@ function is_now(date_string: string) {
 
 const getsocketData = (i: Websocket, ev: MessageEvent) => {
   const data: string = ev.data
-  log.value = log.value + '\n' + data
+  if (data === 'ping') {
+    return
+  }
+  indexStore.UpdateLog(data)
   if (data.includes('请求接管') && is_now(data.split(' ')[0] + ' ' + data.split(' ')[1])) {
     message.warning(data)
     new Notification('请求接管', {
@@ -74,6 +80,7 @@ ws.addEventListener(WebsocketEvent.message, getsocketData)
 
 onMounted(() => {
   watchEffect(() => {
+    console.log(log.value)
     if (log.value) {
       nextTick(() => {
         logInstRef.value?.scrollTo({ position: 'bottom', silent: true })

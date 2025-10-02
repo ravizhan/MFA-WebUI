@@ -78,6 +78,9 @@ import { VueDraggable } from 'vue-draggable-plus'
 import { useInterfaceStore, type TaskListItem } from '../stores/interface.ts'
 import { useIndexStore } from '../stores'
 
+import { useMessage } from 'naive-ui'
+window.$message = useMessage()
+
 const interfaceStore = useInterfaceStore()
 const indexStore = useIndexStore()
 const task_list = ref<TaskListItem[]>([])
@@ -91,11 +94,12 @@ const loading = ref(false)
 watch(
   () => interfaceStore.getTaskList,
   (newList) => {
-    for (const task of newList) {
-      task_list.value.push({ ...task, checked: true})
+    task_list.value = newList.map(task => ({ ...task, checked: true }))
+    if (task_list.value.length) {
+      indexStore.SelectTask(task_list.value[0]!.id)
     }
-    indexStore.SelectTask(task_list.value[0]!.id)
   },
+  { immediate: true }
 )
 
 // 同步回store
