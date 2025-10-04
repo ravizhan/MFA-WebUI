@@ -4,13 +4,13 @@
       <n-layout class="m-3 lg:m-5">
         <n-grid x-gap="36" cols="1 m:3" class="p-1 lg:p-2" responsive="screen">
           <n-grid-item>
-            <left></left>
+            <LeftPanel></LeftPanel>
           </n-grid-item>
           <n-grid-item>
-            <medium></medium>
+            <MediumPanel></MediumPanel>
           </n-grid-item>
           <n-grid-item>
-            <right></right>
+            <RightPanel></RightPanel>
           </n-grid-item>
         </n-grid>
       </n-layout>
@@ -18,9 +18,9 @@
   </n-message-provider>
 </template>
 <script setup lang="ts">
-import left from '../components/left.vue'
-import medium from '../components/medium.vue'
-import right from '../components/right.vue'
+import LeftPanel from '../components/LeftPanel.vue'
+import MediumPanel from '../components/MediumPanel.vue'
+import RightPanel from '../components/RightPanel.vue'
 import { onMounted } from 'vue'
 onMounted(() => {
   if (Notification.permission !== 'granted') {
