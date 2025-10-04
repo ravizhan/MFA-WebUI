@@ -12,7 +12,8 @@ export interface TaskListItem {
 export const useInterfaceStore = defineStore('interface', {
   state: () => {
     return {
-      interface: null as InterfaceModel | null,
+      interface: {} as InterfaceModel,
+      options: {} as Record<string, string>,
     }
   },
   getters: {
@@ -33,6 +34,11 @@ export const useInterfaceStore = defineStore('interface', {
     setInterface() {
       getInterface().then((data: InterfaceModel) => {
         this.interface = data
+        for (const key in this.interface.option) {
+          this.options[key] =
+            this.interface.option[key]!.default_case ||
+            this.interface.option[key]!['cases'][0]!.name
+        }
       })
     },
     getOptionList(entry: string): Record<string, Option> {
@@ -48,6 +54,9 @@ export const useInterfaceStore = defineStore('interface', {
         }
       }
       return result
+    },
+    setOption(key: string, value: string) {
+      this.options[key] = value
     },
   },
 })

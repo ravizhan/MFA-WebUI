@@ -10,7 +10,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketState, WebSocketDisconnect
 
-from models.api import DeviceModel, PostTaskModel
+from models.api import DeviceModel
 from utils import MaaWorker
 
 with open("interface.json", "r", encoding="utf-8") as f:
@@ -75,18 +75,22 @@ def connect_device(device: DeviceModel):
 @app.post("/api/resource")
 def set_resource(name: str):
     app_state.worker.set_resource(name)
+    for name,option in interface.option.items():
+        app_state.worker.set_option(name, option.default_case)
     return {"status": "success"}
 
 
 @app.post("/api/start")
-def start(tasks: PostTaskModel):
+def start(tasks: list[str], options: dict[str, str]):
     if app_state.child_process is not None:
         return {"status": "failed", "message": "任务已开始"}
     if not app_state.worker.connected:
         return {"status": "failed", "message": "请先连接设备"}
+    for name, case in options.items():
+        app_state.worker.set_option(name, case)
     app_state.child_process = threading.Thread(
         target=app_state.worker.run,
-        args=(tasks.tasklist,),
+        args=(tasks,),
         daemon=True
     )
     app_state.child_process.start()

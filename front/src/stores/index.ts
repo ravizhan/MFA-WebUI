@@ -4,7 +4,7 @@ export const useIndexStore = defineStore('index', {
   state: () => {
     return {
       SelectedTaskID: '',
-      RunningLog: ''
+      RunningLog: '',
     }
   },
   actions: {
@@ -13,6 +13,6 @@ export const useIndexStore = defineStore('index', {
     },
     UpdateLog(log: string) {
       this.RunningLog += log + '\n'
-    }
+    },
   },
 })

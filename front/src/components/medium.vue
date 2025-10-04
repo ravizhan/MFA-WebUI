@@ -4,12 +4,17 @@
     <n-list v-if="!isEmpty" hoverable>
       <n-list-item v-for="(value, k) in option_dict['select']" :key="k">
         <div>{{ k }}</div>
-        <n-select :options="value" />
+        <n-select :options="value" v-model:value="options[k]" />
       </n-list-item>
-      <n-list-item v-for="(value, k) in option_dict['checkbox']" :key="k">
+      <n-list-item v-for="(v, k) in option_dict['checkbox']" :key="k">
         <div>{{ k }}</div>
         <template #suffix>
-          <n-switch checked-value="on" unchecked-value="off" :round="false" />
+          <n-switch
+            checked-value="yes"
+            unchecked-value="no"
+            :round="false"
+            v-model:value="options[k]"
+          />
         </template>
       </n-list-item>
     </n-list>
@@ -28,6 +33,7 @@ import { ref, watch } from 'vue'
 import { useInterfaceStore } from '../stores/interface.ts'
 import { useIndexStore } from '../stores'
 import type { Option } from '../types/interfaceV1.ts'
+import { storeToRefs } from 'pinia'
 
 const interfaceStore = useInterfaceStore()
 const indexStore = useIndexStore()
@@ -41,12 +47,13 @@ marked.setOptions({
 })
 type ProcessedOptions = {
   select: Record<string, object>
-  checkbox: Record<string, object>
+  checkbox: Record<string, string>
 }
 const option_dict = ref<ProcessedOptions>({
   select: {},
   checkbox: {},
 })
+const options = storeToRefs(interfaceStore).options
 
 function process_options(origin: Record<string, Option>): ProcessedOptions {
   const result: ProcessedOptions = {
@@ -56,11 +63,11 @@ function process_options(origin: Record<string, Option>): ProcessedOptions {
   for (const key in origin) {
     const optionCases = origin[key]!.cases
     if (optionCases[0]!.name === 'no' || optionCases[0]!.name === 'yes') {
-      result.checkbox[key] = optionCases
+      result.checkbox[key] = origin[key]!.default_case || 'no'
     } else {
-      result.select[key] = optionCases.map((item, index) => ({
+      result.select[key] = optionCases.map((item) => ({
         label: item.name,
-        value: JSON.stringify(optionCases[index]),
+        value: item.name,
       }))
     }
   }
@@ -80,10 +87,8 @@ watch(
       if (i.entry === newTaskId) {
         if (Array.isArray(i.doc)) {
           md.value = marked(i.doc.join('\n\n')) as unknown as HTMLElement
-        } else if (typeof i.doc === 'string') {
-          md.value = marked(i.doc) as unknown as HTMLElement
         } else {
-          md.value = "<div>空空如也</div>" as unknown as HTMLElement
+          md.value = '<div>空空如也</div>' as unknown as HTMLElement
         }
         option_dict.value = process_options(interfaceStore.getOptionList(i.entry))
         isEmpty.value = !(
@@ -94,6 +99,6 @@ watch(
       }
     }
   },
-  { immediate: true }
+  { immediate: true },
 )
 </script>

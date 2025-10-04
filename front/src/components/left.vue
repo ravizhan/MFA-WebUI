@@ -38,7 +38,7 @@
         <n-scrollbar class="max-h-80">
           <VueDraggable v-model="task_list">
             <n-list-item v-for="item in task_list" :key="item.id">
-              <n-checkbox size="large" :label="item.name" />
+              <n-checkbox size="large" :label="item.name" v-model:checked="item.checked" />
               <template #suffix>
                 <n-button quaternary circle @click="indexStore.SelectTask(item.id)">
                   <template #icon>
@@ -66,7 +66,7 @@
       </template>
     </n-list>
     <n-flex class="form-btn" justify="center">
-      <n-button strong secondary type="info" size="large" @click="startTask"> 开始任务</n-button>
+      <n-button strong secondary type="info" size="large" @click="StartTask"> 开始任务</n-button>
       <n-button strong secondary type="info" size="large" @click="stopTask"> 中止任务</n-button>
     </n-flex>
   </n-card>
@@ -90,22 +90,16 @@ const resource = ref<object | null>(null)
 const devices_list = ref<object[]>([])
 const loading = ref(false)
 
-// 监听 store 中的变化并更新本地数据
 watch(
   () => interfaceStore.getTaskList,
   (newList) => {
-    task_list.value = newList.map(task => ({ ...task, checked: true }))
+    task_list.value = newList.map((task) => ({ ...task, checked: true }))
     if (task_list.value.length) {
       indexStore.SelectTask(task_list.value[0]!.id)
     }
   },
-  { immediate: true }
+  { immediate: true },
 )
-
-// 同步回store
-// watch(task_list, (newList) => {
-//   interfaceStore.updateTaskList(newList)
-// }, { deep: true })
 
 function get_device() {
   devices_list.value = []
@@ -131,6 +125,15 @@ function get_resource() {
 
 function post_resource() {
   //TODO
+}
+
+function StartTask() {
+  const selectedTasks = task_list.value.filter((task) => task.checked).map((task) => task.id)
+  if (selectedTasks.length === 0) {
+    window.$message.error('请至少选择一个任务')
+    return
+  }
+  startTask(selectedTasks, interfaceStore.options)
 }
 </script>
 <style scoped>

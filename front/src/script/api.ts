@@ -18,10 +18,10 @@ interface DeviceResponse {
   devices: Device[]
 }
 
-export function startTask(task_list: object[]): void {
+export function startTask(task_list: string[], options: Record<string, string>): void {
   fetch('/api/start', {
     method: 'POST',
-    body: JSON.stringify({ tasklist: task_list }),
+    body: JSON.stringify({ tasks: task_list, options: options }),
     headers: {
       'Content-Type': 'application/json',
     },

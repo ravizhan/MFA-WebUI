@@ -96,6 +96,15 @@ class MaaWorker:
                 self.send_log(f"资源设置为: {i.name}")
         return None
 
+    def set_option(self, option_name: str, case_name: str):
+        if option_name in self.interface.option:
+            option = self.interface.option[option_name]
+            for case in option.cases:
+                if case.name == case_name:
+                    resource.override_pipeline(case.pipeline_override)
+                    # self.send_log(f"选项 {option_name} 设置为: {case_name}")
+                    return
+
     def run(self, task_list):
         self.stop_flag = False
         self.send_log("任务开始")
@@ -104,7 +113,6 @@ class MaaWorker:
                 if self.stop_flag:
                     self.send_log("任务已终止")
                     return
-                self.prepare_task(task)
                 self.tasker.post_task(task).wait()
             if self.stop_flag:
                 self.send_log("任务已终止")
@@ -121,6 +129,3 @@ class MaaWorker:
             self.send_log(f"请将日志反馈至 {self.interface.url}/issues")
         self.send_log("所有任务完成")
         time.sleep(0.5)
-
-    def prepare_task(self,task_config):
-        pass

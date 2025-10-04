@@ -1,5 +1,4 @@
 from pydantic import BaseModel
-from typing import List, Optional, Dict
 
 
 class DeviceModel(BaseModel):
@@ -9,6 +8,3 @@ class DeviceModel(BaseModel):
     screencap_methods: int
     input_methods: int
     config: dict
-
-class PostTaskModel(BaseModel):
-    tasklist: List[Dict[str, str]]

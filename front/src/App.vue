@@ -1,21 +1,19 @@
 <template>
   <n-message-provider>
-  <div class="lg:pt-10 lg:pb-10 pt-0 pb-0">
-    <n-layout class="lg:shadow-3xl lg:w-[80vw] w-full m-auto m-0 pt-0">
-      <n-layout-header bordered>
-        <div class="text-align-center mt-3 text-2xl">{{ name }}</div>
-        <n-menu mode="horizontal" class="justify-between" :options="menuOptions" />
-      </n-layout-header>
-      <n-layout>
-        <router-view></router-view>
+    <div class="lg:pt-10 lg:pb-10 pt-0 pb-0">
+      <n-layout class="lg:shadow-3xl lg:w-[80vw] w-full m-auto m-0 pt-0">
+        <n-layout-header bordered>
+          <div class="text-align-center mt-3 text-2xl">{{ name }}</div>
+          <n-menu mode="horizontal" class="justify-between" :options="menuOptions" />
+        </n-layout-header>
+        <n-layout>
+          <router-view></router-view>
+        </n-layout>
+        <n-layout-footer bordered class="text-align-center">
+          <a href="https://github.com/ravizhan/MFA-WebUI" target="_blank"> Powered by MFA-WebUI </a>
+        </n-layout-footer>
       </n-layout>
-      <n-layout-footer bordered class="text-align-center">
-        <a href="https://github.com/ravizhan/MFA-WebUI" target="_blank">
-          Powered by MFA-WebUI
-        </a>
-      </n-layout-footer>
-    </n-layout>
-  </div>
+    </div>
   </n-message-provider>
 </template>
 

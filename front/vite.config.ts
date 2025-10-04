@@ -28,11 +28,9 @@ export default defineConfig({
   ],
   build: {
     outDir:'../page',
-    minify:'terser',
     rollupOptions:{
       output:{
         manualChunks: {
-          'vue-vendor': ['vue', 'vue-router'],
           'naive-ui': ['naive-ui'],
         }
       }
