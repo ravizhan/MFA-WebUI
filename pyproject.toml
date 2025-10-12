@@ -15,5 +15,5 @@ dependencies = [
 [dependency-groups]
 dev = [
     "imageio>=2.37.0",
-    "nuitka>=2.8",
+    "nuitka==2.7.16",
 ]

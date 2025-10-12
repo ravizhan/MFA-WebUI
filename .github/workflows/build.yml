@@ -55,27 +55,27 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-24.04
             platform: linux
             arch: x64
 
-          - os: ubuntu-latest
+          - os: ubuntu-24.04-arm
             platform: linux
             arch: arm64
 
-          - os: macos-latest
+          - os: macos-15-intel
             platform: osx
             arch: x64
 
-          - os: macos-latest
+          - os: macos-15
             platform: osx
             arch: arm64
 
-          - os: windows-latest
+          - os: windows-2025
             platform: win
             arch: x64
 
-          - os: windows-latest
+          - os: windows-11-arm
             platform: win
             arch: arm64
     runs-on: ${{ matrix.os }}
@@ -95,14 +95,8 @@ jobs:
           fail-on-cache-miss: true
 
       - name: Setup ccache
-        if: ${{ matrix.os != 'windows-latest' }}
+        if: ${{ matrix.platform != 'win' }}
         uses: Chocobo1/setup-ccache-action@v1
-
-      - name: Setup ccache for Windows
-        if: ${{ matrix.os == 'windows-latest' }}
-        uses: Chocobo1/setup-ccache-action@v1
-        with:
-          windows_compile_environment: msvc
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
@@ -126,26 +120,26 @@ jobs:
             nuitka-${{ matrix.platform }}-${{ matrix.arch }}-
 
       - name: Build Executable for Windows
-        if: ${{ matrix.os == 'windows-latest' }}
+        if: ${{ matrix.platform == 'win' }}
         env:
           NUITKA_CCACHE_BINARY: ${{ env.ccache_symlinks_path }}
           NUITKA_CACHE_DIR: ${{ runner.temp }}/nuitka/cache
         run: uv run python -m nuitka --standalone --mingw64 --windows-icon-from-ico=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --remove-output --lto=yes --experimental=debug-report-traceback --output-dir=build -o MFA-WebUI main.py
 
       - name: Build Executable
-        if: ${{ matrix.os != 'windows-latest' }}
+        if: ${{ matrix.platform != 'win' }}
         env:
           NUITKA_CACHE_DIR: ${{ runner.temp }}/nuitka/cache
         run: uv run python -m nuitka --standalone --macos-app-icon=logo.jpg --linux-icon=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --remove-output --lto=yes --experimental=debug-report-traceback --output-dir=build -o MFA-WebUI main.py
 
-      - name: Copy Resource for Linux and Macos
-        if: ${{ matrix.os == 'macos-latest' || matrix.os == 'ubuntu-latest' }}
+      - name: Copy Resource
+        if: ${{ matrix.platform != 'win' }}
         run: |
           cp -r config build/main.dist/config
           cp -r page build/main.dist/page
 
       - name: Copy Resource for Windows
-        if: ${{ matrix.os == 'windows-latest'}}
+        if: ${{ matrix.platform == 'win' }}
         run: |
           xcopy .\config\ build\main.dist\config\ /S /I
           xcopy .\page\ build\main.dist\page\ /S /I
