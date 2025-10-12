@@ -1,4 +1,4 @@
-import type { InterfaceModel } from '../types/interfaceV1'
+import type { InterfaceModel, Resource } from '../types/interfaceV1'
 
 interface ApiResponse {
   status: string
@@ -15,7 +15,13 @@ export interface Device {
 }
 
 interface DeviceResponse {
+  status: string
   devices: Device[]
+}
+
+interface ResourceResponse {
+  status: string
+  resource: Resource[]
 }
 
 export function startTask(task_list: string[], options: Record<string, string>): void {
@@ -79,4 +85,27 @@ export function postDevices(device: Device): void {
 
 export function getInterface(): Promise<InterfaceModel> {
   return fetch('/api/interface', { method: 'GET' }).then((res) => res.json())
+}
+
+export function getResource(): Promise<Resource[]> {
+  return fetch('/api/resource', { method: 'GET' })
+    .then((res) => res.json())
+    .then((data: ResourceResponse) => data.resource)
+}
+
+export function postResource(name: string): void {
+  fetch('/api/resource?name='+name, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  })
+    .then((res) => res.json())
+    .then((data: ApiResponse) => {
+      if (data.status === 'success') {
+        window.$message.success('资源添加成功')
+      } else {
+        window.$message.error(data.message)
+      }
+    })
 }

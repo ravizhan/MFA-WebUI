@@ -3,7 +3,7 @@ interface Controller {
   type: string
 }
 
-interface Resource {
+export interface Resource {
   name: string
   path: string[]
 }

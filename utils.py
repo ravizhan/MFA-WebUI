@@ -1,3 +1,4 @@
+import os
 import time
 import traceback
 from queue import SimpleQueue
@@ -26,18 +27,11 @@ class MaaWorker:
         self.tasker = Tasker()
         self.connected = False
         self.stop_flag = False
-        self.pause_flag = False
         self.send_log("MAA初始化成功")
 
     def send_log(self, msg):
         self.queue.put(f"{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())} {msg}")
         time.sleep(0.05)
-
-    def pause(self):
-        self.send_log("任务暂停")
-        self.pause_flag = True
-        while self.pause_flag:
-            time.sleep(0.05)
 
     @staticmethod
     def get_device():
@@ -88,12 +82,14 @@ class MaaWorker:
         return self.connected
 
     def set_resource(self, resource_name):
+        def replace(path: str):
+            return os.path.realpath(path.replace("{PROJECT_DIR}",os.getcwd()))
         for i in self.interface.resource:
             if i.name == resource_name:
-                resource.post_bundle(i.path[0]).wait()
+                resource.post_bundle(replace(i.path[0])).wait()
                 if len(i.path) > 1:
-                    resource.post_bundle(i.path[1]).wait()
-                self.send_log(f"资源设置为: {i.name}")
+                    resource.post_bundle(replace(i.path[1])).wait()
+                self.send_log(f"资源已设置为: {i.name}")
         return None
 
     def set_option(self, option_name: str, case_name: str):
@@ -110,13 +106,13 @@ class MaaWorker:
         self.send_log("任务开始")
         try:
             for task in task_list:
-                if self.stop_flag:
-                    self.send_log("任务已终止")
-                    return
-                self.tasker.post_task(task).wait()
-            if self.stop_flag:
-                self.send_log("任务已终止")
-                return
+                t = self.tasker.post_task(task)
+                while not t.done:
+                    time.sleep(0.5)
+                    if self.stop_flag:
+                        self.tasker.post_stop().wait()
+                        self.send_log("任务已终止")
+                        return
         except Exception:
             traceback.print_exc()
             plyer.notification.notify(

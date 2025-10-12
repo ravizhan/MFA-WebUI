@@ -4,6 +4,7 @@ import threading
 import webbrowser
 from contextlib import asynccontextmanager
 from queue import SimpleQueue
+import uvicorn
 
 from fastapi import FastAPI, websockets
 from fastapi.responses import FileResponse
@@ -62,7 +63,7 @@ def get_interface():
 @app.get("/api/device")
 def get_device():
     devices = app_state.worker.get_device()
-    return {"devices": devices}
+    return {"status": "success","devices": devices}
 
 
 @app.post("/api/device")
@@ -72,11 +73,17 @@ def connect_device(device: DeviceModel):
     return {"status": "failed"}
 
 
+@app.get("/api/resource")
+def get_resource():
+    return {"status": "success","resource":[i.name for i in interface.resource]}
+
 @app.post("/api/resource")
 def set_resource(name: str):
-    app_state.worker.set_resource(name)
-    for name,option in interface.option.items():
-        app_state.worker.set_option(name, option.default_case)
+    # 设置资源
+    try:
+        app_state.worker.set_resource(name)
+    except Exception as e:
+        return {"status": "failed", "message": str(e)}
     return {"status": "success"}
 
 
@@ -86,6 +93,7 @@ def start(tasks: list[str], options: dict[str, str]):
         return {"status": "failed", "message": "任务已开始"}
     if not app_state.worker.connected:
         return {"status": "failed", "message": "请先连接设备"}
+    # 设置选项
     for name, case in options.items():
         app_state.worker.set_option(name, case)
     app_state.child_process = threading.Thread(
@@ -103,12 +111,6 @@ def stop():
         return {"status": "failed", "message": "任务未开始"}
     app_state.worker.stop_flag = True
     app_state.child_process = None
-    return {"status": "success"}
-
-
-@app.post("/api/continue")
-def going_on():
-    app_state.worker.pause_flag = False
     return {"status": "success"}
 
 
@@ -147,6 +149,4 @@ async def websocket_endpoint(websocket: websockets.WebSocket):
 
 
 if __name__ == '__main__':
-    import uvicorn
-
     uvicorn.run(app, host="0.0.0.0", port=55666)

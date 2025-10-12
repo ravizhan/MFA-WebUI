@@ -20,7 +20,7 @@
           <n-select
             v-model:value="resource"
             placeholder="请选择一个资源"
-            :options="devices_list"
+            :options="resources_list"
             :loading="loading"
             remote
             @click="get_resource"
@@ -73,7 +73,15 @@
 </template>
 <script setup lang="ts">
 import { watch, ref } from 'vue'
-import { getDevices, postDevices, startTask, stopTask, type Device } from '../script/api'
+import {
+  getDevices,
+  postDevices,
+  startTask,
+  stopTask,
+  type Device,
+  getResource,
+  postResource,
+} from '../script/api'
 import { VueDraggable } from 'vue-draggable-plus'
 import { useInterfaceStore, type TaskListItem } from '../stores/interface.ts'
 import { useIndexStore } from '../stores'
@@ -88,6 +96,7 @@ const scroll_show = ref(window.innerWidth > 768)
 const device = ref<Device | null>(null)
 const resource = ref<object | null>(null)
 const devices_list = ref<object[]>([])
+const resources_list = ref<object[]>([])
 const loading = ref(false)
 
 watch(
@@ -120,11 +129,26 @@ function connectDevices() {
 }
 
 function get_resource() {
-  //TODO
+  resources_list.value = []
+  loading.value = true
+  getResource().then((resource_data) => {
+    for (const resource of resource_data) {
+      resources_list.value?.push({
+        label: resource,
+        value: resource,
+      })
+    }
+  })
+  loading.value = false
 }
 
 function post_resource() {
-  //TODO
+  if (!resource.value) {
+    window.$message.error('请选择一个资源')
+    return
+  } else {
+    postResource(resource.value)
+  }
 }
 
 function StartTask() {

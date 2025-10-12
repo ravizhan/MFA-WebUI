@@ -33,8 +33,8 @@ const screenWidth = ref(window.innerWidth)
 const handleResize = () => {
   screenWidth.value = window.innerWidth
 }
-onMounted(async () => {
-  await interfaceStore.setInterface()
+onMounted(() => {
+  interfaceStore.setInterface()
   window.addEventListener('resize', handleResize)
 })
 watch(screenWidth, (newValue) => {
@@ -54,12 +54,12 @@ const menuOptions = [
         RouterLink,
         {
           to: {
-            name: 'home',
+            name: 'panel',
           },
         },
         { default: () => '首页' },
       ),
-    key: 'home',
+    key: 'panel',
     icon: renderIcon('i-mdi-home'),
   },
   {
