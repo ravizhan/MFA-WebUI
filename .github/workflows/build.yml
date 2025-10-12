@@ -130,13 +130,13 @@ jobs:
         env:
           NUITKA_CCACHE_BINARY: ${{ env.ccache_symlinks_path }}
           NUITKA_CACHE_DIR: ${{ runner.temp }}/nuitka/cache
-        run: uv run python -m nuitka --standalone --mingw64 --windows-icon-from-ico=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --remove-output --lto=yes --output-dir=build -o MFA-WebUI main.py
+        run: uv run python -m nuitka --standalone --mingw64 --windows-icon-from-ico=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --remove-output --lto=yes --experimental=debug-report-traceback --output-dir=build -o MFA-WebUI main.py
 
       - name: Build Executable
         if: ${{ matrix.os != 'windows-latest' }}
         env:
           NUITKA_CACHE_DIR: ${{ runner.temp }}/nuitka/cache
-        run: uv run python -m nuitka --standalone --macos-app-icon=logo.jpg --linux-icon=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --remove-output --lto=yes --output-dir=build -o MFA-WebUI main.py
+        run: uv run python -m nuitka --standalone --macos-app-icon=logo.jpg --linux-icon=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --remove-output --lto=yes --experimental=debug-report-traceback --output-dir=build -o MFA-WebUI main.py
 
       - name: Copy Resource for Linux and Macos
         if: ${{ matrix.os == 'macos-latest' || matrix.os == 'ubuntu-latest' }}
@@ -171,3 +171,10 @@ jobs:
         with:
           name: MFA-WebUI-${{ github.ref_name }}-${{ matrix.platform }}-${{ matrix.arch }}
           path: MFA-WebUI-${{ github.ref_name }}-${{ matrix.platform }}-${{ matrix.arch }}.7z
+
+      - name: Breakpoint if tests failed
+        if: failure()
+        uses: namespacelabs/breakpoint-action@v0
+        with:
+          duration: 30m
+          authorized-users: ravizhan
