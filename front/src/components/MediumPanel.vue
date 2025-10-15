@@ -87,8 +87,11 @@ watch(
       if (i.entry === newTaskId) {
         if (Array.isArray(i.doc)) {
           md.value = marked(i.doc.join('\n\n')) as unknown as HTMLElement
-        } else {
-          md.value = '<div>空空如也</div>' as unknown as HTMLElement
+        } else if (typeof i.doc === 'string') {
+          md.value = marked(i.doc) as unknown as HTMLElement
+        }
+        else {
+          md.value = marked('空空如也') as unknown as HTMLElement
         }
         option_dict.value = process_options(interfaceStore.getOptionList(i.entry))
         isEmpty.value = !(

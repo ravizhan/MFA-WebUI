@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketState, WebSocketDisconnect
 
 from models.api import DeviceModel
-from utils import MaaWorker
+from maa_utils import MaaWorker
 
 with open("interface.json", "r", encoding="utf-8") as f:
     json_data = json.load(f)
@@ -42,7 +42,7 @@ app_state = AppState()
 async def lifespan(app: FastAPI):
     app_state.worker = MaaWorker(app_state.message_conn, INTERFACE_VERSION, interface)
     await asyncio.sleep(1.0)
-    webbrowser.open_new("http://127.0.0.1:55666")
+    # webbrowser.open_new("http://127.0.0.1:55666")
     yield
 
 

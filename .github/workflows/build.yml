@@ -109,7 +109,7 @@ jobs:
           python-version-file: "pyproject.toml"
 
       - name: Install Dependencies
-        run: uv sync --dev
+        run: uv sync --build
 
       - name: Cache Nuitka cache directory
         uses: actions/cache@v4

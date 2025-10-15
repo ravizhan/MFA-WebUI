@@ -13,7 +13,6 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = [
-    "imageio>=2.37.0",
+build = [
     "nuitka==2.7.16",
 ]
