@@ -40,9 +40,8 @@ app_state = AppState()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    webbrowser.open_new("http://127.0.0.1:55666")
     app_state.worker = MaaWorker(app_state.message_conn, INTERFACE_VERSION, interface)
-    await asyncio.sleep(1.0)
-    # webbrowser.open_new("http://127.0.0.1:55666")
     yield
 
 

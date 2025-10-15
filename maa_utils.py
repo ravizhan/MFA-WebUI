@@ -8,6 +8,10 @@ from maa.controller import AdbController
 from maa.resource import Resource
 from maa.tasker import Tasker
 from maa.toolkit import Toolkit
+import importlib.util
+import re
+import sys
+from pathlib import Path
 
 resource = Resource()
 resource.set_cpu()
@@ -27,6 +31,8 @@ class MaaWorker:
         self.connected = False
         self.stop_flag = False
         self.send_log("MAA初始化成功")
+        self.load_custom_func()
+        self.send_log("Agent加载完成")
 
     def send_log(self, msg):
         self.queue.put(f"{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())} {msg}")
@@ -99,6 +105,61 @@ class MaaWorker:
                     resource.override_pipeline(case.pipeline_override)
                     # self.send_log(f"选项 {option_name} 设置为: {case_name}")
                     return
+
+    def load_custom_func(self):
+        def load_module(module_path):
+            # 1. 读取模块源代码
+            with open(module_path, "r", encoding="utf-8") as f:
+                source = f.read()
+            # 2. 删除装饰器行
+            filtered_lines = [line for line in source.split('\n') if "AgentServer" not in line]
+            modified_source = '\n'.join(filtered_lines)
+            # 3. 创建模块对象
+            spec = importlib.util.spec_from_file_location("temp_module", module_path)
+            module = importlib.util.module_from_spec(spec)
+            # 4. 执行模块代码
+            exec(modified_source, module.__dict__)
+            return module
+
+        agent_index_path = next(
+            (Path(arg.replace("{PROJECT_DIR}", "./")).resolve().parent
+             for arg in self.interface.agent.child_args if arg.endswith(".py")),
+            None
+        )
+        assert agent_index_path is not None, "Interface agent参数解析错误"
+        sys.path.append(str(agent_index_path))
+        custom_action_pattern = re.compile(r"@AgentServer.custom_action\(\".*\"\)")
+        custom_recognition_pattern = re.compile(r"@AgentServer.custom_recognition\(\".*\"\)")
+        custom = {
+            "action": [],
+            "recognition": [],
+        }
+
+        for file in agent_index_path.glob("**/*.py"):
+            if file.name == "__init__.py":
+                sys.path.append(str(file.parent))
+                continue
+            with open(file, "r", encoding="utf-8") as f:
+                file_lines = f.readlines()
+            for line in file_lines:
+                match_action = re.match(custom_action_pattern, line.strip())
+                match_recognition = re.match(custom_recognition_pattern, line.strip())
+
+                if match_action or match_recognition:
+                    name = line.split("(\"")[1].split("\")")[0]
+                    class_line = file_lines[file_lines.index(line) + 1].strip()
+                    class_name = class_line.split("class ")[1].split("(")[0]
+                    key = "action" if match_action else "recognition"
+                    custom[key].append({"name": name, "class": class_name, "file_path": str(file)})
+
+        for action in custom["action"]:
+                module = load_module(action["file_path"])
+                instance = getattr(module, action["class"])()
+                resource.register_custom_action(action["name"], instance)
+        for recognition in custom["recognition"]:
+            module = load_module(recognition["file_path"])
+            instance = getattr(module, recognition["class"])()
+            resource.register_custom_recognition(recognition["name"], instance)
 
     def run(self, task_list):
         self.stop_flag = False
