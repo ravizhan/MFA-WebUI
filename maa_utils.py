@@ -17,15 +17,10 @@ resource = Resource()
 resource.set_cpu()
 
 class MaaWorker:
-    def __init__(self, queue: SimpleQueue, version: int, interface):
+    def __init__(self, queue: SimpleQueue, interface):
         Toolkit.init_option("./")
-        if version == 2:
-            # from models.interfaceV2 import InterfaceModel
-            # self.interface: InterfaceModel = interface
-            pass
-        else:
-            from models.interfaceV1 import InterfaceModel
-            self.interface: InterfaceModel = interface
+        from models.interfaceV2 import InterfaceModel
+        self.interface: InterfaceModel = interface
         self.queue = queue
         self.tasker = Tasker()
         self.connected = False
@@ -61,9 +56,9 @@ class MaaWorker:
         conn_fail_msg = "设备连接失败，请检查终端日志"
         if not status:
             plyer.notification.notify(
-                title=self.interface.name,
+                title=self.interface.title,
                 message=conn_fail_msg,
-                app_name=self.interface.name,
+                app_name=self.interface.label,
                 timeout=30
             )
             self.send_log(conn_fail_msg)
@@ -78,9 +73,9 @@ class MaaWorker:
             self.send_log("设备连接成功")
         else:
             plyer.notification.notify(
-                title=self.interface.name,
+                title=self.interface.title,
                 message=conn_fail_msg,
-                app_name=self.interface.name,
+                app_name=self.interface.label,
                 timeout=30
             )
             self.send_log(conn_fail_msg)
@@ -176,12 +171,12 @@ class MaaWorker:
         except Exception:
             traceback.print_exc()
             plyer.notification.notify(
-                title=self.interface.name,
+                title=self.interface.title,
                 message="任务出现异常，请检查终端日志",
-                app_name=self.interface.name,
+                app_name=self.interface.label,
                 timeout=30
             )
             self.send_log("任务出现异常，请检查终端日志")
-            self.send_log(f"请将日志反馈至 {self.interface.url}/issues")
+            self.send_log(f"请将日志反馈至 {self.interface.github}/issues")
         self.send_log("所有任务完成")
         time.sleep(0.5)

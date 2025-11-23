@@ -10,19 +10,13 @@ from fastapi import FastAPI, websockets
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketState, WebSocketDisconnect
-
+from models.interfaceV2 import InterfaceModel
 from models.api import DeviceModel
 from maa_utils import MaaWorker
 
 with open("interface.json", "r", encoding="utf-8") as f:
     json_data = json.load(f)
-if json_data.get("interface_version") == "2":
-    # from models.interfaceV2 import InterfaceModel
-    INTERFACE_VERSION = 2
-    pass
-else:
-    INTERFACE_VERSION = 1
-    from models.interfaceV1 import InterfaceModel
+
 interface = InterfaceModel(**json_data)
 
 
@@ -41,7 +35,7 @@ app_state = AppState()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     webbrowser.open_new("http://127.0.0.1:55666")
-    app_state.worker = MaaWorker(app_state.message_conn, INTERFACE_VERSION, interface)
+    app_state.worker = MaaWorker(app_state.message_conn, interface)
     yield
 
 

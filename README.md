@@ -25,7 +25,7 @@ _✨ 基于 **[Vue](https://github.com/vuejs/vue)** 的 **[MAAFramework](https:/
 - 非 Windows 7或更早版本
 - 一个基于`MaaFramework`的资源项目
 
-## 说明
+## 使用说明
 
 Working in progress...
 
@@ -39,20 +39,30 @@ Working in progress...
 
 - **[NaiveUI](https://github.com/tusen-ai/naive-ui)**\
   A Vue 3 Component Library. Fairly Complete. Theme Customizable. Uses TypeScript. Fast.
+  
 - **[FastAPI](https://github.com/fastapi/fastapi)**\
   FastAPI framework, high performance, easy to learn, fast to code, ready for production
+  
 - **[Vite](https://github.com/vitejs/vite)**\
   Next Generation Frontend Tooling. It's fast!
+  
 - **[MaaFramework](https://github.com/MaaAssistantArknights/MaaFramework)**\
   基于图像识别的自动化黑盒测试框架。
+  
 - **[VueDraggablePlus](https://github.com/Alfred-Skyblue/vue-draggable-plus)**\
   支持 Vue2 和 Vue3 的拖拽组件
+  
 - **[Plyer](https://github.com/kivy/plyer)**\
   Plyer is a platform-independent Python wrapper for platform-dependent APIs
+  
 - **[UnoCSS](https://github.com/unocss/unocss)**\
   The instant on-demand Atomic CSS engine.
+  
 - **[tailwindcss](https://github.com/tailwindlabs/tailwindcss)**\
   A utility-first CSS framework for rapid UI development.
+  
+- **[Nuitka](https://github.com/Nuitka/Nuitka)**\
+  Nuitka is a Python compiler written in Python.
 
 ### 开发者
 
