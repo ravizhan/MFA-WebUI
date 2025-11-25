@@ -29,6 +29,13 @@ _✨ 基于 **[Vue](https://github.com/vuejs/vue)** 的 **[MAAFramework](https:/
 
 Working in progress...
 
+## 项目架构
+
+- **前端**
+  Vue 3 + NaiveUI + Vite + UnoCSS
+- **后端**
+  FastAPI
+
 ## 许可证
 
 **MFA-WebUI** 使用 **[AGPL-3.0 许可证](./LICENSE)** 授权开源。
@@ -64,10 +71,13 @@ Working in progress...
 - **[Nuitka](https://github.com/Nuitka/Nuitka)**\
   Nuitka is a Python compiler written in Python.
 
+- **[Oxlint](https://oxc.rs/docs/guide/usage/linter.html)**\
+  Oxlint is designed to catch erroneous or useless code without requiring any configurations by default.
+
 ### 开发者
 
-感谢所有为 **MFAAvalonia** 做出贡献的开发者。
+感谢所有为 **MFA-WebUI** 做出贡献的开发者。
 
 <a href="https://github.com/ravizhan/MFA-WebUI/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=ravizhan/MFA-WebUI&max=1000" alt="Contributors to MFAAvalonia"/>
+  <img src="https://contrib.rocks/image?repo=ravizhan/MFA-WebUI&max=1000" alt="Contributors to MFA-WebUI"/>
 </a>
