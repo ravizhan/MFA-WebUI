@@ -7,12 +7,8 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi==0.122.0",
     "maafw==5.0.5",
+    "nuitka[all]>=2.8.6",
     "plyer>=2.1.0",
     "uvicorn==0.38.0",
     "websockets>=15.0.1",
-]
-
-[dependency-groups]
-build = [
-    "nuitka>=2.8.6",
 ]
