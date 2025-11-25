@@ -1,4 +1,4 @@
-import type { InterfaceModel, Resource } from '../types/interfaceV2'
+import type { InterfaceModel } from '../types/interfaceV2'
 
 interface ApiResponse {
   status: string
@@ -21,7 +21,7 @@ interface DeviceResponse {
 
 interface ResourceResponse {
   status: string
-  resource: Resource[]
+  resource: string[]
 }
 
 export function startTask(task_list: string[], options: Record<string, string>): void {
@@ -93,7 +93,7 @@ export function getInterface(): Promise<InterfaceModel> {
   return fetch('/api/interface', { method: 'GET' }).then((res) => res.json())
 }
 
-export function getResource(): Promise<Resource[]> {
+export function getResource(): Promise<string[]> {
   return fetch('/api/resource', { method: 'GET' })
     .then((res) => res.json())
     .then((data: ResourceResponse) => data.resource)
