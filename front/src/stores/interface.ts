@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { getInterface } from '../script/api'
-import type { InterfaceModel, Option } from '../types/interfaceV1'
+import type { InterfaceModel, Option } from '../types/interfaceV2'
 
 export interface TaskListItem {
   id: string
@@ -35,9 +35,15 @@ export const useInterfaceStore = defineStore('interface', {
       getInterface().then((data: InterfaceModel) => {
         this.interface = data
         for (const key in this.interface.option) {
-          this.options[key] =
-            this.interface.option[key]!.default_case ||
-            this.interface.option[key]!['cases'][0]!.name
+          const option = this.interface.option[key]!
+          if (option.type === 'select') {
+            this.options[key] = option.default_case || ''
+          } else if (option.type === 'input') {
+            // 为 input 类型的每个输入项设置默认值
+            for (const input of option.inputs) {
+              this.options[`${key}_${input.name}`] = input.default || ''
+            }
+          }
         }
       })
     },
@@ -54,9 +60,6 @@ export const useInterfaceStore = defineStore('interface', {
         }
       }
       return result
-    },
-    setOption(key: string, value: string) {
-      this.options[key] = value
-    },
+    }
   },
 })

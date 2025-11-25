@@ -87,6 +87,7 @@ import { useInterfaceStore, type TaskListItem } from '../stores/interface.ts'
 import { useIndexStore } from '../stores'
 
 import { useMessage } from 'naive-ui'
+// @ts-ignore
 window.$message = useMessage()
 
 const interfaceStore = useInterfaceStore()
@@ -94,7 +95,7 @@ const indexStore = useIndexStore()
 const task_list = ref<TaskListItem[]>([])
 const scroll_show = ref(window.innerWidth > 768)
 const device = ref<Device | null>(null)
-const resource = ref<object | null>(null)
+const resource = ref<string | null>(null)
 const devices_list = ref<object[]>([])
 const resources_list = ref<object[]>([])
 const loading = ref(false)
@@ -144,6 +145,7 @@ function get_resource() {
 
 function post_resource() {
   if (!resource.value) {
+    // @ts-ignore
     window.$message.error('请选择一个资源')
     return
   } else {
@@ -154,6 +156,7 @@ function post_resource() {
 function StartTask() {
   const selectedTasks = task_list.value.filter((task) => task.checked).map((task) => task.id)
   if (selectedTasks.length === 0) {
+    // @ts-ignore
     window.$message.error('请至少选择一个任务')
     return
   }

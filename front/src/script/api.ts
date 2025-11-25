@@ -1,4 +1,4 @@
-import type { InterfaceModel, Resource } from '../types/interfaceV1'
+import type { InterfaceModel, Resource } from '../types/interfaceV2'
 
 interface ApiResponse {
   status: string
@@ -35,8 +35,10 @@ export function startTask(task_list: string[], options: Record<string, string>):
     .then((res) => res.json())
     .then((data: ApiResponse) => {
       if (data.status === 'success') {
+        // @ts-ignore
         window.$message.success('任务开始')
       } else {
+        // @ts-ignore
         window.$message.error(data.message)
       }
     })
@@ -52,8 +54,10 @@ export function stopTask(): void {
     .then((res) => res.json())
     .then((data: ApiResponse) => {
       if (data.status === 'success') {
+        // @ts-ignore
         window.$message.success('正在中止任务，请稍后')
       } else {
+        // @ts-ignore
         window.$message.error(data.message)
       }
     })
@@ -76,8 +80,10 @@ export function postDevices(device: Device): void {
     .then((res) => res.json())
     .then((data: ApiResponse) => {
       if (data.status === 'success') {
+        // @ts-ignore
         window.$message.success('设备连接成功')
       } else {
+        // @ts-ignore
         window.$message.error('设备连接成功，请检查终端日志')
       }
     })
@@ -103,8 +109,10 @@ export function postResource(name: string): void {
     .then((res) => res.json())
     .then((data: ApiResponse) => {
       if (data.status === 'success') {
+        // @ts-ignore
         window.$message.success('资源添加成功')
       } else {
+        // @ts-ignore
         window.$message.error(data.message)
       }
     })

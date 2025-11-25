@@ -6,7 +6,16 @@
         <div>{{ k }}</div>
         <n-select :options="value" v-model:value="options[k]" />
       </n-list-item>
-      <n-list-item v-for="(v, k) in option_dict['checkbox']" :key="k">
+      <n-list-item v-for="(value, k) in option_dict['input']" :key="k">
+        <div>{{ k }}</div>
+        <div class="flex flex-col gap-2 w-full">
+          <div v-for="input in value" :key="input.name" class="flex flex-col gap-1">
+            <span class="text-sm text-gray-500">{{ input.label || input.name }}</span>
+            <n-input v-model:value="options[`${k}_${input.name}`]" />
+          </div>
+        </div>
+      </n-list-item>
+      <n-list-item v-for="(_, k) in option_dict['checkbox']" :key="k">
         <div>{{ k }}</div>
         <template #suffix>
           <n-switch
@@ -32,7 +41,7 @@ import { marked } from 'marked'
 import { ref, watch } from 'vue'
 import { useInterfaceStore } from '../stores/interface.ts'
 import { useIndexStore } from '../stores'
-import type { Option } from '../types/interfaceV1.ts'
+import type { Option, SelectOption, InputOption, InputCase } from '../types/interfaceV2.ts'
 import { storeToRefs } from 'pinia'
 
 const interfaceStore = useInterfaceStore()
@@ -45,13 +54,16 @@ marked.setOptions({
   gfm: true,
   pedantic: false,
 })
+
 type ProcessedOptions = {
   select: Record<string, object>
   checkbox: Record<string, string>
+  input: Record<string, InputCase[]>
 }
 const option_dict = ref<ProcessedOptions>({
   select: {},
   checkbox: {},
+  input: {},
 })
 const options = storeToRefs(interfaceStore).options
 
@@ -59,16 +71,24 @@ function process_options(origin: Record<string, Option>): ProcessedOptions {
   const result: ProcessedOptions = {
     select: {},
     checkbox: {},
+    input: {},
   }
   for (const key in origin) {
-    const optionCases = origin[key]!.cases
-    if (optionCases[0]!.name === 'no' || optionCases[0]!.name === 'yes') {
-      result.checkbox[key] = origin[key]!.default_case || 'no'
-    } else {
-      result.select[key] = optionCases.map((item) => ({
-        label: item.name,
-        value: item.name,
-      }))
+    const option = origin[key]!
+    if (option.type === 'select') {
+      const selectOption = option as SelectOption
+      const cases = selectOption.cases
+      if (cases.length > 0 && (cases[0]!.name === 'no' || cases[0]!.name === 'yes')) {
+        result.checkbox[key] = selectOption.default_case || 'no'
+      } else {
+        result.select[key] = cases.map((item) => ({
+          label: item.label || item.name,
+          value: item.name,
+        }))
+      }
+    } else if (option.type === 'input') {
+      const inputOption = option as InputOption
+      result.input[key] = inputOption.inputs
     }
   }
   return result
@@ -85,18 +105,16 @@ watch(
     }
     for (const i of interface_task!) {
       if (i.entry === newTaskId) {
-        if (Array.isArray(i.doc)) {
-          md.value = marked(i.doc.join('\n\n')) as unknown as HTMLElement
-        } else if (typeof i.doc === 'string') {
-          md.value = marked(i.doc) as unknown as HTMLElement
-        }
-        else {
+        if (i.description) {
+          md.value = marked(i.description) as unknown as HTMLElement
+        } else {
           md.value = marked('空空如也') as unknown as HTMLElement
         }
         option_dict.value = process_options(interfaceStore.getOptionList(i.entry))
         isEmpty.value = !(
           Object.keys(option_dict.value.select).length > 0 ||
-          Object.keys(option_dict.value.checkbox).length > 0
+          Object.keys(option_dict.value.checkbox).length > 0 ||
+          Object.keys(option_dict.value.input).length > 0
         )
         break
       }
