@@ -95,11 +95,15 @@ class MaaWorker:
     def set_option(self, option_name: str, case_name: str):
         if option_name in self.interface.option:
             option = self.interface.option[option_name]
-            for case in option.cases:
-                if case.name == case_name:
-                    resource.override_pipeline(case.pipeline_override)
-                    # self.send_log(f"选项 {option_name} 设置为: {case_name}")
-                    return
+            if option.type == "select" and option.cases:
+                for case in option.cases:
+                    if case.name == case_name:
+                        resource.override_pipeline(case.pipeline_override)
+                        # self.send_log(f"选项 {option_name} 设置为: {case_name}")
+                        return
+            elif option.type == "input" and option.pipeline_override:
+                resource.override_pipeline(option.pipeline_override)
+                return
 
     def load_custom_func(self):
         def load_module(module_path):
