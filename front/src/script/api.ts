@@ -117,3 +117,63 @@ export function postResource(name: string): void {
       }
     })
 }
+
+// ==================== 设置相关 API ====================
+
+import type { SettingsModel, SettingsUpdateRequest } from '../types/settings'
+
+interface SettingsResponse {
+  status: string
+  data: SettingsModel
+}
+
+// 获取所有设置（一次性获取）
+export function getSettings(): Promise<SettingsModel> {
+  return fetch('/api/settings', { method: 'GET' })
+    .then((res) => res.json())
+    .then((data: SettingsResponse) => data.data)
+}
+
+// 更新设置（支持部分更新）
+export function updateSettings(settings: SettingsUpdateRequest): Promise<boolean> {
+  return fetch('/api/settings', {
+    method: 'PUT',
+    body: JSON.stringify(settings),
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  })
+    .then((res) => res.json())
+    .then((data: ApiResponse) => {
+      if (data.status === 'success') {
+        // @ts-ignore
+        window.$message.success('设置已保存')
+        return true
+      } else {
+        // @ts-ignore
+        window.$message.error(data.message || '保存失败')
+        return false
+      }
+    })
+    .catch((error) => {
+      console.error('Failed to update settings:', error)
+      // @ts-ignore
+      window.$message.error('网络错误，请稍后重试')
+      return false
+    })
+}
+
+// 检查更新
+export function checkUpdate(): Promise<{ hasUpdate: boolean; version?: string; changelog?: string }> {
+  return fetch('/api/update/check', { method: 'GET' })
+    .then((res) => res.json())
+    .then((data) => ({
+      hasUpdate: data.has_update || false,
+      version: data.version,
+      changelog: data.changelog,
+    }))
+    .catch((error) => {
+      console.error('Failed to check update:', error)
+      return { hasUpdate: false }
+    })
+}
