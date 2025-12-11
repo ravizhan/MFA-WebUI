@@ -1,8 +1,7 @@
 import { defineStore } from 'pinia'
 import { getSettings, updateSettings } from '../script/api'
-import type { SettingsModel, SettingsUpdateRequest } from '../types/settings'
+import type { SettingsModel } from '../types/settings'
 
-// 默认设置
 const defaultSettings: SettingsModel = {
   update: {
     autoUpdate: true,
@@ -10,15 +9,13 @@ const defaultSettings: SettingsModel = {
     proxy: '',
   },
   notification: {
-    enabled: false,
+    enabled: true,
     webhook: '',
     notifyOnComplete: true,
     notifyOnError: true,
   },
   ui: {
     darkMode: 'auto',
-    language: 'zh-CN',
-    fontSize: 14,
   },
   runtime: {
     timeout: 300,
@@ -54,41 +51,35 @@ export const useSettingsStore = defineStore('settings', {
   },
 
   actions: {
-    // 获取所有设置
     async fetchSettings() {
       this.loading = true
       try {
         const data = await getSettings()
-        this.settings = { ...defaultSettings, ...data }
+        this.settings = {
+          update: { ...defaultSettings.update, ...(data?.update || {}) },
+          notification: { ...defaultSettings.notification, ...(data?.notification || {}) },
+          ui: { ...defaultSettings.ui, ...(data?.ui || {}) },
+          runtime: { ...defaultSettings.runtime, ...(data?.runtime || {}) },
+          about: { ...defaultSettings.about, ...(data?.about || {}) },
+        }
         this.initialized = true
       } catch (error) {
         console.error('Failed to fetch settings:', error)
-        // 使用默认设置
         this.settings = { ...defaultSettings }
       } finally {
         this.loading = false
       }
     },
 
-    // 更新设置（支持部分更新）
-    async saveSettings(updates: SettingsUpdateRequest) {
+    async saveSettings(newSettings?: SettingsModel) {
       this.loading = true
       try {
-        await updateSettings(updates)
-        // 合并更新到本地状态
-        if (updates.update) {
-          this.settings.update = { ...this.settings.update, ...updates.update }
+        const payload = newSettings || this.settings
+        const success = await updateSettings(payload)
+        if (success) {
+          this.settings = { ...payload }
         }
-        if (updates.notification) {
-          this.settings.notification = { ...this.settings.notification, ...updates.notification }
-        }
-        if (updates.ui) {
-          this.settings.ui = { ...this.settings.ui, ...updates.ui }
-        }
-        if (updates.runtime) {
-          this.settings.runtime = { ...this.settings.runtime, ...updates.runtime }
-        }
-        return true
+        return success
       } catch (error) {
         console.error('Failed to save settings:', error)
         return false
@@ -98,27 +89,31 @@ export const useSettingsStore = defineStore('settings', {
     },
 
     // 更新单个设置项的便捷方法
-    async updateSingleSetting<K extends keyof SettingsUpdateRequest>(
+    async updateSetting<K extends keyof SettingsModel, P extends keyof SettingsModel[K]>(
       category: K,
-      key: string,
-      value: unknown
+      key: P,
+      value: SettingsModel[K][P]
     ) {
-      const updates = {
+      const updatedSettings: SettingsModel = {
+        ...this.settings,
         [category]: {
+          ...this.settings[category],
           [key]: value,
         },
-      } as SettingsUpdateRequest
-      return this.saveSettings(updates)
+      }
+      this.settings = updatedSettings
+      return this.saveSettings(updatedSettings)
     },
 
-    // 重置为默认设置
     async resetSettings() {
-      const resetData: SettingsUpdateRequest = {
-        update: defaultSettings.update,
-        notification: defaultSettings.notification,
-        ui: defaultSettings.ui,
-        runtime: defaultSettings.runtime,
+      const resetData: SettingsModel = {
+        update: { ...defaultSettings.update },
+        notification: { ...defaultSettings.notification },
+        ui: { ...defaultSettings.ui },
+        runtime: { ...defaultSettings.runtime },
+        about: { ...this.settings.about },
       }
+      this.settings = resetData
       return this.saveSettings(resetData)
     },
   },

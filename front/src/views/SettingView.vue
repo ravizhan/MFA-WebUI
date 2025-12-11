@@ -1,4 +1,5 @@
 <template>
+    <n-message-provider>
   <div class="flex p-5 gap-6 min-h-[60vh] max-h-[65.5vh] overflow-y-auto max-md:flex-col max-md:p-3">
     <!-- 左侧锚点导航 -->
     <div class="sticky top-5 w-45 shrink-0 h-fit max-md:relative max-md:top-0 max-md:w-full max-md:mb-4">
@@ -124,23 +125,6 @@
                 @update:value="(val: string | boolean) => handleSettingChange('ui', 'darkMode', val)"
               />
             </n-form-item>
-            <n-form-item label="界面语言">
-              <n-select
-                v-model:value="settings.ui.language"
-                :options="languageOptions"
-                @update:value="(val: string) => handleSettingChange('ui', 'language', val)"
-              />
-            </n-form-item>
-            <n-form-item label="字体大小">
-              <n-slider
-                v-model:value="settings.ui.fontSize"
-                :min="12"
-                :max="20"
-                :step="1"
-                :marks="fontSizeMarks"
-                @update:value="(val: number) => handleSettingChange('ui', 'fontSize', val)"
-              />
-            </n-form-item>
           </n-form>
         </n-card>
 
@@ -246,6 +230,7 @@
       </n-spin>
     </div>
   </div>
+  </n-message-provider>
 </template>
 
 <script setup lang="ts">
@@ -253,21 +238,21 @@ import { ref, onMounted, computed } from 'vue'
 import { useSettingsStore } from '../stores/settings'
 import { checkUpdate } from '../script/api'
 import { useMessage, useDialog } from 'naive-ui'
+import type { SettingsModel } from '../types/settings'
+// @ts-ignore
+window.$message = useMessage()
 
 const message = useMessage()
 const dialog = useDialog()
 const settingsStore = useSettingsStore()
 
-// 使用 computed 确保响应式
 const settings = computed(() => settingsStore.settings)
 
 const checkingUpdate = ref(false)
 
-// 选项配置
 const updateChannelOptions = [
   { label: '稳定版', value: 'stable' },
   { label: '测试版', value: 'beta' },
-  { label: '开发版', value: 'dev' },
 ]
 
 const darkModeOptions = [
@@ -276,40 +261,23 @@ const darkModeOptions = [
   { label: '深色模式', value: true },
 ]
 
-const languageOptions = [
-  { label: '简体中文', value: 'zh-CN' },
-  { label: 'English', value: 'en-US' },
-]
-
-const fontSizeMarks = {
-  12: '小',
-  14: '中',
-  16: '大',
-  18: '特大',
-  20: '超大',
-}
-
-// 初始化获取设置
 onMounted(() => {
   if (!settingsStore.initialized) {
     settingsStore.fetchSettings()
   }
 })
 
-// 处理设置变更（使用部分更新策略）
-// 选择部分更新的原因：
-// 1. 减少网络传输量
-// 2. 避免并发修改冲突
-// 3. 更细粒度的错误处理
-const handleSettingChange = async (
-  category: 'update' | 'notification' | 'ui' | 'runtime',
-  key: string,
-  value: string | number | boolean | null
+const handleSettingChange = async <
+  K extends 'update' | 'notification' | 'ui' | 'runtime',
+  P extends keyof SettingsModel[K]
+>(
+  category: K,
+  key: P,
+  value: SettingsModel[K][P]
 ) => {
-  await settingsStore.updateSingleSetting(category, key, value)
+  await settingsStore.updateSetting(category, key, value)
 }
 
-// 检查更新
 const checkForUpdate = async () => {
   checkingUpdate.value = true
   try {
@@ -321,7 +289,7 @@ const checkForUpdate = async () => {
         positiveText: '前往更新',
         negativeText: '稍后',
         onPositiveClick: () => {
-          window.open(settings.value.about.github || 'https://github.com/ravizhan/MFA-WebUI/releases', '_blank')
+          window.open(settings.value.about.github, '_blank')
         },
       })
     } else {
@@ -334,13 +302,11 @@ const checkForUpdate = async () => {
   }
 }
 
-// 测试通知
 const testNotification = () => {
   message.info('正在发送测试通知...')
   // TODO: 调用后端测试通知接口
 }
 
-// 重置设置
 const handleResetSettings = () => {
   dialog.warning({
     title: '确认重置',

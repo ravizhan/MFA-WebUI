@@ -1,1 +1,31 @@
-{}
+{
+    "update": {
+        "autoUpdate": true,
+        "updateChannel": "stable",
+        "proxy": ""
+    },
+    "notification": {
+        "enabled": true,
+        "webhook": "",
+        "notifyOnComplete": true,
+        "notifyOnError": true
+    },
+    "ui": {
+        "darkMode": "auto"
+    },
+    "runtime": {
+        "timeout": 300,
+        "reminderInterval": 30,
+        "autoRetry": true,
+        "maxRetryCount": 3
+    },
+    "about": {
+        "version": "",
+        "author": "",
+        "github": "",
+        "license": "",
+        "description": "",
+        "contact": "",
+        "issueUrl": ""
+    }
+}

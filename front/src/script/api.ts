@@ -120,24 +120,22 @@ export function postResource(name: string): void {
 
 // ==================== 设置相关 API ====================
 
-import type { SettingsModel, SettingsUpdateRequest } from '../types/settings'
+import type { SettingsModel } from '../types/settings'
 
 interface SettingsResponse {
   status: string
   data: SettingsModel
 }
 
-// 获取所有设置（一次性获取）
 export function getSettings(): Promise<SettingsModel> {
   return fetch('/api/settings', { method: 'GET' })
     .then((res) => res.json())
     .then((data: SettingsResponse) => data.data)
 }
 
-// 更新设置（支持部分更新）
-export function updateSettings(settings: SettingsUpdateRequest): Promise<boolean> {
+export function updateSettings(settings: SettingsModel): Promise<boolean> {
   return fetch('/api/settings', {
-    method: 'PUT',
+    method: 'POST',
     body: JSON.stringify(settings),
     headers: {
       'Content-Type': 'application/json',

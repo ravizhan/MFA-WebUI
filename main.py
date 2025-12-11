@@ -6,12 +6,13 @@ from contextlib import asynccontextmanager
 from queue import SimpleQueue
 import uvicorn
 
-from fastapi import FastAPI, websockets
+from fastapi import FastAPI, websockets, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketState, WebSocketDisconnect
 from models.interfaceV2 import InterfaceModel
 from models.api import DeviceModel
+from models.settings import SettingsModel
 from maa_utils import MaaWorker
 
 with open("interface.json", "r", encoding="utf-8") as f:
@@ -41,7 +42,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 app.mount("/assets", StaticFiles(directory="page/assets"))
+app.mount("/resource", StaticFiles(directory="resource"))
 
+@app.middleware("http")
+async def spa_middleware(request: Request, call_next):
+    response = await call_next(request)
+    if response.status_code == 404 and not ( request.url.path.startswith("/api/") or request.url.path.startswith("/assets/") or request.url.path.startswith("/resource/")):
+        return FileResponse("page/index.html")
+    return response
 
 @app.get("/")
 async def serve_homepage():
@@ -77,6 +85,19 @@ def set_resource(name: str):
         app_state.worker.set_resource(name)
     except Exception as e:
         return {"status": "failed", "message": str(e)}
+    return {"status": "success"}
+
+@app.get("/api/settings")
+def get_settings():
+    with open("config/config.json", "r", encoding="utf-8") as f:
+        config_data = json.load(f)
+    settings = SettingsModel(**config_data)
+    return {"status": "success", "settings": settings.model_dump()}
+
+@app.post("/api/settings")
+def set_settings(settings: SettingsModel):
+    with open("config/config.json", "w", encoding="utf-8") as f:
+        json.dump(settings.model_dump(), f, indent=4, ensure_ascii=False)
     return {"status": "success"}
 
 

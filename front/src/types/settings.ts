@@ -16,8 +16,6 @@ export interface NotificationSettings {
 // 界面设置
 export interface UISettings {
   darkMode: boolean | 'auto'
-  language: string
-  fontSize: number
 }
 
 // 运行设置
@@ -47,11 +45,3 @@ export interface SettingsModel {
   runtime: RuntimeSettings
   about: AboutInfo
 }
-
-// 设置更新请求（部分更新）
-export type SettingsUpdateRequest = Partial<{
-  update: Partial<UpdateSettings>
-  notification: Partial<NotificationSettings>
-  ui: Partial<UISettings>
-  runtime: Partial<RuntimeSettings>
-}>
