@@ -26,29 +26,70 @@
           />
         </template>
       </n-list-item>
+      <n-list-item v-for="(switchValues, k) in option_dict['switch']" :key="k">
+        <div>{{ k }}</div>
+        <template #suffix>
+          <n-switch
+            :checked-value="switchValues[1]"
+            :unchecked-value="switchValues[0]"
+            :round="false"
+            v-model:value="options[k]"
+          />
+        </template>
+      </n-list-item>
     </n-list>
     <div v-else class="py-[12px] px-[20px]">空空如也</div>
   </n-card>
   <div class="col-name">任务说明</div>
   <n-card hoverable content-style="padding-top: 0.5rem;">
     <n-scrollbar class="max-h-90" trigger="none">
-      <div class="prose prose-sm dark:prose-invert" v-html="md"></div>
+      <div ref="mdContainer" class="prose prose-sm dark:prose-invert" v-html="md"></div>
     </n-scrollbar>
   </n-card>
+  <!-- 隐藏的 n-image 用于预览 -->
+  <n-image
+    ref="previewImageRef"
+    :src="previewSrc"
+    :show-toolbar="true"
+    style="display: none;"
+  />
 </template>
 <script setup lang="ts">
 import { marked } from 'marked'
-import { ref, watch } from 'vue'
+import { ref, watch, nextTick } from 'vue'
 import { useInterfaceStore } from '../stores/interface.ts'
 import { useIndexStore } from '../stores'
-import type { Option, SelectOption, InputOption, InputCase } from '../types/interfaceV2.ts'
+import type { Option, SelectOption, InputOption, SwitchOption, InputCase } from '../types/interfaceV2.ts'
 import { storeToRefs } from 'pinia'
 
 const interfaceStore = useInterfaceStore()
 const indexStore = useIndexStore()
 const md = ref<HTMLElement | null>(null)
 const isEmpty = ref(true)
+const mdContainer = ref<HTMLElement | null>(null)
+const previewImageRef = ref<InstanceType<typeof import('naive-ui').NImage> | null>(null)
+const previewSrc = ref('')
 const render = new marked.Renderer()
+
+render.image = function({ href, title, text }: { href: string; title: string | null; text: string }) {
+  const titleAttr = title ? ` title="${title}"` : ''
+  const altAttr = text ? ` alt="${text}"` : ''
+  return `<img src="${href}"${titleAttr}${altAttr} class="preview-image" style="max-width: 100%; object-fit: contain; cursor: pointer;" />`
+}
+
+function setupImagePreview() {
+  if (!mdContainer.value) return
+  const images = mdContainer.value.querySelectorAll('img.preview-image')
+  images.forEach((img) => {
+    img.addEventListener('click', () => {
+      previewSrc.value = (img as HTMLImageElement).src
+      nextTick(() => {
+        previewImageRef.value?.click()
+      })
+    })
+  })
+}
+
 marked.setOptions({
   renderer: render,
   gfm: true,
@@ -59,11 +100,13 @@ type ProcessedOptions = {
   select: Record<string, object>
   checkbox: Record<string, string>
   input: Record<string, InputCase[]>
+  switch: Record<string, [string, string]>
 }
 const option_dict = ref<ProcessedOptions>({
   select: {},
   checkbox: {},
   input: {},
+  switch: {},
 })
 const options = storeToRefs(interfaceStore).options
 
@@ -72,6 +115,7 @@ function process_options(origin: Record<string, Option>): ProcessedOptions {
     select: {},
     checkbox: {},
     input: {},
+    switch: {},
   }
   for (const key in origin) {
     const option = origin[key]!
@@ -89,6 +133,9 @@ function process_options(origin: Record<string, Option>): ProcessedOptions {
     } else if (option.type === 'input') {
       const inputOption = option as InputOption
       result.input[key] = inputOption.inputs
+    } else if (option.type === 'switch') {
+      const switchOption = option as SwitchOption
+      result.switch[key] = [switchOption.cases[0]!.name, switchOption.cases[1]!.name]
     }
   }
   return result
@@ -114,8 +161,12 @@ watch(
         isEmpty.value = !(
           Object.keys(option_dict.value.select).length > 0 ||
           Object.keys(option_dict.value.checkbox).length > 0 ||
-          Object.keys(option_dict.value.input).length > 0
+          Object.keys(option_dict.value.input).length > 0 ||
+          Object.keys(option_dict.value.switch).length > 0
         )
+        nextTick(() => {
+          setupImagePreview()
+        })
         break
       }
     }

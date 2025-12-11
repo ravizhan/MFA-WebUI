@@ -43,6 +43,8 @@ export const useInterfaceStore = defineStore('interface', {
             for (const input of option.inputs) {
               this.options[`${key}_${input.name}`] = input.default || ''
             }
+          } else if (option.type === 'switch') {
+            this.options[key] = option.cases[0]?.name || ''
           }
         }
       })
