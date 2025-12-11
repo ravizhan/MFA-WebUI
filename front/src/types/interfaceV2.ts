@@ -1,28 +1,40 @@
-export interface AdbController {
-  input?: number
-  screencap?: number
-  config?: Record<string, string>
-}
+export type Win32MouseKeyboard =
+  | 'Seize'
+  | 'SendMessage'
+  | 'PostMessage'
+  | 'LegacyEvent'
+  | 'PostThreadMessage'
+  | 'SendMessageWithCursorPos'
+  | 'PostMessageWithCursorPos'
+
+export type Win32Screencap =
+  | 'GDI'
+  | 'FramePool'
+  | 'DXGI_DesktopDup'
+  | 'DXGI_DesktopDup_Window'
+  | 'PrintWindow'
+  | 'ScreenDC'
 
 export interface Win32Controller {
   class_regex?: string
   window_regex?: string
-  mouse?: number
-  keyboard?: number
-  screencap?: number
+  mouse?: Win32MouseKeyboard
+  keyboard?: Win32MouseKeyboard
+  screencap?: Win32Screencap
 }
 
-interface Controller {
+export type ControllerType = 'Adb' | 'Win32'
+
+export interface Controller {
   name: string
-  label: string
+  label?: string
   description?: string
-  icon: string
-  type: string
-  adb?: AdbController
+  icon?: string
+  type: ControllerType
   win32?: Win32Controller
-  display_short_side?: undefined
-  display_long_side?: undefined
-  display_raw?: undefined
+  display_short_side?: number
+  display_long_side?: number
+  display_raw?: boolean
 }
 
 export interface Resource {
@@ -57,11 +69,11 @@ export interface OptionCase {
   label?: string
   description?: string
   icon?: string
-  options?: Record<string, string>
-  pipeline_override: Record<string, object>
+  option?: string[]
+  pipeline_override?: Record<string, object>
 }
 
-export type InputPipelineType = 'str' | 'int' | 'float'
+export type InputPipelineType = 'string' | 'int' | 'bool'
 
 export interface InputCase {
   name: string
@@ -70,10 +82,10 @@ export interface InputCase {
   default?: string
   pipeline_type?: InputPipelineType
   verify?: string
+  pattern_msg?: string
 }
 
 interface OptionBase {
-  key: string
   label?: string
   description?: string
   icon?: string
@@ -91,10 +103,15 @@ export interface InputOption extends OptionBase {
   pipeline_override?: Record<string, object>
 }
 
-export type Option = SelectOption | InputOption
+export interface SwitchOption extends OptionBase {
+  type: 'switch'
+  cases: [OptionCase, OptionCase]
+}
+
+export type Option = SelectOption | InputOption | SwitchOption
 
 export interface InterfaceModel {
-  interface_version: number
+  interface_version: 2
   languages?: Record<string, string>
   name: string
   label?: string
@@ -102,18 +119,16 @@ export interface InterfaceModel {
   icon?: string
   mirrorchyan_rid?: string
   mirrorchyan_multiplatform?: boolean
-  auto_update_ui: boolean
-  auto_update_maafw: boolean
-  github: string
-  version: string
-  contact: string
-  license: string
-  welcome: string
-  description: string
+  github?: string
+  version?: string
+  contact?: string
+  license?: string
+  welcome?: string
+  description?: string
   controller: Controller[]
   resource: Resource[]
   agent?: Agent
   task: Task[]
-  option: Record<string, Option>
+  option?: Record<string, Option>
 }
 

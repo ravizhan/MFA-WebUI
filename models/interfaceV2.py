@@ -135,10 +135,3 @@ class InterfaceModel(BaseModel):
         if self.title is None and self.label and self.version:
             self.title = f"{self.label} {self.version}"
         return self
-
-if __name__ == '__main__':
-    import json
-    with open("../interface.json", "r", encoding="utf-8") as f:
-        data = json.load(f)
-    interface = InterfaceModel.model_validate(data)
-    print(interface)
