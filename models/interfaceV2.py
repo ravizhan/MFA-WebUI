@@ -2,36 +2,36 @@ from pydantic import BaseModel, model_validator
 from typing import List, Optional, Dict, Literal
 
 
-class AdbController(BaseModel):
-    input: Optional[int] = None
-    screencap: Optional[int] = None
-    config: Optional[Dict[str, str]] = None
-
 class Win32Controller(BaseModel):
     class_regex: Optional[str] = None
     window_regex: Optional[str] = None
-    mouse: Optional[int] = None
-    keyboard: Optional[int] = None
-    screencap: Optional[int] = None
+    mouse: Optional[Literal["Seize", "SendMessage", "PostMessage", "LegacyEvent", "PostThreadMessage", "SendMessageWithCursorPos", "PostMessageWithCursorPos"]] = None
+    keyboard: Optional[Literal["Seize", "SendMessage", "PostMessage", "LegacyEvent", "PostThreadMessage", "SendMessageWithCursorPos", "PostMessageWithCursorPos"]] = None
+    screencap: Optional[Literal["GDI", "FramePool", "DXGI_DesktopDup", "DXGI_DesktopDup_Window", "PrintWindow", "ScreenDC"]] = None
 
 
 class Controller(BaseModel):
     name: str
-    label: str
+    label: Optional[str] = None
     description: Optional[str] = None
-    icon: str
-    type: str
+    icon: Optional[str] = None
+    type: Literal["Adb", "Win32"]
     display_short_side: Optional[int] = 720
-    display_long_side: Optional[int] = 1280
+    display_long_side: Optional[int] = None
     display_raw: Optional[bool] = False
-    adb: Optional[AdbController] = None
     win32: Optional[Win32Controller] = None
 
     @model_validator(mode='after')
     def check_display_fields_mutual_exclusive(self):
-        fields = [self.display_short_side, self.display_long_side, self.display_raw]
-        non_none_count = sum(f is not None for f in fields)
-        if non_none_count > 1:
+        # 检查是否设置了多个互斥字段（非默认值）
+        fields_set = []
+        if self.display_short_side is not None and self.display_short_side != 720:
+            fields_set.append('display_short_side')
+        if self.display_long_side is not None:
+            fields_set.append('display_long_side')
+        if self.display_raw is True:
+            fields_set.append('display_raw')
+        if len(fields_set) > 1:
             raise ValueError('display_short_side, display_long_side 和 display_raw 必须互斥')
         return self
 
@@ -67,20 +67,22 @@ class OptionCase(BaseModel):
     label: Optional[str] = None
     description: Optional[str] = None
     icon: Optional[str] = None
-    options: Optional[Dict[str,str]] = None
-    pipeline_override: Dict[str, dict]
+    option: Optional[List[str]] = None
+    pipeline_override: Optional[Dict[str, dict]] = None
+
 
 class InputCase(BaseModel):
     name: str
     label: Optional[str] = None
     description: Optional[str] = None
     default: Optional[str] = None
-    pipeline_type: Literal["str", "int", "float"] = "str"
+    pipeline_type: Optional[Literal["string", "int", "bool"]] = None
     verify: Optional[str] = None
+    pattern_msg: Optional[str] = None
+
 
 class Option(BaseModel):
-    key: str
-    type: Literal["select", "input"] = "select"
+    type: Literal["select", "input", "switch"] = "select"
     label: Optional[str] = None
     description: Optional[str] = None
     icon: Optional[str] = None
@@ -94,43 +96,49 @@ class Option(BaseModel):
         if self.type == "select":
             if not self.cases:
                 raise ValueError('当 type 为 select 时，cases 不能为空')
-            if self.pipeline_override:
-                raise ValueError('当 type 为 select 时，pipeline_override 不应存在')
+        if self.type == "switch":
+            if not self.cases:
+                raise ValueError('当 type 为 switch 时，cases 不能为空')
+            if len(self.cases) != 2:
+                raise ValueError('当 type 为 switch 时，cases 必须有且仅有 2 个元素')
         if self.type == "input":
             if not self.inputs:
                 raise ValueError('当 type 为 input 时，inputs 不能为空')
-            if self.default_case:
-                raise ValueError('当 type 为 input 时，default_case 不应存在')
         return self
 
 
 class InterfaceModel(BaseModel):
-    interface_version: int
-    languages: Optional[Dict[str, str]]
+    interface_version: Literal[2]
+    languages: Optional[Dict[str, str]] = None
     name: str
     label: Optional[str] = None
     title: Optional[str] = None
     icon: Optional[str] = None
     mirrorchyan_rid: Optional[str] = None
     mirrorchyan_multiplatform: Optional[bool] = None
-    auto_update_ui: bool
-    auto_update_maafw: bool
-    github: str
-    version: str
-    contact: str
-    license: str
-    welcome: str
-    description: str
+    github: Optional[str] = None
+    version: Optional[str] = None
+    contact: Optional[str] = None
+    license: Optional[str] = None
+    welcome: Optional[str] = None
+    description: Optional[str] = None
     controller: List[Controller]
     resource: List[Resource]
     agent: Optional[Agent] = None
     task: List[Task]
-    option: Dict[str, Option]
+    option: Optional[Dict[str, Option]] = None
 
     @model_validator(mode='after')
     def set_variable_if_none(self):
         if self.label is None:
             self.label = self.name
-        if self.title is None and self.label:
+        if self.title is None and self.label and self.version:
             self.title = f"{self.label} {self.version}"
         return self
+
+if __name__ == '__main__':
+    import json
+    with open("../interface.json", "r", encoding="utf-8") as f:
+        data = json.load(f)
+    interface = InterfaceModel.model_validate(data)
+    print(interface)
