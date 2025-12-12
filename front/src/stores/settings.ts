@@ -39,28 +39,62 @@ export const useSettingsStore = defineStore('settings', {
     settings: { ...defaultSettings } as SettingsModel,
     loading: false,
     initialized: false,
+    systemPrefersDark: false,
+    systemThemeListenerReady: false,
   }),
 
   getters: {
-    isDarkMode: (state) => {
-      if (state.settings.ui.darkMode === 'auto') {
-        return window.matchMedia('(prefers-color-scheme: dark)').matches
+    isDarkMode(): boolean {
+      if (this.settings.ui.darkMode === 'auto') {
+        return this.systemPrefersDark
       }
-      return state.settings.ui.darkMode
+      return Boolean(this.settings.ui.darkMode)
     },
   },
 
   actions: {
+    ensureSystemThemeListener() {
+      if (this.systemThemeListenerReady) return
+      if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+        this.systemThemeListenerReady = true
+        this.systemPrefersDark = false
+        return
+      }
+
+      const media = window.matchMedia('(prefers-color-scheme: dark)')
+      this.systemPrefersDark = media.matches
+
+      const onChange = (e: MediaQueryListEvent) => {
+        this.systemPrefersDark = e.matches
+      }
+
+      if (typeof media.addEventListener === 'function') {
+        media.addEventListener('change', onChange)
+      } else if (
+        typeof (media as unknown as { addListener?: (cb: (e: MediaQueryListEvent) => void) => void })
+          .addListener === 'function'
+      ) {
+        ;(
+          media as unknown as {
+            addListener: (cb: (e: MediaQueryListEvent) => void) => void
+          }
+        ).addListener(onChange)
+      }
+
+      this.systemThemeListenerReady = true
+    },
+
     async fetchSettings() {
       this.loading = true
       try {
+        this.ensureSystemThemeListener()
         const data = await getSettings()
         this.settings = {
-          update: { ...defaultSettings.update, ...(data?.update || {}) },
-          notification: { ...defaultSettings.notification, ...(data?.notification || {}) },
-          ui: { ...defaultSettings.ui, ...(data?.ui || {}) },
-          runtime: { ...defaultSettings.runtime, ...(data?.runtime || {}) },
-          about: { ...defaultSettings.about, ...(data?.about || {}) },
+          update: { ...defaultSettings.update, ...data?.update },
+          notification: { ...defaultSettings.notification, ...data?.notification },
+          ui: { ...defaultSettings.ui, ...data?.ui },
+          runtime: { ...defaultSettings.runtime, ...data?.runtime },
+          about: { ...defaultSettings.about, ...data?.about },
         }
         this.initialized = true
       } catch (error) {
@@ -94,6 +128,9 @@ export const useSettingsStore = defineStore('settings', {
       key: P,
       value: SettingsModel[K][P],
     ) {
+      if (category === 'ui' && key === 'darkMode' && value === 'auto') {
+        this.ensureSystemThemeListener()
+      }
       const updatedSettings: SettingsModel = {
         ...this.settings,
         [category]: {

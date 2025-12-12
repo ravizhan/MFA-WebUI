@@ -69,7 +69,12 @@
                   v-model:value="settings.update.updateChannel"
                   :options="updateChannelOptions"
                   @update:value="
-                    (val: string) => handleSettingChange('update', 'updateChannel', val)
+                    (val: string) =>
+                      handleSettingChange(
+                        'update',
+                        'updateChannel',
+                        val as SettingsModel['update']['updateChannel'],
+                      )
                   "
                 />
               </n-form-item>
@@ -140,7 +145,9 @@
                   v-model:value="settings.ui.darkMode"
                   :options="darkModeOptions"
                   @update:value="
-                    (val: string | boolean) => handleSettingChange('ui', 'darkMode', val)
+                    (val: string | boolean) =>
+                      (val === 'auto' || typeof val === 'boolean') &&
+                      handleSettingChange('ui', 'darkMode', val as SettingsModel['ui']['darkMode'])
                   "
                 />
               </n-form-item>
@@ -264,14 +271,21 @@ import { useSettingsStore } from '../stores/settings'
 import { checkUpdate } from '../script/api'
 import { useMessage, useDialog } from 'naive-ui'
 import type { SettingsModel } from '../types/settings'
-// @ts-ignore
-window.$message = useMessage()
+
+type EditableCategory = Exclude<keyof SettingsModel, 'about'>
+type MaybeNullForNumbers<T> = T extends number ? T | null : T
+type EditableSettingValue<K extends EditableCategory, P extends keyof SettingsModel[K]> =
+  MaybeNullForNumbers<SettingsModel[K][P]>
 
 const message = useMessage()
 const dialog = useDialog()
 const settingsStore = useSettingsStore()
 
-const settings = computed(() => settingsStore.settings)
+if (typeof window !== 'undefined') {
+  window.$message = message
+}
+
+const settings = computed<SettingsModel>(() => settingsStore.settings)
 
 const checkingUpdate = ref(false)
 
@@ -282,8 +296,8 @@ const updateChannelOptions = [
 
 const darkModeOptions = [
   { label: '跟随系统', value: 'auto' },
-  { label: '浅色模式', value: false },
-  { label: '深色模式', value: true },
+  { label: '关', value: false },
+  { label: '开', value: true },
 ]
 
 onMounted(() => {
@@ -293,14 +307,15 @@ onMounted(() => {
 })
 
 const handleSettingChange = async <
-  K extends 'update' | 'notification' | 'ui' | 'runtime',
+  K extends EditableCategory,
   P extends keyof SettingsModel[K],
 >(
   category: K,
   key: P,
-  value: SettingsModel[K][P],
+  value: EditableSettingValue<K, P>,
 ) => {
-  await settingsStore.updateSetting(category, key, value)
+  if (value === null) return
+  await settingsStore.updateSetting(category, key, value as SettingsModel[K][P])
 }
 
 const checkForUpdate = async () => {

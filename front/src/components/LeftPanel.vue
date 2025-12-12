@@ -87,8 +87,9 @@ import { useInterfaceStore, type TaskListItem } from '../stores/interface.ts'
 import { useIndexStore } from '../stores'
 
 import { useMessage } from 'naive-ui'
-// @ts-ignore
-window.$message = useMessage()
+if (typeof window !== 'undefined') {
+  window.$message = useMessage()
+}
 
 const interfaceStore = useInterfaceStore()
 const indexStore = useIndexStore()

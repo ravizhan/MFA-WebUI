@@ -43,7 +43,7 @@
   <div class="col-name">任务说明</div>
   <n-card hoverable content-style="padding-top: 0.5rem;">
     <n-scrollbar class="max-h-90" trigger="none">
-      <div ref="mdContainer" class="prose prose-sm dark:prose-invert" v-html="md"></div>
+      <div ref="mdContainer" class="markdown-body" v-html="md"></div>
     </n-scrollbar>
   </n-card>
   <!-- 隐藏的 n-image 用于预览 -->
@@ -51,62 +51,58 @@
 </template>
 <script setup lang="ts">
 import { marked } from 'marked'
+import type { Tokens } from 'marked'
 import { ref, watch, nextTick } from 'vue'
 import { useInterfaceStore } from '../stores/interface.ts'
 import { useIndexStore } from '../stores'
+import { NImage } from 'naive-ui'
+import type { SelectOption as NaiveSelectOption } from 'naive-ui'
 import type {
   Option,
-  SelectOption,
-  InputOption,
-  SwitchOption,
+  SelectOption as TaskSelectOption,
+  InputOption as TaskInputOption,
+  SwitchOption as TaskSwitchOption,
   InputCase,
 } from '../types/interfaceV2.ts'
 import { storeToRefs } from 'pinia'
 
 const interfaceStore = useInterfaceStore()
 const indexStore = useIndexStore()
-const md = ref<HTMLElement | null>(null)
+const md = ref('')
 const isEmpty = ref(true)
 const mdContainer = ref<HTMLElement | null>(null)
-const previewImageRef = ref<InstanceType<typeof import('naive-ui').NImage> | null>(null)
+const previewImageRef = ref<InstanceType<typeof NImage> | null>(null)
 const previewSrc = ref('')
 const render = new marked.Renderer()
 
-render.image = function ({
-  href,
-  title,
-  text,
-}: {
-  href: string
-  title: string | null
-  text: string
-}) {
+render.image = function ({ href, title, text }: Tokens.Image) {
+  const safeHref = href || ''
   const titleAttr = title ? ` title="${title}"` : ''
   const altAttr = text ? ` alt="${text}"` : ''
-  return `<img src="${href}"${titleAttr}${altAttr} class="preview-image" style="max-width: 100%; object-fit: contain; cursor: pointer;" />`
+  return `<img src="${safeHref}"${titleAttr}${altAttr} class="preview-image" style="max-width: 100%; object-fit: contain; cursor: pointer;" />`
 }
 
 function setupImagePreview() {
   if (!mdContainer.value) return
   const images = mdContainer.value.querySelectorAll('img.preview-image')
   images.forEach((img) => {
-    img.addEventListener('click', () => {
+    (img as HTMLImageElement).onclick = () => {
       previewSrc.value = (img as HTMLImageElement).src
       nextTick(() => {
         previewImageRef.value?.click()
       })
-    })
+    }
   })
 }
 
 marked.setOptions({
   renderer: render,
   gfm: true,
-  pedantic: false,
+  pedantic: false
 })
 
 type ProcessedOptions = {
-  select: Record<string, object>
+  select: Record<string, NaiveSelectOption[]>
   checkbox: Record<string, string>
   input: Record<string, InputCase[]>
   switch: Record<string, [string, string]>
@@ -129,7 +125,7 @@ function process_options(origin: Record<string, Option>): ProcessedOptions {
   for (const key in origin) {
     const option = origin[key]!
     if (option.type === 'select') {
-      const selectOption = option as SelectOption
+      const selectOption = option as TaskSelectOption
       const cases = selectOption.cases
       if (cases.length > 0 && (cases[0]!.name === 'no' || cases[0]!.name === 'yes')) {
         result.checkbox[key] = selectOption.default_case || 'no'
@@ -140,10 +136,10 @@ function process_options(origin: Record<string, Option>): ProcessedOptions {
         }))
       }
     } else if (option.type === 'input') {
-      const inputOption = option as InputOption
+      const inputOption = option as TaskInputOption
       result.input[key] = inputOption.inputs
     } else if (option.type === 'switch') {
-      const switchOption = option as SwitchOption
+      const switchOption = option as TaskSwitchOption
       result.switch[key] = [switchOption.cases[0]!.name, switchOption.cases[1]!.name]
     }
   }
@@ -152,7 +148,7 @@ function process_options(origin: Record<string, Option>): ProcessedOptions {
 
 watch(
   () => indexStore.SelectedTaskID,
-  (newTaskId) => {
+  async (newTaskId) => {
     // console.log(newTaskId)
     const interface_task = interfaceStore.interface?.task
     // console.log(interface_task)
@@ -162,9 +158,9 @@ watch(
     for (const i of interface_task!) {
       if (i.entry === newTaskId) {
         if (i.description) {
-          md.value = marked(i.description) as unknown as HTMLElement
+          md.value = await marked(i.description)
         } else {
-          md.value = marked('空空如也') as unknown as HTMLElement
+          md.value = await marked('空空如也')
         }
         option_dict.value = process_options(interfaceStore.getOptionList(i.entry))
         isEmpty.value = !(
