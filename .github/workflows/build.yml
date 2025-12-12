@@ -132,13 +132,13 @@ jobs:
         env:
           NUITKA_CCACHE_BINARY: ${{ env.ccache_symlinks_path }}
           NUITKA_CACHE_DIR: ${{ runner.temp }}/nuitka/cache
-        run: uv run python -m nuitka --standalone --windows-icon-from-ico=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --remove-output --lto=yes --experimental=debug-report-traceback --output-dir=build -o MFA-WebUI main.py
+        run: uv run python -m nuitka --standalone --windows-icon-from-ico=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --remove-output --experimental=debug-report-traceback --output-dir=build -o MFA-WebUI main.py
 
       - name: Build Executable
         if: ${{ matrix.platform != 'win' }}
         env:
           NUITKA_CACHE_DIR: ${{ runner.temp }}/nuitka/cache
-        run: uv run python -m nuitka --standalone --macos-app-icon=logo.jpg --linux-icon=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --remove-output --lto=yes --experimental=debug-report-traceback --output-dir=build -o MFA-WebUI main.py
+        run: uv run python -m nuitka --standalone --macos-app-icon=logo.jpg --linux-icon=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --remove-output --experimental=debug-report-traceback --output-dir=build -o MFA-WebUI main.py
 
       - name: Copy Resource
         if: ${{ matrix.platform != 'win' }}
