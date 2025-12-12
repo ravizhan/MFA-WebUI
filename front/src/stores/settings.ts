@@ -34,72 +34,70 @@ const defaultSettings: SettingsModel = {
   },
 }
 
+const DARK_MODE_KEY = 'darkMode'
+
+function getCachedDarkMode(): 'auto' | boolean {
+  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return 'auto'
+  const cached = localStorage.getItem(DARK_MODE_KEY)
+  if (cached === 'true') return true
+  if (cached === 'false') return false
+  return 'auto'
+}
+
 export const useSettingsStore = defineStore('settings', {
   state: () => ({
-    settings: { ...defaultSettings } as SettingsModel,
+    settings: {
+      ...defaultSettings,
+      ui: { darkMode: getCachedDarkMode() },
+    } as SettingsModel,
     loading: false,
     initialized: false,
-    systemPrefersDark: false,
-    systemThemeListenerReady: false,
+    systemPrefersDark:
+      typeof window !== 'undefined' && window.matchMedia
+        ? window.matchMedia('(prefers-color-scheme: dark)').matches
+        : false,
   }),
 
   getters: {
-    isDarkMode(): boolean {
-      if (this.settings.ui.darkMode === 'auto') {
-        return this.systemPrefersDark
+    isDarkMode(state): boolean {
+      if (state.settings.ui.darkMode === 'auto') {
+        return state.systemPrefersDark
       }
-      return Boolean(this.settings.ui.darkMode)
+      return !!state.settings.ui.darkMode
     },
   },
 
   actions: {
-    ensureSystemThemeListener() {
-      if (this.systemThemeListenerReady) return
-      if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
-        this.systemThemeListenerReady = true
-        this.systemPrefersDark = false
-        return
-      }
+    initSystemThemeListener() {
+      if (typeof window === 'undefined' || !window.matchMedia) return
 
       const media = window.matchMedia('(prefers-color-scheme: dark)')
-      this.systemPrefersDark = media.matches
-
-      const onChange = (e: MediaQueryListEvent) => {
+      const listener = (e: MediaQueryListEvent) => {
         this.systemPrefersDark = e.matches
       }
 
-      if (typeof media.addEventListener === 'function') {
-        media.addEventListener('change', onChange)
-      } else if (
-        typeof (media as unknown as { addListener?: (cb: (e: MediaQueryListEvent) => void) => void })
-          .addListener === 'function'
-      ) {
-        ;(
-          media as unknown as {
-            addListener: (cb: (e: MediaQueryListEvent) => void) => void
-          }
-        ).addListener(onChange)
-      }
-
-      this.systemThemeListenerReady = true
+      media.addEventListener('change', listener)
+      this.systemPrefersDark = media.matches
     },
 
     async fetchSettings() {
       this.loading = true
       try {
-        this.ensureSystemThemeListener()
         const data = await getSettings()
-        this.settings = {
-          update: { ...defaultSettings.update, ...data?.update },
-          notification: { ...defaultSettings.notification, ...data?.notification },
-          ui: { ...defaultSettings.ui, ...data?.ui },
-          runtime: { ...defaultSettings.runtime, ...data?.runtime },
-          about: { ...defaultSettings.about, ...data?.about },
+        if (data) {
+          this.settings = {
+            update: { ...defaultSettings.update, ...data.update },
+            notification: { ...defaultSettings.notification, ...data.notification },
+            ui: { ...defaultSettings.ui, ...data.ui },
+            runtime: { ...defaultSettings.runtime, ...data.runtime },
+            about: { ...defaultSettings.about, ...data.about },
+          }
+          // 确保本地缓存与服务器设置同步
+          localStorage.setItem(DARK_MODE_KEY, String(this.settings.ui.darkMode))
         }
         this.initialized = true
       } catch (error) {
         console.error('Failed to fetch settings:', error)
-        this.settings = { ...defaultSettings }
       } finally {
         this.loading = false
       }
@@ -112,6 +110,8 @@ export const useSettingsStore = defineStore('settings', {
         const success = await updateSettings(payload)
         if (success) {
           this.settings = { ...payload }
+          // 保存成功后更新本地缓存
+          localStorage.setItem(DARK_MODE_KEY, String(this.settings.ui.darkMode))
         }
         return success
       } catch (error) {
@@ -122,34 +122,36 @@ export const useSettingsStore = defineStore('settings', {
       }
     },
 
-    // 更新单个设置项的便捷方法
     async updateSetting<K extends keyof SettingsModel, P extends keyof SettingsModel[K]>(
       category: K,
       key: P,
       value: SettingsModel[K][P],
     ) {
-      if (category === 'ui' && key === 'darkMode' && value === 'auto') {
-        this.ensureSystemThemeListener()
-      }
-      const updatedSettings: SettingsModel = {
+      const updatedSettings = {
         ...this.settings,
         [category]: {
           ...this.settings[category],
           [key]: value,
         },
       }
+      
+      // 乐观更新：立即更新状态和缓存
       this.settings = updatedSettings
+      if (category === 'ui' && key === 'darkMode') {
+        localStorage.setItem(DARK_MODE_KEY, String(value))
+      }
+
+      // 后台保存
       return this.saveSettings(updatedSettings)
     },
 
     async resetSettings() {
       const resetData: SettingsModel = {
-        update: { ...defaultSettings.update },
-        notification: { ...defaultSettings.notification },
-        ui: { ...defaultSettings.ui },
-        runtime: { ...defaultSettings.runtime },
-        about: { ...this.settings.about },
+        ...defaultSettings,
+        about: { ...this.settings.about }, // 保留关于信息
       }
+      // 重置时也要更新缓存
+      localStorage.setItem(DARK_MODE_KEY, 'auto')
       this.settings = resetData
       return this.saveSettings(resetData)
     },

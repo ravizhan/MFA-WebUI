@@ -274,8 +274,10 @@ import type { SettingsModel } from '../types/settings'
 
 type EditableCategory = Exclude<keyof SettingsModel, 'about'>
 type MaybeNullForNumbers<T> = T extends number ? T | null : T
-type EditableSettingValue<K extends EditableCategory, P extends keyof SettingsModel[K]> =
-  MaybeNullForNumbers<SettingsModel[K][P]>
+type EditableSettingValue<
+  K extends EditableCategory,
+  P extends keyof SettingsModel[K],
+> = MaybeNullForNumbers<SettingsModel[K][P]>
 
 const message = useMessage()
 const dialog = useDialog()
@@ -306,10 +308,7 @@ onMounted(() => {
   }
 })
 
-const handleSettingChange = async <
-  K extends EditableCategory,
-  P extends keyof SettingsModel[K],
->(
+const handleSettingChange = async <K extends EditableCategory, P extends keyof SettingsModel[K]>(
   category: K,
   key: P,
   value: EditableSettingValue<K, P>,

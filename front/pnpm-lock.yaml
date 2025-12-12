@@ -8,9 +8,6 @@ importers:
 
   .:
     dependencies:
-      '@unocss/reset':
-        specifier: ^66.5.10
-        version: 66.5.10
       clipboard:
         specifier: ^2.0.11
         version: 2.0.11

@@ -86,7 +86,7 @@ function setupImagePreview() {
   if (!mdContainer.value) return
   const images = mdContainer.value.querySelectorAll('img.preview-image')
   images.forEach((img) => {
-    (img as HTMLImageElement).onclick = () => {
+    ;(img as HTMLImageElement).onclick = () => {
       previewSrc.value = (img as HTMLImageElement).src
       nextTick(() => {
         previewImageRef.value?.click()
@@ -98,7 +98,7 @@ function setupImagePreview() {
 marked.setOptions({
   renderer: render,
   gfm: true,
-  pedantic: false
+  pedantic: false,
 })
 
 type ProcessedOptions = {

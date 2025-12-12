@@ -1,26 +1,26 @@
 <template>
   <n-config-provider :theme="naiveTheme">
-  <n-message-provider>
-    <n-dialog-provider>
-      <div class="lg:pt-10 lg:pb-10 pt-0 pb-0">
-        <n-layout class="lg:shadow-3xl lg:w-[80vw] w-full m-auto m-0 pt-0">
-          <n-layout-header bordered>
-            <div class="text-align-center mt-3 text-2xl">{{ name }}</div>
-            <n-menu mode="horizontal" class="justify-between" :options="menuOptions" />
-          </n-layout-header>
-          <n-layout>
-            <router-view></router-view>
+    <n-message-provider>
+      <n-dialog-provider>
+        <div class="lg:pt-10 lg:pb-10 pt-0 pb-0">
+          <n-layout class="lg:shadow-3xl lg:w-[80vw] w-full m-auto m-0 pt-0">
+            <n-layout-header bordered>
+              <div class="text-align-center mt-3 text-2xl">{{ name }}</div>
+              <n-menu mode="horizontal" class="justify-between" :options="menuOptions" />
+            </n-layout-header>
+            <n-layout>
+              <router-view></router-view>
+            </n-layout>
+            <n-layout-footer bordered class="text-align-center">
+              <a href="https://github.com/ravizhan/MFA-WebUI" target="_blank">
+                Powered by MFA-WebUI
+              </a>
+            </n-layout-footer>
           </n-layout>
-          <n-layout-footer bordered class="text-align-center">
-            <a href="https://github.com/ravizhan/MFA-WebUI" target="_blank">
-              Powered by MFA-WebUI
-            </a>
-          </n-layout-footer>
-        </n-layout>
-      </div>
-    </n-dialog-provider>
-  </n-message-provider>
-   <n-global-style />
+        </div>
+      </n-dialog-provider>
+    </n-message-provider>
+    <n-global-style />
   </n-config-provider>
 </template>
 
@@ -70,6 +70,7 @@ const handleResize = () => {
   screenWidth.value = window.innerWidth
 }
 onMounted(() => {
+  settingsStore.initSystemThemeListener()
   interfaceStore.setInterface()
   if (!settingsStore.initialized) {
     settingsStore.fetchSettings()
