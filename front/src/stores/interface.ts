@@ -62,6 +62,6 @@ export const useInterfaceStore = defineStore('interface', {
         }
       }
       return result
-    }
+    },
   },
 })

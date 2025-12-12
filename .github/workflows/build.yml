@@ -8,6 +8,8 @@ on:
 
 jobs:
   vite-build:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     outputs:
       cache-key: ${{ steps.Store-Cache-Key.outputs.cache-key }}
@@ -51,6 +53,8 @@ jobs:
   build:
     env:
       UV_INDEX: https://pypi.org/simple
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:

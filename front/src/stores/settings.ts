@@ -92,7 +92,7 @@ export const useSettingsStore = defineStore('settings', {
     async updateSetting<K extends keyof SettingsModel, P extends keyof SettingsModel[K]>(
       category: K,
       key: P,
-      value: SettingsModel[K][P]
+      value: SettingsModel[K][P],
     ) {
       const updatedSettings: SettingsModel = {
         ...this.settings,

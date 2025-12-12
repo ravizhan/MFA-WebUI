@@ -100,7 +100,7 @@ export function getResource(): Promise<string[]> {
 }
 
 export function postResource(name: string): void {
-  fetch('/api/resource?name='+name, {
+  fetch('/api/resource?name=' + name, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -162,7 +162,11 @@ export function updateSettings(settings: SettingsModel): Promise<boolean> {
 }
 
 // 检查更新
-export function checkUpdate(): Promise<{ hasUpdate: boolean; version?: string; changelog?: string }> {
+export function checkUpdate(): Promise<{
+  hasUpdate: boolean
+  version?: string
+  changelog?: string
+}> {
   return fetch('/api/update/check', { method: 'GET' })
     .then((res) => res.json())
     .then((data) => ({

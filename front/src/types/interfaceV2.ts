@@ -131,4 +131,3 @@ export interface InterfaceModel {
   task: Task[]
   option?: Record<string, Option>
 }
-

@@ -47,19 +47,20 @@
     </n-scrollbar>
   </n-card>
   <!-- 隐藏的 n-image 用于预览 -->
-  <n-image
-    ref="previewImageRef"
-    :src="previewSrc"
-    :show-toolbar="true"
-    style="display: none;"
-  />
+  <n-image ref="previewImageRef" :src="previewSrc" :show-toolbar="true" style="display: none" />
 </template>
 <script setup lang="ts">
 import { marked } from 'marked'
 import { ref, watch, nextTick } from 'vue'
 import { useInterfaceStore } from '../stores/interface.ts'
 import { useIndexStore } from '../stores'
-import type { Option, SelectOption, InputOption, SwitchOption, InputCase } from '../types/interfaceV2.ts'
+import type {
+  Option,
+  SelectOption,
+  InputOption,
+  SwitchOption,
+  InputCase,
+} from '../types/interfaceV2.ts'
 import { storeToRefs } from 'pinia'
 
 const interfaceStore = useInterfaceStore()
@@ -71,7 +72,15 @@ const previewImageRef = ref<InstanceType<typeof import('naive-ui').NImage> | nul
 const previewSrc = ref('')
 const render = new marked.Renderer()
 
-render.image = function({ href, title, text }: { href: string; title: string | null; text: string }) {
+render.image = function ({
+  href,
+  title,
+  text,
+}: {
+  href: string
+  title: string | null
+  text: string
+}) {
   const titleAttr = title ? ` title="${title}"` : ''
   const altAttr = text ? ` alt="${text}"` : ''
   return `<img src="${href}"${titleAttr}${altAttr} class="preview-image" style="max-width: 100%; object-fit: contain; cursor: pointer;" />`
