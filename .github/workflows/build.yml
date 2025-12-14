@@ -127,7 +127,7 @@ jobs:
           restore-keys: |
             nuitka-${{ matrix.platform }}-${{ matrix.arch }}-
 
-      - name: Build Executable for Windows
+      - name: Build Executable
         if: ${{ matrix.platform == 'win' }}
         env:
           NUITKA_CCACHE_BINARY: ${{ env.ccache_symlinks_path }}
@@ -146,11 +146,25 @@ jobs:
           cp -r config build/main.dist/config
           cp -r page build/main.dist/page
 
-      - name: Copy Resource for Windows
+      - name: Copy Resource
         if: ${{ matrix.platform == 'win' }}
         run: |
           xcopy .\config\ build\main.dist\config\ /S /I
           xcopy .\page\ build\main.dist\page\ /S /I
+
+      - name: Download MaaAgentBinary
+        uses: schmiddim/action-wget-unzip@v2
+        with:
+          url: 'https://github.com/MaaXYZ/MaaAgentBinary/archive/refs/heads/main.zip'
+          destination: build\main.dist
+
+      - name: Rename MaaAgentBinary folder
+        if: ${{ matrix.platform == 'win' }}
+        run: ren build\main.dist\MaaAgentBinary-main MaaAgentBinary
+
+      - name: Rename MaaAgentBinary folder
+        if: ${{ matrix.platform != 'win' }}
+        run: mv build/main.dist/MaaAgentBinary-main build/main.dist/MaaAgentBinary
 
       - name: Create Version file
         run: echo "${{ github.ref_name }}" >> build/main.dist/version
