@@ -147,7 +147,6 @@ watch(
         option_dict.value = process_options(interfaceStore.getOptionList(i.entry))
         isEmpty.value = !(
           Object.keys(option_dict.value.select).length > 0 ||
-          Object.keys(option_dict.value.checkbox).length > 0 ||
           Object.keys(option_dict.value.input).length > 0 ||
           Object.keys(option_dict.value.switch).length > 0
         )

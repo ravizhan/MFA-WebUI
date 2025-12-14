@@ -12,12 +12,10 @@ export default defineConfig({
     vue(),
     UnoCSS(),
     AutoImport({
-      imports: [
-        'vue',
-      ]
+      imports: ["vue"],
     }),
     Components({
-      resolvers: [NaiveUiResolver()]
+      resolvers: [NaiveUiResolver()],
     }),
     visualizer({
       gzipSize: true,
@@ -27,23 +25,15 @@ export default defineConfig({
     }),
   ],
   build: {
-    outDir:'../page',
-    rollupOptions:{
-      output:{
-        manualChunks: {
-          'vue': ['vue', 'vue-router', 'pinia'],
-          'naive-ui': ['naive-ui'],
-        }
-      }
-    }
+    outDir: "../page",
   },
   server: {
     proxy: {
-      '/api': {
-        target: 'http://localhost:55666',
+      "/api": {
+        target: "http://localhost:55666",
         changeOrigin: true,
-        ws: true
-      }
-    }
-  }
+        ws: true,
+      },
+    },
+  },
 })

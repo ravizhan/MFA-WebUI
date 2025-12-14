@@ -50,13 +50,14 @@ export const useInterfaceStore = defineStore("interface", {
       })
     },
     getOptionList(entry: string): Record<string, Option> {
-      const result: Record<string, Option> = {}
+      let result: Record<string, Option> = {}
+      if (!this.interface?.option) return result
       for (const task of this.interface?.task || []) {
         if (task.entry === entry && task.option) {
           task.option.forEach((optionName) => {
-            const optionValue = this.interface?.option[optionName]
+            const optionValue = this.interface.option?.[optionName]
             if (optionValue !== undefined) {
-              result[optionName] = optionValue
+              result = Object.assign(result, { optionName: optionValue })
             }
           })
         }
