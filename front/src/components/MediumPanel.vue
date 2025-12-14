@@ -2,30 +2,7 @@
   <div class="col-name">任务设置</div>
   <n-card hoverable>
     <n-list v-if="!isEmpty" hoverable>
-      <n-list-item v-for="(value, k) in option_dict['select']" :key="k">
-        <div>{{ k }}</div>
-        <n-select :options="value" v-model:value="options[k]" />
-      </n-list-item>
-      <n-list-item v-for="(value, k) in option_dict['input']" :key="k">
-        <div>{{ k }}</div>
-        <div class="flex flex-col gap-2 w-full">
-          <div v-for="input in value" :key="input.name" class="flex flex-col gap-1">
-            <span class="text-sm text-gray-500">{{ input.label || input.name }}</span>
-            <n-input v-model:value="options[`${k}_${input.name}`]" />
-          </div>
-        </div>
-      </n-list-item>
-      <n-list-item v-for="(switchValues, k) in option_dict['switch']" :key="k">
-        <div>{{ k }}</div>
-        <template #suffix>
-          <n-switch
-            :checked-value="switchValues[1]"
-            :unchecked-value="switchValues[0]"
-            :round="false"
-            v-model:value="options[k]"
-          />
-        </template>
-      </n-list-item>
+      <OptionItem v-for="optName in rootOptions" :key="optName" :name="optName" />
     </n-list>
     <div v-else class="py-[12px] px-[20px]">空空如也</div>
   </n-card>
@@ -45,15 +22,7 @@ import { ref, watch, nextTick } from "vue"
 import { useInterfaceStore } from "../stores/interface.ts"
 import { useIndexStore } from "../stores"
 import { NImage } from "naive-ui"
-import type { SelectOption as NaiveSelectOption } from "naive-ui"
-import type {
-  Option,
-  SelectOption as TaskSelectOption,
-  InputOption as TaskInputOption,
-  SwitchOption as TaskSwitchOption,
-  InputCase,
-} from "../types/interfaceV2.ts"
-import { storeToRefs } from "pinia"
+import OptionItem from "./OptionItem.vue"
 
 const interfaceStore = useInterfaceStore()
 const indexStore = useIndexStore()
@@ -90,43 +59,7 @@ marked.setOptions({
   pedantic: false,
 })
 
-type ProcessedOptions = {
-  select: Record<string, NaiveSelectOption[]>
-  input: Record<string, InputCase[]>
-  switch: Record<string, [string, string]>
-}
-const option_dict = ref<ProcessedOptions>({
-  select: {},
-  input: {},
-  switch: {},
-})
-const options = storeToRefs(interfaceStore).options
-
-function process_options(origin: Record<string, Option>): ProcessedOptions {
-  const result: ProcessedOptions = {
-    select: {},
-    input: {},
-    switch: {},
-  }
-  for (const key in origin) {
-    const option = origin[key]!
-    if (option.type === "select") {
-      const selectOption = option as TaskSelectOption
-      const cases = selectOption.cases
-      result.select[key] = cases.map((item) => ({
-        label: item.label || item.name,
-        value: item.name,
-      }))
-    } else if (option.type === "input") {
-      const inputOption = option as TaskInputOption
-      result.input[key] = inputOption.inputs
-    } else if (option.type === "switch") {
-      const switchOption = option as TaskSwitchOption
-      result.switch[key] = [switchOption.cases[0].name, switchOption.cases[1].name]
-    }
-  }
-  return result
-}
+const rootOptions = ref<string[]>([])
 
 watch(
   () => indexStore.SelectedTaskID,
@@ -144,12 +77,10 @@ watch(
         } else {
           md.value = await marked("空空如也")
         }
-        option_dict.value = process_options(interfaceStore.getOptionList(i.entry))
-        isEmpty.value = !(
-          Object.keys(option_dict.value.select).length > 0 ||
-          Object.keys(option_dict.value.input).length > 0 ||
-          Object.keys(option_dict.value.switch).length > 0
-        )
+        
+        rootOptions.value = i.option || []
+        isEmpty.value = rootOptions.value.length === 0
+        
         nextTick(() => {
           setupImagePreview()
         })

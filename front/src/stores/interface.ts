@@ -37,9 +37,8 @@ export const useInterfaceStore = defineStore("interface", {
         for (const key in this.interface.option) {
           const option = this.interface.option[key]!
           if (option.type === "select") {
-            this.options[key] = option.default_case || ""
+            this.options[key] = option.default_case || option.cases[0]?.name || ""
           } else if (option.type === "input") {
-            // 为 input 类型的每个输入项设置默认值
             for (const input of option.inputs) {
               this.options[`${key}_${input.name}`] = input.default || ""
             }
@@ -50,16 +49,29 @@ export const useInterfaceStore = defineStore("interface", {
       })
     },
     getOptionList(entry: string): Record<string, Option> {
-      let result: Record<string, Option> = {}
+      const result: Record<string, Option> = {}
       if (!this.interface?.option) return result
+
+      const collectOptions = (optionNames: string[]) => {
+        for (const optionName of optionNames) {
+          if (result[optionName]) continue
+          const optionValue = this.interface.option?.[optionName]
+          if (optionValue !== undefined) {
+            result[optionName] = optionValue
+            if (optionValue.type === "switch" || optionValue.type === "select") {
+              for (const caseItem of optionValue.cases) {
+                if (caseItem.option) {
+                  collectOptions(caseItem.option)
+                }
+              }
+            }
+          }
+        }
+      }
+
       for (const task of this.interface?.task || []) {
         if (task.entry === entry && task.option) {
-          task.option.forEach((optionName) => {
-            const optionValue = this.interface.option?.[optionName]
-            if (optionValue !== undefined) {
-              result = Object.assign(result, { optionName: optionValue })
-            }
-          })
+          collectOptions(task.option)
         }
       }
       return result
