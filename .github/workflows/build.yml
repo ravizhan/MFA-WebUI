@@ -114,7 +114,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version-file: "pyproject.toml"
+          python-version-file: ".python-version"
 
       - name: Install Dependencies
         run: uv sync
@@ -140,31 +140,8 @@ jobs:
           NUITKA_CACHE_DIR: ${{ runner.temp }}/nuitka/cache
         run: uv run python -m nuitka --standalone --macos-app-icon=logo.jpg --linux-icon=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --remove-output --experimental=debug-report-traceback --output-dir=build -o MFA-WebUI main.py
 
-      - name: Copy Resource
-        if: ${{ matrix.platform != 'win' }}
-        run: |
-          cp -r config build/main.dist/config
-          cp -r page build/main.dist/page
-
-      - name: Copy Resource
-        if: ${{ matrix.platform == 'win' }}
-        run: |
-          xcopy .\config\ build\main.dist\config\ /S /I
-          xcopy .\page\ build\main.dist\page\ /S /I
-
-      - name: Download MaaAgentBinary
-        uses: schmiddim/action-wget-unzip@v2
-        with:
-          url: 'https://github.com/MaaXYZ/MaaAgentBinary/archive/refs/heads/main.zip'
-          destination: build\main.dist
-
-      - name: Rename MaaAgentBinary folder
-        if: ${{ matrix.platform == 'win' }}
-        run: ren build\main.dist\MaaAgentBinary-main MaaAgentBinary
-
-      - name: Rename MaaAgentBinary folder
-        if: ${{ matrix.platform != 'win' }}
-        run: mv build/main.dist/MaaAgentBinary-main build/main.dist/MaaAgentBinary
+      - name: Copy Resources
+        run: uv run ./scripts/copy_resources.py
 
       - name: Create Version file
         run: echo "${{ github.ref_name }}" >> build/main.dist/version

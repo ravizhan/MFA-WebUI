@@ -57,7 +57,7 @@ wheels = [
 
 [[package]]
 name = "fastapi"
-version = "0.124.2"
+version = "0.124.4"
 source = { registry = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/" }
 dependencies = [
     { name = "annotated-doc" },
@@ -65,9 +65,9 @@ dependencies = [
     { name = "starlette" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/58/b7/4dbca3f9d847ba9876dcb7098c13a4c6c86ee8db148c923fab78e27748d3/fastapi-0.124.2.tar.gz", hash = "sha256:72e188f01f360e2f59da51c8822cbe4bca210c35daaae6321b1b724109101c00", size = 361867, upload-time = "2025-12-10T12:10:10.676Z" }
+sdist = { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/cd/21/ade3ff6745a82ea8ad88552b4139d27941549e4f19125879f848ac8f3c3d/fastapi-0.124.4.tar.gz", hash = "sha256:0e9422e8d6b797515f33f500309f6e1c98ee4e85563ba0f2debb282df6343763", size = 378460, upload-time = "2025-12-12T15:00:43.891Z" }
 wheels = [
-    { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/25/c5/8a5231197b81943b2df126cc8ea2083262e004bee3a39cf85a471392d145/fastapi-0.124.2-py3-none-any.whl", hash = "sha256:6314385777a507bb19b34bd064829fddaea0eea54436deb632b5de587554055c", size = 112711, upload-time = "2025-12-10T12:10:08.855Z" },
+    { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/3e/57/aa70121b5008f44031be645a61a7c4abc24e0e888ad3fc8fda916f4d188e/fastapi-0.124.4-py3-none-any.whl", hash = "sha256:6d1e703698443ccb89e50abe4893f3c84d9d6689c0cf1ca4fad6d3c15cf69f15", size = 113281, upload-time = "2025-12-12T15:00:42.44Z" },
 ]
 
 [[package]]
@@ -111,7 +111,7 @@ wheels = [
 
 [[package]]
 name = "maafw"
-version = "5.2.5"
+version = "5.2.6"
 source = { registry = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple/" }
 dependencies = [
     { name = "maaagentbinary" },
@@ -119,12 +119,12 @@ dependencies = [
     { name = "strenum" },
 ]
 wheels = [
-    { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/24/ca/00fab07d7bfee765d98497567d3349f249e61770b8d90dfac88e330d10bb/maafw-5.2.5-py3-none-macosx_13_0_arm64.whl", hash = "sha256:bf4f3806b3825f4bbbb422e6ee1d0fcff3fddb665e46bce709ed06a12a18bbda", size = 15192648, upload-time = "2025-12-11T17:10:53.364Z" },
-    { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/22/d0/374111210946c09eabc1abf5defe9cc2574082e3af81dd38c2e9ed8f54a8/maafw-5.2.5-py3-none-macosx_13_0_x86_64.whl", hash = "sha256:fec4d4921d17ccaddd9979826b9127e91bff907df039a83812e3c109d0e113cd", size = 17134409, upload-time = "2025-12-11T17:10:55.507Z" },
-    { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/54/39/4a16db9c177b1fe4d88a6caa4343f66c84691aa8b3919304615a63c798a6/maafw-5.2.5-py3-none-manylinux2014_aarch64.whl", hash = "sha256:13f9e705a47513964a4c86bc71ff8c59d3efc2acaa4702afb3f0cb2380e5f5f2", size = 52036486, upload-time = "2025-12-11T17:10:58.191Z" },
-    { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/60/d6/29408680611abe318f342b25cbcb387c3bd8e279f1a94494a82eb6cff5c1/maafw-5.2.5-py3-none-manylinux2014_x86_64.whl", hash = "sha256:cf27ffe70e55e0e575468a512ab048de0b826e5f8372308b19dc26e089e2ee2a", size = 53183215, upload-time = "2025-12-11T17:11:03.599Z" },
-    { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/08/92/d3ac753117964003417b07d84d65261129694ba8ac79541b408dd33791f1/maafw-5.2.5-py3-none-win_amd64.whl", hash = "sha256:ca0b6b0199840e82340ee8e979e000546c565b92e2e3f434c9cdbe517271f328", size = 25212068, upload-time = "2025-12-11T17:11:06.284Z" },
-    { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/e8/f0/4ae2a21fc51a5fb0eb113e437af1c20aa59e6cbefb0523ae4b67272b77e7/maafw-5.2.5-py3-none-win_arm64.whl", hash = "sha256:93e7de5a3494adb19776a70894318efdc456c67d00a43dbbf77e56bf89d46934", size = 23922900, upload-time = "2025-12-11T17:11:08.842Z" },
+    { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/3e/93/45dd8b5796535cf603e1e3b71f4dfe786055835311f6ca95c1ca2a898a81/maafw-5.2.6-py3-none-macosx_13_0_arm64.whl", hash = "sha256:b6df54bfc3a632f70d0344b29d4203b9589b7c09ee0210d75e63c1bc556d2dcf", size = 15193860, upload-time = "2025-12-13T16:37:39.795Z" },
+    { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/0f/68/158c10b2cba0624d8e6dee63c5a6bc166b0b263e2e1a6b7c0a385db6e97d/maafw-5.2.6-py3-none-macosx_13_0_x86_64.whl", hash = "sha256:a3a7b9456b89be33a3e8225ea5da82e6c09485dcc15f7cf27ead33d592bf0d5d", size = 17135774, upload-time = "2025-12-13T16:37:43.715Z" },
+    { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/27/4c/a7b16f3118a8a1d56905712c9f53d805da926e4e64644cbb1b4ce46171d9/maafw-5.2.6-py3-none-manylinux2014_aarch64.whl", hash = "sha256:dfa481bca4c1ec6997a595f89fcf50e26e5ea06a07d588bf610ef49921ec1e17", size = 15996471, upload-time = "2025-12-13T16:37:45.837Z" },
+    { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/77/38/b487abb137287f204bae533825a60e077116f2cbc5a1ce41c57fafb84dcf/maafw-5.2.6-py3-none-manylinux2014_x86_64.whl", hash = "sha256:a52fd0774f3f2447bdab88346bd2a0e7697eb5efd190bcfb947e1066b2f52827", size = 17849298, upload-time = "2025-12-13T16:37:47.765Z" },
+    { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/29/fc/d0775df391854ca3cae5a1f15df1decfdace549bbe06ed9cdf2c0b5eb892/maafw-5.2.6-py3-none-win_amd64.whl", hash = "sha256:30faabf67c1523b29dc1c7ccc4eaaca5c50a500d648980d2d5231e6f7d276cc3", size = 25213706, upload-time = "2025-12-13T16:37:50.322Z" },
+    { url = "https://mirrors.tuna.tsinghua.edu.cn/pypi/web/packages/72/98/3f955fa7cccdab8c0558d4ae134be944bd6f4ac734ac9f7ad91244f452b1/maafw-5.2.6-py3-none-win_arm64.whl", hash = "sha256:38cd40a531f52c97272bbcd2daace6f2a1c78194c5e709340ac903198ee03ca9", size = 23925371, upload-time = "2025-12-13T16:37:53.39Z" },
 ]
 
 [[package]]
@@ -143,8 +143,8 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "fastapi", specifier = ">=0.124.2" },
-    { name = "maafw", specifier = ">=5.2.5" },
+    { name = "fastapi", specifier = ">=0.124.4" },
+    { name = "maafw", specifier = ">=5.2.6" },
     { name = "nuitka", extras = ["all"], specifier = ">=2.8.9" },
     { name = "numpy", specifier = ">=2.3.5" },
     { name = "plyer", specifier = ">=2.1.0" },
