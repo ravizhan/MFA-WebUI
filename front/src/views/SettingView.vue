@@ -211,13 +211,13 @@
           <n-card id="about" class="mb-6 scroll-mt-5 last:mb-0" title="关于我们">
             <n-descriptions bordered :column="1">
               <n-descriptions-item label="版本">
-                {{ settings.about.version || '未知' }}
+                {{ settings.about.version || "未知" }}
               </n-descriptions-item>
               <n-descriptions-item label="作者">
-                {{ settings.about.author || '未知' }}
+                {{ settings.about.author || "未知" }}
               </n-descriptions-item>
               <n-descriptions-item label="开源协议">
-                {{ settings.about.license || 'MIT' }}
+                {{ settings.about.license || "MIT" }}
               </n-descriptions-item>
               <n-descriptions-item label="项目主页">
                 <n-button
@@ -230,7 +230,7 @@
                   <template #icon>
                     <n-icon><div class="i-mdi-github" /></n-icon>
                   </template>
-                  {{ settings.about.github || 'https://github.com/ravizhan/MFA-WebUI' }}
+                  {{ settings.about.github || "https://github.com/ravizhan/MFA-WebUI" }}
                 </n-button>
               </n-descriptions-item>
               <n-descriptions-item label="问题反馈">
@@ -251,7 +251,7 @@
                 {{ settings.about.contact }}
               </n-descriptions-item>
               <n-descriptions-item label="项目简介">
-                {{ settings.about.description || '基于 MAA 框架的 Web UI 界面' }}
+                {{ settings.about.description || "基于 MAA 框架的 Web UI 界面" }}
               </n-descriptions-item>
             </n-descriptions>
             <n-divider />
@@ -266,13 +266,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
-import { useSettingsStore } from '../stores/settings'
-import { checkUpdate } from '../script/api'
-import { useMessage, useDialog } from 'naive-ui'
-import type { SettingsModel } from '../types/settings'
+import { ref, onMounted, computed } from "vue"
+import { useSettingsStore } from "../stores/settings"
+import { checkUpdate } from "../script/api"
+import { useMessage, useDialog } from "naive-ui"
+import type { SettingsModel } from "../types/settings"
 
-type EditableCategory = Exclude<keyof SettingsModel, 'about'>
+type EditableCategory = Exclude<keyof SettingsModel, "about">
 type MaybeNullForNumbers<T> = T extends number ? T | null : T
 type EditableSettingValue<
   K extends EditableCategory,
@@ -283,7 +283,7 @@ const message = useMessage()
 const dialog = useDialog()
 const settingsStore = useSettingsStore()
 
-if (typeof window !== 'undefined') {
+if (typeof window !== "undefined") {
   window.$message = message
 }
 
@@ -292,14 +292,14 @@ const settings = computed<SettingsModel>(() => settingsStore.settings)
 const checkingUpdate = ref(false)
 
 const updateChannelOptions = [
-  { label: '稳定版', value: 'stable' },
-  { label: '测试版', value: 'beta' },
+  { label: "稳定版", value: "stable" },
+  { label: "测试版", value: "beta" },
 ]
 
 const darkModeOptions = [
-  { label: '跟随系统', value: 'auto' },
-  { label: '关', value: false },
-  { label: '开', value: true },
+  { label: "跟随系统", value: "auto" },
+  { label: "关", value: false },
+  { label: "开", value: true },
 ]
 
 onMounted(() => {
@@ -323,39 +323,39 @@ const checkForUpdate = async () => {
     const result = await checkUpdate()
     if (result.hasUpdate) {
       dialog.info({
-        title: '发现新版本',
-        content: `新版本 ${result.version} 已发布！\n\n更新日志：\n${result.changelog || '暂无'}`,
-        positiveText: '前往更新',
-        negativeText: '稍后',
+        title: "发现新版本",
+        content: `新版本 ${result.version} 已发布！\n\n更新日志：\n${result.changelog || "暂无"}`,
+        positiveText: "前往更新",
+        negativeText: "稍后",
         onPositiveClick: () => {
-          window.open(settings.value.about.github, '_blank')
+          window.open(settings.value.about.github, "_blank")
         },
       })
     } else {
-      message.success('当前已是最新版本')
+      message.success("当前已是最新版本")
     }
   } catch (error) {
-    message.error('检查更新失败')
+    message.error("检查更新失败")
   } finally {
     checkingUpdate.value = false
   }
 }
 
 const testNotification = () => {
-  message.info('正在发送测试通知...')
+  message.info("正在发送测试通知...")
   // TODO: 调用后端测试通知接口
 }
 
 const handleResetSettings = () => {
   dialog.warning({
-    title: '确认重置',
-    content: '确定要将所有设置重置为默认值吗？此操作不可撤销。',
-    positiveText: '确定重置',
-    negativeText: '取消',
+    title: "确认重置",
+    content: "确定要将所有设置重置为默认值吗？此操作不可撤销。",
+    positiveText: "确定重置",
+    negativeText: "取消",
     onPositiveClick: async () => {
       const success = await settingsStore.resetSettings()
       if (success) {
-        message.success('设置已重置为默认值')
+        message.success("设置已重置为默认值")
       }
     },
   })

@@ -1,7 +1,7 @@
 // 更新设置
 export interface UpdateSettings {
   autoUpdate: boolean
-  updateChannel: 'stable' | 'beta' | 'dev'
+  updateChannel: "stable" | "beta" | "dev"
   proxy: string
 }
 
@@ -15,7 +15,7 @@ export interface NotificationSettings {
 
 // 界面设置
 export interface UISettings {
-  darkMode: boolean | 'auto'
+  darkMode: boolean | "auto"
 }
 
 // 运行设置

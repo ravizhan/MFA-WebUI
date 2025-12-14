@@ -72,7 +72,7 @@
   </n-card>
 </template>
 <script setup lang="ts">
-import { watch, ref } from 'vue'
+import { watch, ref } from "vue"
 import {
   getDevices,
   postDevices,
@@ -81,13 +81,13 @@ import {
   type Device,
   getResource,
   postResource,
-} from '../script/api'
-import { VueDraggable } from 'vue-draggable-plus'
-import { useInterfaceStore, type TaskListItem } from '../stores/interface.ts'
-import { useIndexStore } from '../stores'
+} from "../script/api"
+import { VueDraggable } from "vue-draggable-plus"
+import { useInterfaceStore, type TaskListItem } from "../stores/interface.ts"
+import { useIndexStore } from "../stores"
 
-import { useMessage } from 'naive-ui'
-if (typeof window !== 'undefined') {
+import { useMessage } from "naive-ui"
+if (typeof window !== "undefined") {
   window.$message = useMessage()
 }
 
@@ -118,7 +118,7 @@ function get_device() {
   getDevices().then((devices_data) => {
     for (const device of devices_data) {
       devices_list.value?.push({
-        label: device.name + ' ' + device.address,
+        label: device.name + " " + device.address,
         value: device,
       })
     }
@@ -147,7 +147,7 @@ function get_resource() {
 function post_resource() {
   if (!resource.value) {
     // @ts-ignore
-    window.$message.error('请选择一个资源')
+    window.$message.error("请选择一个资源")
     return
   } else {
     postResource(resource.value)
@@ -158,7 +158,7 @@ function StartTask() {
   const selectedTasks = task_list.value.filter((task) => task.checked).map((task) => task.id)
   if (selectedTasks.length === 0) {
     // @ts-ignore
-    window.$message.error('请至少选择一个任务')
+    window.$message.error("请至少选择一个任务")
     return
   }
   startTask(selectedTasks, interfaceStore.options)

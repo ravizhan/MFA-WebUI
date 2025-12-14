@@ -1,10 +1,10 @@
-import { defineStore } from 'pinia'
+import { defineStore } from "pinia"
 
-export const useIndexStore = defineStore('index', {
+export const useIndexStore = defineStore("index", {
   state: () => {
     return {
-      SelectedTaskID: '',
-      RunningLog: '',
+      SelectedTaskID: "",
+      RunningLog: "",
     }
   },
   actions: {
@@ -12,7 +12,7 @@ export const useIndexStore = defineStore('index', {
       this.SelectedTaskID = id
     },
     UpdateLog(log: string) {
-      this.RunningLog += log + '\n'
+      this.RunningLog += log + "\n"
     },
   },
 })

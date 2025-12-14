@@ -1,21 +1,21 @@
-import { defineStore } from 'pinia'
-import { getSettings, updateSettings } from '../script/api'
-import type { SettingsModel } from '../types/settings'
+import { defineStore } from "pinia"
+import { getSettings, updateSettings } from "../script/api"
+import type { SettingsModel } from "../types/settings"
 
 const defaultSettings: SettingsModel = {
   update: {
     autoUpdate: true,
-    updateChannel: 'stable',
-    proxy: '',
+    updateChannel: "stable",
+    proxy: "",
   },
   notification: {
     enabled: true,
-    webhook: '',
+    webhook: "",
     notifyOnComplete: true,
     notifyOnError: true,
   },
   ui: {
-    darkMode: 'auto',
+    darkMode: "auto",
   },
   runtime: {
     timeout: 300,
@@ -24,27 +24,27 @@ const defaultSettings: SettingsModel = {
     maxRetryCount: 3,
   },
   about: {
-    version: '',
-    author: '',
-    github: '',
-    license: '',
-    description: '',
-    contact: '',
-    issueUrl: '',
+    version: "",
+    author: "",
+    github: "",
+    license: "",
+    description: "",
+    contact: "",
+    issueUrl: "",
   },
 }
 
-const DARK_MODE_KEY = 'darkMode'
+const DARK_MODE_KEY = "darkMode"
 
-function getCachedDarkMode(): 'auto' | boolean {
-  if (typeof window === 'undefined' || typeof localStorage === 'undefined') return 'auto'
+function getCachedDarkMode(): "auto" | boolean {
+  if (typeof window === "undefined" || typeof localStorage === "undefined") return "auto"
   const cached = localStorage.getItem(DARK_MODE_KEY)
-  if (cached === 'true') return true
-  if (cached === 'false') return false
-  return 'auto'
+  if (cached === "true") return true
+  if (cached === "false") return false
+  return "auto"
 }
 
-export const useSettingsStore = defineStore('settings', {
+export const useSettingsStore = defineStore("settings", {
   state: () => ({
     settings: {
       ...defaultSettings,
@@ -53,14 +53,14 @@ export const useSettingsStore = defineStore('settings', {
     loading: false,
     initialized: false,
     systemPrefersDark:
-      typeof window !== 'undefined' && window.matchMedia
-        ? window.matchMedia('(prefers-color-scheme: dark)').matches
+      typeof window !== "undefined" && window.matchMedia
+        ? window.matchMedia("(prefers-color-scheme: dark)").matches
         : false,
   }),
 
   getters: {
     isDarkMode(state): boolean {
-      if (state.settings.ui.darkMode === 'auto') {
+      if (state.settings.ui.darkMode === "auto") {
         return state.systemPrefersDark
       }
       return !!state.settings.ui.darkMode
@@ -69,14 +69,14 @@ export const useSettingsStore = defineStore('settings', {
 
   actions: {
     initSystemThemeListener() {
-      if (typeof window === 'undefined' || !window.matchMedia) return
+      if (typeof window === "undefined" || !window.matchMedia) return
 
-      const media = window.matchMedia('(prefers-color-scheme: dark)')
+      const media = window.matchMedia("(prefers-color-scheme: dark)")
       const listener = (e: MediaQueryListEvent) => {
         this.systemPrefersDark = e.matches
       }
 
-      media.addEventListener('change', listener)
+      media.addEventListener("change", listener)
       this.systemPrefersDark = media.matches
     },
 
@@ -97,7 +97,7 @@ export const useSettingsStore = defineStore('settings', {
         }
         this.initialized = true
       } catch (error) {
-        console.error('Failed to fetch settings:', error)
+        console.error("Failed to fetch settings:", error)
       } finally {
         this.loading = false
       }
@@ -115,7 +115,7 @@ export const useSettingsStore = defineStore('settings', {
         }
         return success
       } catch (error) {
-        console.error('Failed to save settings:', error)
+        console.error("Failed to save settings:", error)
         return false
       } finally {
         this.loading = false
@@ -134,10 +134,10 @@ export const useSettingsStore = defineStore('settings', {
           [key]: value,
         },
       }
-      
+
       // 乐观更新：立即更新状态和缓存
       this.settings = updatedSettings
-      if (category === 'ui' && key === 'darkMode') {
+      if (category === "ui" && key === "darkMode") {
         localStorage.setItem(DARK_MODE_KEY, String(value))
       }
 
@@ -151,7 +151,7 @@ export const useSettingsStore = defineStore('settings', {
         about: { ...this.settings.about }, // 保留关于信息
       }
       // 重置时也要更新缓存
-      localStorage.setItem(DARK_MODE_KEY, 'auto')
+      localStorage.setItem(DARK_MODE_KEY, "auto")
       this.settings = resetData
       return this.saveSettings(resetData)
     },

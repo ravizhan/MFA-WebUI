@@ -1,6 +1,6 @@
-import { defineStore } from 'pinia'
-import { getInterface } from '../script/api'
-import type { InterfaceModel, Option } from '../types/interfaceV2'
+import { defineStore } from "pinia"
+import { getInterface } from "../script/api"
+import type { InterfaceModel, Option } from "../types/interfaceV2"
 
 export interface TaskListItem {
   id: string
@@ -9,7 +9,7 @@ export interface TaskListItem {
   checked?: boolean
 }
 
-export const useInterfaceStore = defineStore('interface', {
+export const useInterfaceStore = defineStore("interface", {
   state: () => {
     return {
       interface: {} as InterfaceModel,
@@ -36,15 +36,15 @@ export const useInterfaceStore = defineStore('interface', {
         this.interface = data
         for (const key in this.interface.option) {
           const option = this.interface.option[key]!
-          if (option.type === 'select') {
-            this.options[key] = option.default_case || ''
-          } else if (option.type === 'input') {
+          if (option.type === "select") {
+            this.options[key] = option.default_case || ""
+          } else if (option.type === "input") {
             // 为 input 类型的每个输入项设置默认值
             for (const input of option.inputs) {
-              this.options[`${key}_${input.name}`] = input.default || ''
+              this.options[`${key}_${input.name}`] = input.default || ""
             }
-          } else if (option.type === 'switch') {
-            this.options[key] = option.cases[0]?.name || ''
+          } else if (option.type === "switch") {
+            this.options[key] = option.cases[0]?.name || ""
           }
         }
       })

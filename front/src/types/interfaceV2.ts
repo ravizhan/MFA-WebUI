@@ -1,19 +1,19 @@
 export type Win32MouseKeyboard =
-  | 'Seize'
-  | 'SendMessage'
-  | 'PostMessage'
-  | 'LegacyEvent'
-  | 'PostThreadMessage'
-  | 'SendMessageWithCursorPos'
-  | 'PostMessageWithCursorPos'
+  | "Seize"
+  | "SendMessage"
+  | "PostMessage"
+  | "LegacyEvent"
+  | "PostThreadMessage"
+  | "SendMessageWithCursorPos"
+  | "PostMessageWithCursorPos"
 
 export type Win32Screencap =
-  | 'GDI'
-  | 'FramePool'
-  | 'DXGI_DesktopDup'
-  | 'DXGI_DesktopDup_Window'
-  | 'PrintWindow'
-  | 'ScreenDC'
+  | "GDI"
+  | "FramePool"
+  | "DXGI_DesktopDup"
+  | "DXGI_DesktopDup_Window"
+  | "PrintWindow"
+  | "ScreenDC"
 
 export interface Win32Controller {
   class_regex?: string
@@ -23,7 +23,7 @@ export interface Win32Controller {
   screencap?: Win32Screencap
 }
 
-export type ControllerType = 'Adb' | 'Win32'
+export type ControllerType = "Adb" | "Win32"
 
 export interface Controller {
   name: string
@@ -73,7 +73,7 @@ export interface OptionCase {
   pipeline_override?: Record<string, object>
 }
 
-export type InputPipelineType = 'string' | 'int' | 'bool'
+export type InputPipelineType = "string" | "int" | "bool"
 
 export interface InputCase {
   name: string
@@ -92,19 +92,19 @@ interface OptionBase {
 }
 
 export interface SelectOption extends OptionBase {
-  type: 'select'
+  type: "select"
   cases: OptionCase[]
   default_case?: string
 }
 
 export interface InputOption extends OptionBase {
-  type: 'input'
+  type: "input"
   inputs: InputCase[]
   pipeline_override?: Record<string, object>
 }
 
 export interface SwitchOption extends OptionBase {
-  type: 'switch'
+  type: "switch"
   cases: [OptionCase, OptionCase]
 }
 

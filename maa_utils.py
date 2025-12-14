@@ -252,6 +252,7 @@ class MaaWorker:
         try:
             for task in task_list:
                 t = self.tasker.post_task(task)
+                self.send_log("正在运行任务: " + task)
                 while not t.done:
                     time.sleep(0.5)
                     if self.stop_flag:

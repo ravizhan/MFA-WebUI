@@ -18,12 +18,12 @@
   </n-message-provider>
 </template>
 <script setup lang="ts">
-import LeftPanel from '../components/LeftPanel.vue'
-import MediumPanel from '../components/MediumPanel.vue'
-import RightPanel from '../components/RightPanel.vue'
-import { onMounted } from 'vue'
+import LeftPanel from "../components/LeftPanel.vue"
+import MediumPanel from "../components/MediumPanel.vue"
+import RightPanel from "../components/RightPanel.vue"
+import { onMounted } from "vue"
 onMounted(() => {
-  if (Notification.permission !== 'granted') {
+  if (Notification.permission !== "granted") {
     Notification.requestPermission()
   }
 })
