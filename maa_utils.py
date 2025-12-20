@@ -123,6 +123,7 @@ class MaaWorker:
         # 将agent目录添加到sys.path的开头，确保优先级最高
         if str(agent_index_path) not in sys.path:
             sys.path.insert(0, str(agent_index_path))
+            sys.path.insert(1, str(Path("./deps").resolve()))
         
         # 扫描所有 .py 文件建立映射
         module_map = {}  # module_name -> {path, is_pkg}
