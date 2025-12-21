@@ -127,7 +127,7 @@ jobs:
 
       - name: Install UPX
         uses: crazy-max/ghaction-upx@v3
-        if: ${{ matrix.platform != 'osx' }} and ${{ matrix.os != 'windows-11-arm' }}
+        if: ${{ matrix.platform != 'osx' && matrix.os != 'windows-11-arm' }}
         with:
           install-only: true
 
