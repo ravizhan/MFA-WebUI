@@ -123,10 +123,11 @@ jobs:
         uses: actions/cache/restore@v5
         with:
           path: ${{ runner.temp }}/nuitka/cache
-          key: nuitka-${{ matrix.platform }}-${{ matrix.arch }}-${{ github.sha }}
+          key: nuitka-${{ matrix.platform }}-${{ matrix.arch }}
 
       - name: Install UPX
         uses: crazy-max/ghaction-upx@v3
+        if: ${{ matrix.platform != 'osx' }}
         with:
           install-only: true
 
@@ -147,7 +148,7 @@ jobs:
         uses: actions/cache/save@v5
         with:
           path: ${{ runner.temp }}/nuitka/cache
-          key: nuitka-${{ matrix.platform }}-${{ matrix.arch }}-
+          key: nuitka-${{ matrix.platform }}-${{ matrix.arch }}
 
       - name: Copy Resources
         run: uv run ./scripts/copy_resources.py
