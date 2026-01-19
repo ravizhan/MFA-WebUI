@@ -49,6 +49,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useInterfaceStore } from "../stores/interface"
+import { useUserConfigStore } from "../stores/userConfig"
 import { storeToRefs } from "pinia"
 
 const props = defineProps<{
@@ -57,7 +58,8 @@ const props = defineProps<{
 }>()
 
 const interfaceStore = useInterfaceStore()
-const options = storeToRefs(interfaceStore).options
+const configStore = useUserConfigStore()
+const options = storeToRefs(configStore).options
 
 const option = computed(() => interfaceStore.interface?.option?.[props.name])
 const label = computed(() => option.value?.label)

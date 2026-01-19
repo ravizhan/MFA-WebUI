@@ -13,7 +13,6 @@ export const useInterfaceStore = defineStore("interface", {
   state: () => {
     return {
       interface: {} as InterfaceModel,
-      options: {} as Record<string, string>,
     }
   },
   getters: {
@@ -31,23 +30,11 @@ export const useInterfaceStore = defineStore("interface", {
     },
   },
   actions: {
-    setInterface() {
-      getInterface().then((data: InterfaceModel) => {
-        this.interface = data
-        for (const key in this.interface.option) {
-          const option = this.interface.option[key]!
-          if (option.type === "select") {
-            this.options[key] = option.default_case || option.cases[0]?.name || ""
-          } else if (option.type === "input") {
-            for (const input of option.inputs) {
-              this.options[`${key}_${input.name}`] = input.default || ""
-            }
-          } else if (option.type === "switch") {
-            this.options[key] = option.cases[0]?.name || ""
-          }
-        }
-      })
+    async setInterface() {
+      const data = await getInterface()
+      this.interface = data
     },
+    
     getOptionList(entry: string): Record<string, Option> {
       const result: Record<string, Option> = {}
       if (!this.interface?.option) return result

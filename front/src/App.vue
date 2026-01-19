@@ -29,6 +29,7 @@ import { NIcon } from "naive-ui"
 import { h, ref, onMounted, watch, computed, watchEffect } from "vue"
 import { RouterLink } from "vue-router"
 import { useInterfaceStore } from "./stores/interface.ts"
+import { useUserConfigStore } from "./stores/userConfig.ts"
 import { useSettingsStore } from "./stores/settings"
 import { darkTheme } from "naive-ui"
 
@@ -40,6 +41,7 @@ function renderIcon(icon: string) {
   return () => h(NIcon, null, { default: () => h("div", { class: icon }) })
 }
 const interfaceStore = useInterfaceStore()
+const configStore = useUserConfigStore()
 const settingsStore = useSettingsStore()
 const name = computed(() => interfaceStore.interface?.name || "")
 const offset = ref(0)
@@ -69,9 +71,10 @@ function ensureMarkdownStylesheet(href: string) {
 const handleResize = () => {
   screenWidth.value = window.innerWidth
 }
-onMounted(() => {
+onMounted(async () => {
   settingsStore.initSystemThemeListener()
-  interfaceStore.setInterface()
+  await interfaceStore.setInterface()
+  await configStore.loadConfig()
   if (!settingsStore.initialized) {
     settingsStore.fetchSettings()
   }

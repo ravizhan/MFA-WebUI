@@ -179,3 +179,80 @@ export function checkUpdate(): Promise<{
       return { hasUpdate: false }
     })
 }
+
+
+// ==================== 用户配置相关 API ====================
+
+export interface UserConfig {
+  taskOrder?: string[]
+  taskChecked?: Record<string, boolean>
+  taskOptions?: Record<string, string>
+}
+
+interface UserConfigResponse {
+  status: string
+  config: UserConfig
+  message?: string
+}
+
+export function getUserConfig(): Promise<UserConfig> {
+  return fetch("/api/user-config", { method: "GET" })
+    .then((res) => res.json())
+    .then((data: UserConfigResponse) => {
+      if (data.status === "success") {
+        return data.config || {}
+      } else {
+        console.error("Failed to load user config:", data.message)
+        return {}
+      }
+    })
+    .catch((error) => {
+      console.error("Failed to load user config:", error)
+      return {}
+    })
+}
+
+export function saveUserConfig(config: UserConfig): Promise<boolean> {
+  return fetch("/api/user-config", {
+    method: "POST",
+    body: JSON.stringify(config),
+    headers: {
+      "Content-Type": "application/json",
+    },
+  })
+    .then((res) => res.json())
+    .then((data: ApiResponse) => {
+      if (data.status === "success") {
+        return true
+      } else {
+        console.error("Failed to save user config:", data.message)
+        return false
+      }
+    })
+    .catch((error) => {
+      console.error("Failed to save user config:", error)
+      return false
+    })
+}
+
+export function resetUserConfig(): Promise<boolean> {
+  return fetch("/api/user-config", {
+    method: "DELETE",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  })
+    .then((res) => res.json())
+    .then((data: ApiResponse) => {
+      if (data.status === "success") {
+        return true
+      } else {
+        console.error("Failed to reset user config:", data.message)
+        return false
+      }
+    })
+    .catch((error) => {
+      console.error("Failed to reset user config:", error)
+      return false
+    })
+}

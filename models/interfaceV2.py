@@ -135,3 +135,4 @@ class InterfaceModel(BaseModel):
         if self.title is None and self.label and self.version:
             self.title = f"{self.label} {self.version}"
         return self
+

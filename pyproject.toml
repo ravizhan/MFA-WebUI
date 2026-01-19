@@ -10,6 +10,7 @@ dependencies = [
     "nuitka[all]>=2.8.9",
     "numpy>=2.3.5",
     "plyer>=2.1.0",
+    "requirements-parser>=0.13.0",
     "uvicorn>=0.38.0",
     "websockets>=15.0.1",
 ]

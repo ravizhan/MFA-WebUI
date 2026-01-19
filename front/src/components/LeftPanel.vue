@@ -36,8 +36,8 @@
     <n-list hoverable bordered>
       <template v-if="scroll_show">
         <n-scrollbar class="max-h-80">
-          <VueDraggable v-model="task_list">
-            <n-list-item v-for="item in task_list" :key="item.id">
+          <VueDraggable v-model="configStore.taskList">
+            <n-list-item v-for="item in configStore.taskList" :key="item.id">
               <n-checkbox size="large" :label="item.name" v-model:checked="item.checked" />
               <template #suffix>
                 <n-button quaternary circle @click="indexStore.SelectTask(item.id)">
@@ -51,8 +51,8 @@
         </n-scrollbar>
       </template>
       <template v-else>
-        <VueDraggable v-model="task_list">
-          <n-list-item v-for="item in task_list" :key="item.id">
+        <VueDraggable v-model="configStore.taskList">
+          <n-list-item v-for="item in configStore.taskList" :key="item.id">
             <n-checkbox size="large" :label="item.name" v-model:checked="item.checked" />
             <template #suffix>
               <n-button quaternary circle @click="indexStore.SelectTask(item.id)">
@@ -69,6 +69,9 @@
       <n-button strong secondary type="info" size="large" @click="StartTask"> 开始任务</n-button>
       <n-button strong secondary type="info" size="large" @click="stopTask"> 中止任务</n-button>
     </n-flex>
+    <n-flex class="form-btn" justify="center">
+      <n-button quaternary type="warning" size="small" @click="resetConfig"> 重置配置</n-button>
+    </n-flex>
   </n-card>
 </template>
 <script setup lang="ts">
@@ -83,17 +86,17 @@ import {
   postResource,
 } from "../script/api"
 import { VueDraggable } from "vue-draggable-plus"
-import { useInterfaceStore, type TaskListItem } from "../stores/interface.ts"
+import { useUserConfigStore } from "../stores/userConfig"
 import { useIndexStore } from "../stores"
 
-import { useMessage } from "naive-ui"
+import { useMessage, useDialog } from "naive-ui"
 if (typeof window !== "undefined") {
   window.$message = useMessage()
 }
 
-const interfaceStore = useInterfaceStore()
+const dialog = useDialog()
+const configStore = useUserConfigStore()
 const indexStore = useIndexStore()
-const task_list = ref<TaskListItem[]>([])
 const scroll_show = ref(window.innerWidth > 768)
 const device = ref<Device | null>(null)
 const resource = ref<string | null>(null)
@@ -102,14 +105,33 @@ const resources_list = ref<object[]>([])
 const loading = ref(false)
 
 watch(
-  () => interfaceStore.getTaskList,
+  () => configStore.taskList,
   (newList) => {
-    task_list.value = newList.map((task) => ({ ...task, checked: true }))
-    if (task_list.value.length) {
-      indexStore.SelectTask(task_list.value[0]!.id)
+    if (newList.length) {
+      indexStore.SelectTask(newList[0]!.id)
     }
   },
-  { immediate: true },
+  { immediate: true }
+)
+
+watch(
+  () => configStore.taskList,
+  () => {
+    if (configStore.configLoaded) {
+      configStore.debouncedSave()
+    }
+  },
+  { deep: true }
+)
+
+watch(
+  () => configStore.options,
+  () => {
+    if (configStore.configLoaded) {
+      configStore.debouncedSave()
+    }
+  },
+  { deep: true }
 )
 
 function get_device() {
@@ -155,13 +177,27 @@ function post_resource() {
 }
 
 function StartTask() {
-  const selectedTasks = task_list.value.filter((task) => task.checked).map((task) => task.id)
+  const selectedTasks = configStore.taskList.filter((task) => task.checked).map((task) => task.id)
   if (selectedTasks.length === 0) {
     // @ts-ignore
     window.$message.error("请至少选择一个任务")
     return
   }
-  startTask(selectedTasks, interfaceStore.options)
+  startTask(selectedTasks, configStore.options)
+}
+
+function resetConfig() {
+  dialog.warning({
+    title: "重置配置",
+    content: "确定要重置所有任务配置吗？此操作不可撤销。",
+    positiveText: "确定",
+    negativeText: "取消",
+    onPositiveClick: async () => {
+      await configStore.resetConfig()
+      // @ts-ignore
+      window.$message.success("配置已重置")
+    }
+  })
 }
 </script>
 <style scoped>

@@ -5,13 +5,13 @@ import webbrowser
 from contextlib import asynccontextmanager
 from queue import SimpleQueue
 import uvicorn
-
+import os
 from fastapi import FastAPI, websockets, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.websockets import WebSocketState, WebSocketDisconnect
 from models.interfaceV2 import InterfaceModel
-from models.api import DeviceModel
+from models.api import DeviceModel, UserConfig
 from models.settings import SettingsModel
 from maa_utils import MaaWorker
 
@@ -89,16 +89,50 @@ def set_resource(name: str):
 
 @app.get("/api/settings")
 def get_settings():
-    with open("config/config.json", "r", encoding="utf-8") as f:
+    with open("config/settings.json", "r", encoding="utf-8") as f:
         config_data = json.load(f)
     settings = SettingsModel(**config_data)
     return {"status": "success", "settings": settings.model_dump()}
 
 @app.post("/api/settings")
 def set_settings(settings: SettingsModel):
-    with open("config/config.json", "w", encoding="utf-8") as f:
+    with open("config/settings.json", "w", encoding="utf-8") as f:
         json.dump(settings.model_dump(), f, indent=4, ensure_ascii=False)
     return {"status": "success"}
+
+
+@app.get("/api/user-config")
+def get_user_config():
+    try:
+        with open("config/user_config.json", "r", encoding="utf-8") as f:
+            config_data = json.load(f)
+        user_config = UserConfig(**config_data)
+        return {"status": "success", "config": user_config.model_dump()}
+    except FileNotFoundError:
+        return {"status": "success", "config": UserConfig().model_dump()}
+    except Exception as e:
+        return {"status": "failed", "message": str(e)}
+
+
+@app.post("/api/user-config")
+def save_user_config(config: UserConfig):
+    try:
+        with open("config/user_config.json", "w", encoding="utf-8") as f:
+            json.dump(config.model_dump(), f, indent=4, ensure_ascii=False)
+        return {"status": "success"}
+    except Exception as e:
+        return {"status": "failed", "message": str(e)}
+
+
+@app.delete("/api/user-config")
+def reset_user_config():
+    try:
+        config_path = "config/user_config.json"
+        if os.path.exists(config_path):
+            os.remove(config_path)
+        return {"status": "success"}
+    except Exception as e:
+        return {"status": "failed", "message": str(e)}
 
 
 @app.post("/api/start")

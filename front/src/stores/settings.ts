@@ -44,10 +44,15 @@ function getCachedDarkMode(): "auto" | boolean {
   return "auto"
 }
 
+// Deep clone helper to prevent mutation of default settings
+function deepClone<T>(obj: T): T {
+  return JSON.parse(JSON.stringify(obj))
+}
+
 export const useSettingsStore = defineStore("settings", {
   state: () => ({
     settings: {
-      ...defaultSettings,
+      ...deepClone(defaultSettings),
       ui: { darkMode: getCachedDarkMode() },
     } as SettingsModel,
     loading: false,
@@ -109,7 +114,7 @@ export const useSettingsStore = defineStore("settings", {
         const payload = newSettings || this.settings
         const success = await updateSettings(payload)
         if (success) {
-          this.settings = { ...payload }
+          this.settings = deepClone(payload)
           // 保存成功后更新本地缓存
           localStorage.setItem(DARK_MODE_KEY, String(this.settings.ui.darkMode))
         }
@@ -147,7 +152,7 @@ export const useSettingsStore = defineStore("settings", {
 
     async resetSettings() {
       const resetData: SettingsModel = {
-        ...defaultSettings,
+        ...deepClone(defaultSettings),
         about: { ...this.settings.about }, // 保留关于信息
       }
       // 重置时也要更新缓存
