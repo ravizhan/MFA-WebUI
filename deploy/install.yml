@@ -62,15 +62,17 @@ jobs:
           echo tag=$tag | tee -a $GITHUB_OUTPUT
           echo is_release=$is_release | tee -a $GITHUB_OUTPUT
           echo is_prerelease=$is_prerelease | tee -a $GITHUB_OUTPUT
+          echo "repo_name=$(echo ${{ github.repository }} | cut -d'/' -f2)" >> $GITHUB_OUTPUT
     outputs:
       tag: ${{ steps.set_tag.outputs.tag }}
       is_release: ${{ steps.set_tag.outputs.is_release }}
       is_prerelease: ${{ steps.set_tag.outputs.is_prerelease }}
+      repo_name: ${{ steps.set_tag.outputs.repo_name }}
 
   build:
     env:
       UV_INDEX: https://pypi.org/simple
-      repo_name: ${{ github.repository }}
+      repo_name: ${{ needs.meta.outputs.repo_name }}
     permissions:
       contents: write
     strategy:
