@@ -10,7 +10,9 @@
 
 <!-- prettier-ignore-start -->
 <!-- markdownlint-disable-next-line MD036 -->
-_✨ 基于 **[Vue](https://github.com/vuejs/vue)** 的 **[MAAFramework](https://github.com/MaaXYZ/MaaFramework)** 通用 GUI 项目 ✨_
+_✨ 基于 **[Vue](https://github.com/vuejs/vue)** 和 **[FastAPI](https://github.com/fastapi/fastapi)**  的 **[MAAFramework](https://github.com/MaaXYZ/MaaFramework)** 通用 WebUI 项目 ✨_
+
+**本项目尚未Production-Ready，欢迎测试并提供反馈**
 <!-- prettier-ignore-end -->
 
   <img alt="license" src="https://img.shields.io/github/license/ravizhan/MFA-WebUI">
