@@ -120,14 +120,7 @@ jobs:
         run: uv sync
 
       - name: Build Executable
-        if: ${{ matrix.os == 'windows-2025' }}
-        env:
-          NUITKA_CCACHE_BINARY: ${{ env.ccache_symlinks_path }}
-          NUITKA_CACHE_DIR: ${{ runner.temp }}/nuitka/cache
-        run: uv run python -m nuitka --standalone --lto=yes --windows-icon-from-ico=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --remove-output --output-dir=build --include-package=PIL --include-package=maa -o MFA-WebUI main.py
-
-      - name: Build Executable
-        if: ${{ matrix.os == 'windows-11-arm' }}
+        if: ${{ matrix.os == 'windows-11-arm' || matrix.os == 'windows-2025' }}
         env:
           NUITKA_CCACHE_BINARY: ${{ env.ccache_symlinks_path }}
           NUITKA_CACHE_DIR: ${{ runner.temp }}/nuitka/cache
@@ -144,6 +137,13 @@ jobs:
         env:
           NUITKA_CACHE_DIR: ${{ runner.temp }}/nuitka/cache
         run: uv run python -m nuitka --standalone --lto=no --macos-app-icon=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --remove-output --output-dir=build --include-package=PIL --include-package=maa -o MFA-WebUI main.py
+
+      - name: Copy Resources to Build
+        shell: bash
+        run: |
+          cp -r "config" "build/main.dist/config"
+          cp -r "page" "build/main.dist/page"
+          git clone "https://github.com/MaaXYZ/MaaAgentBinary" "build/main.dist/MaaAgentBinary"
 
       - name: Create Version file
         run: echo "${{ github.ref_name }}" >> build/main.dist/version
