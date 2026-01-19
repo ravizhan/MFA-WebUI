@@ -314,3 +314,15 @@ auto-imports.d.ts
 components.d.ts
 debug
 agent
+
+openspec
+openspec*.*
+AGENTS.md
+user_config.json
+.iflow
+.opencode
+.roo
+interface.json
+test*.py
+*.psd
+*.bak

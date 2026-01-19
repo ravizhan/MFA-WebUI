@@ -1,0 +1,238 @@
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*"  
+    branches:
+      - "**"
+    paths:
+      - ".github/workflows/install.yml"
+      - "assets/**"
+      - "**.py"
+  pull_request:
+    branches:
+      - "**"
+    paths:
+      - ".github/workflows/install.yml"
+      - "assets/**"
+      - "**.py"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  meta:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: set_tag
+        run: |
+          # 检查标签格式
+          if [[ ${{ github.ref }} =~ ^refs/tags/v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9-]+(\.[a-zA-Z0-9-]+)*)?$ ]]; then
+            is_release=true
+            tag=${GITHUB_REF#refs/tags/}
+            echo "Release tag format is valid: $tag"
+          else
+            is_release=false
+            # 获取最新的发布标签
+            tag=$(curl -sX GET "https://api.github.com/repos/${{ github.repository }}/releases/latest" --header 'authorization: Bearer ${{ secrets.GITHUB_TOKEN }}' | awk '/tag_name/{print $4}' FS='["]')
+            if [[ ! $tag =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?$ ]]; then
+              echo "No valid release tag found, using v0.0.0"
+              tag="v0.0.0"
+            fi
+            tag=$(date "+$tag-%y%m%d-$(git rev-parse --short HEAD)")
+          fi
+
+          if ! $($is_release) ; then
+            prefix=${tag%-*-*}
+            suffix=${tag#$prefix-}
+            tag="$prefix-ci.$suffix"
+          fi
+
+          # 检查是否为预发布版本
+          is_prerelease=false
+          if [[ $tag =~ .*alpha.* || $tag =~ .*beta.* || $tag =~ .*rc.* || $tag =~ .*dev.* || $tag =~ .*-ci.* ]]; then
+            is_prerelease=true
+            echo "This is a pre-release version"
+          fi
+
+          echo tag=$tag | tee -a $GITHUB_OUTPUT
+          echo is_release=$is_release | tee -a $GITHUB_OUTPUT
+          echo is_prerelease=$is_prerelease | tee -a $GITHUB_OUTPUT
+    outputs:
+      tag: ${{ steps.set_tag.outputs.tag }}
+      is_release: ${{ steps.set_tag.outputs.is_release }}
+      is_prerelease: ${{ steps.set_tag.outputs.is_prerelease }}
+
+  build:
+    env:
+      UV_INDEX: https://pypi.org/simple
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            platform: linux
+            arch: x64
+
+          - os: ubuntu-24.04-arm
+            platform: linux
+            arch: arm64
+
+          - os: macos-15-intel
+            platform: osx
+            arch: x64
+
+          - os: macos-15
+            platform: osx
+            arch: arm64
+
+          - os: windows-2025
+            platform: win
+            arch: x64
+
+          - os: windows-11-arm
+            platform: win
+            arch: arm64
+    runs-on: ${{ matrix.os }}
+    name: Build (${{ matrix.platform }}-${{ matrix.arch }})
+    needs: meta
+
+    steps:
+      - name: Check-out repository
+        uses: actions/checkout@v4
+        with:
+          submodules: true
+
+      - name: 'Workaround for missing zstd in windows-11-arm'
+        if: matrix.os == 'windows-11-arm'
+        run: choco install zstandard
+
+      - name: Setup ccache
+        if: ${{ matrix.platform != 'win' }}
+        uses: Chocobo1/setup-ccache-action@v1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12.10"
+
+      - name: Copy Resources
+        shell: bash
+        run: |
+          curl -L https://github.com/ravizhan/MFA-WebUI/raw/refs/heads/main/deploy/copy_resources.py -o ./copy_resources.py
+          uv run ./copy_resources.py
+
+      - name: Compile Dependencies
+        if: false
+        shell: bash
+        run: |
+          curl -L https://github.com/ravizhan/MFA-WebUI/raw/refs/heads/main/deploy/compile_deps.py -o ./compile_deps.py
+          uv run ./compile_deps.py
+
+      - name: Download Dependencies
+        shell: bash
+        run: |
+          curl -L https://github.com/ravizhan/MFA-WebUI/raw/refs/heads/main/deploy/download_deps.py -o ./download_deps.py
+          uv run ./download_deps.py
+
+      - name: Create Version file
+        run: echo "${{ github.ref_name }}" >> build/version
+
+      - name: Download Artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: MFA-WebUI-${{ github.ref_name }}-${{ matrix.platform }}-${{ matrix.arch }}
+          repository: ravizhan/MFA-WebUI
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: 20388539480
+          path: ./
+
+      - name: Decompress Artifact to build
+        run: |
+          7z x MFA-WebUI-${{ github.ref_name }}-${{ matrix.platform }}-${{ matrix.arch }}.7z -obuild -y
+
+      - name: Compress Final Artifact
+        run: |
+          7z a -t7z -mx=9 -mmt -ms -r M9A-WebUI-${{ needs.meta.outputs.tag }}-${{ matrix.platform }}-${{ matrix.arch }}.7z "./build/*"
+
+      - name: Breakpoint if tests failed
+        uses: namespacelabs/breakpoint-action@v0
+        if: failure()
+        with:
+          duration: 30m
+          authorized-users: ravizhan
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: M9A-WebUI-${{ needs.meta.outputs.tag }}-${{ matrix.platform }}-${{ matrix.arch }}
+          path: M9A-WebUI-${{ needs.meta.outputs.tag }}-${{ matrix.platform }}-${{ matrix.arch }}.7z
+
+  changelog:
+    name: Generate changelog
+    runs-on: ubuntu-latest
+    outputs:
+      release_body: ${{ steps.git-cliff.outputs.content }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate a changelog
+        uses: orhun/git-cliff-action@v4
+        id: git-cliff
+        with:
+          config: .github/cliff.toml
+          args: -vv --latest --strip header
+        env:
+          OUTPUT: CHANGES.md
+          GITHUB_REPO: ${{ github.repository }}
+
+  debug:
+    runs-on: ubuntu-latest
+    needs: [meta, build, changelog]
+    steps:
+      - name: Show Outputs
+        run: |
+          echo "Tag: ${{ needs.meta.outputs.tag }}"
+          echo "Is Release: ${{ needs.meta.outputs.is_release }}"
+          echo "Is Pre-release: ${{ needs.meta.outputs.is_prerelease }}"
+          echo "Changelog:"
+          echo "${{ needs.changelog.outputs.release_body }}"
+
+  # release:
+  #   if: ${{ needs.meta.outputs.is_release == 'true' }}
+  #   needs: [meta, build, changelog]
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/download-artifact@v4
+  #       with:
+  #         path: assets
+
+  #     - uses: softprops/action-gh-release@v2.2.2
+  #       with:
+  #         files: assets/*
+  #         tag_name: ${{ needs.meta.outputs.tag }}
+  #         body: ${{ needs.changelog.outputs.release_body }}
+  #         draft: false
+  #         prerelease: ${{ needs.meta.outputs.is_prerelease == 'true' }}
+
+  #     - name: Trigger MirrorChyanUploading
+  #       shell: bash
+  #       run: |
+  #         gh workflow run --repo $GITHUB_REPOSITORY mirrorchyan.yml -f tag=${{ needs.meta.outputs.tag }}
+  #         gh workflow run --repo $GITHUB_REPOSITORY mirrorchyan_release_note.yml -f tag=${{ needs.meta.outputs.tag }}
+  #       env:
+  #         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
