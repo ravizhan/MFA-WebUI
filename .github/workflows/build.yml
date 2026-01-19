@@ -131,22 +131,19 @@ jobs:
         env:
           NUITKA_CCACHE_BINARY: ${{ env.ccache_symlinks_path }}
           NUITKA_CACHE_DIR: ${{ runner.temp }}/nuitka/cache
-        run: uv run python -m nuitka --standalone --lto=yes --windows-icon-from-ico=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --remove-output --output-dir=build --include-package=PIL --include-package=maa -o MFA-WebUI main.py
+        run: uv run python -m nuitka --standalone --lto=no --windows-icon-from-ico=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --remove-output --output-dir=build --include-package=PIL --include-package=maa -o MFA-WebUI main.py
 
       - name: Build Executable
         if: ${{ matrix.platform == 'linux' }}
         env:
           NUITKA_CACHE_DIR: ${{ runner.temp }}/nuitka/cache
-        run: uv run python -m nuitka --standalone --lto=yes --linux-icon=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --remove-output --output-dir=build --include-package=PIL --include-package=maa -o MFA-WebUI main.py
+        run: uv run python -m nuitka --standalone --lto=no --linux-icon=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --remove-output --output-dir=build --include-package=PIL --include-package=maa -o MFA-WebUI main.py
 
       - name: Build Executable
         if: ${{ matrix.platform == 'osx' }}
         env:
           NUITKA_CACHE_DIR: ${{ runner.temp }}/nuitka/cache
-        run: uv run python -m nuitka --standalone --lto=yes --macos-app-icon=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --remove-output --output-dir=build --include-package=PIL --include-package=maa -o MFA-WebUI main.py
-
-      - name: Copy Resources
-        run: uv run ./scripts/copy_resources.py
+        run: uv run python -m nuitka --standalone --lto=no --macos-app-icon=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --remove-output --output-dir=build --include-package=PIL --include-package=maa -o MFA-WebUI main.py
 
       - name: Create Version file
         run: echo "${{ github.ref_name }}" >> build/main.dist/version
