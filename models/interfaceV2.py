@@ -1,5 +1,10 @@
 from pydantic import BaseModel, model_validator
-from typing import List, Optional, Dict, Literal
+from typing import List, Optional, Dict, Literal, Union
+
+
+class AdbController(BaseModel):
+    """Adb 控制器配置，V2 协议中 input/screencap 由 MaaFramework 自动检测"""
+    pass
 
 
 class Win32Controller(BaseModel):
@@ -10,16 +15,33 @@ class Win32Controller(BaseModel):
     screencap: Optional[Literal["GDI", "FramePool", "DXGI_DesktopDup", "DXGI_DesktopDup_Window", "PrintWindow", "ScreenDC"]] = None
 
 
+class PlayCoverController(BaseModel):
+    """PlayCover 控制器配置（仅 macOS）"""
+    uuid: Optional[str] = None
+
+
+class GamepadController(BaseModel):
+    """虚拟游戏手柄控制器配置（仅 Windows）"""
+    class_regex: Optional[str] = None
+    window_regex: Optional[str] = None
+    gamepad_type: Optional[Literal["Xbox360", "DualShock4", "DS4"]] = "Xbox360"
+    screencap: Optional[Literal["GDI", "FramePool", "DXGI_DesktopDup", "DXGI_DesktopDup_Window", "PrintWindow", "ScreenDC"]] = None
+
+
 class Controller(BaseModel):
     name: str
     label: Optional[str] = None
     description: Optional[str] = None
     icon: Optional[str] = None
-    type: Literal["Adb", "Win32"]
+    type: Literal["Adb", "Win32", "PlayCover", "Gamepad"]
     display_short_side: Optional[int] = 720
     display_long_side: Optional[int] = None
     display_raw: Optional[bool] = False
+    permission_required: Optional[bool] = False
+    adb: Optional[AdbController] = None
     win32: Optional[Win32Controller] = None
+    playcover: Optional[PlayCoverController] = None
+    gamepad: Optional[GamepadController] = None
 
     @model_validator(mode='after')
     def check_display_fields_mutual_exclusive(self):
@@ -42,6 +64,7 @@ class Resource(BaseModel):
     icon: Optional[str] = None
     path: List[str]
     controller: Optional[List[str]] = None
+    option: Optional[List[str]] = None
 
 
 class Agent(BaseModel):
@@ -56,8 +79,10 @@ class Task(BaseModel):
     entry: str
     default_check: Optional[bool] = False
     description: Optional[str] = None
+    doc: Optional[Union[str, List[str]]] = None
     icon: Optional[str] = None
     resource: Optional[List[str]] = None
+    controller: Optional[List[str]] = None
     pipeline_override: Optional[Dict[str, dict]] = None
     option: Optional[List[str]] = None
 
