@@ -251,7 +251,7 @@
                 {{ settings.about.contact }}
               </n-descriptions-item>
               <n-descriptions-item label="项目简介">
-                {{ settings.about.description || "基于 MAA 框架的 Web UI 界面" }}
+                {{ settings.about.description || "基于 Vue 的 MAAFramework 通用 GUI 项目" }}
               </n-descriptions-item>
             </n-descriptions>
             <n-divider />

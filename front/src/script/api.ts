@@ -118,19 +118,17 @@ export function postResource(name: string): void {
     })
 }
 
-// ==================== 设置相关 API ====================
-
 import type { SettingsModel } from "../types/settings"
 
 interface SettingsResponse {
   status: string
-  data: SettingsModel
+  settings: SettingsModel
 }
 
 export function getSettings(): Promise<SettingsModel> {
   return fetch("/api/settings", { method: "GET" })
     .then((res) => res.json())
-    .then((data: SettingsResponse) => data.data)
+    .then((data: SettingsResponse) => data.settings)
 }
 
 export function updateSettings(settings: SettingsModel): Promise<boolean> {
@@ -179,9 +177,6 @@ export function checkUpdate(): Promise<{
       return { hasUpdate: false }
     })
 }
-
-
-// ==================== 用户配置相关 API ====================
 
 export interface UserConfig {
   taskOrder?: string[]
