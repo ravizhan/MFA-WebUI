@@ -12,8 +12,8 @@
               <router-view></router-view>
             </n-layout>
             <n-layout-footer bordered class="text-align-center">
-              <a href="https://github.com/ravizhan/MFA-WebUI" target="_blank">
-                Powered by MFA-WebUI
+              <a href="https://github.com/ravizhan/MWU" target="_blank">
+                Powered by MWU
               </a>
             </n-layout-footer>
           </n-layout>

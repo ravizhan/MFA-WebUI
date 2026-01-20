@@ -1,5 +1,5 @@
 [project]
-name = "mfa-webui"
+name = "MWU"
 version = "0.1.0"
 description = "基于 Vue 的 通用 GUI。由 MaaFramework 强力驱动！"
 readme = "README.md"

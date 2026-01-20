@@ -128,7 +128,7 @@ wheels = [
 ]
 
 [[package]]
-name = "mfa-webui"
+name = "mwu"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

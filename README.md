@@ -1,12 +1,12 @@
 <!-- markdownlint-disable MD033 MD041 -->
 
 <p align="center">
-  <img alt="LOGO" src="https://github.com/ravizhan/MFA-WebUI/blob/main/logo.jpg" width="256" height="256" />
+  <img alt="LOGO" src="https://github.com/ravizhan/MWU/blob/main/logo.jpg" width="256" height="256" />
 </p>
 
 <div align="center">
 
-# MFA-WebUI
+# MWU
 
 <!-- prettier-ignore-start -->
 <!-- markdownlint-disable-next-line MD036 -->
@@ -15,11 +15,11 @@ _✨ 基于 **[Vue](https://github.com/vuejs/vue)** 和 **[FastAPI](https://gith
 **本项目尚未Production-Ready，欢迎测试并提供反馈**
 <!-- prettier-ignore-end -->
 
-  <img alt="license" src="https://img.shields.io/github/license/ravizhan/MFA-WebUI">
-  <img alt="Python" src="https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2Fravizhan%2FMFA-WebUI%2Frefs%2Fheads%2Fmain%2Fpyproject.toml">
+  <img alt="license" src="https://img.shields.io/github/license/ravizhan/MWU">
+  <img alt="Python" src="https://img.shields.io/python/required-version-toml?tomlFilePath=https%3A%2F%2Fraw.githubusercontent.com%2Fravizhan%2FMWU%2Frefs%2Fheads%2Fmain%2Fpyproject.toml">
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-blueviolet">
-  <img alt="commit" src="https://img.shields.io/github/commit-activity/m/ravizhan/MFA-WebUI">
-  <img alt="stars" src="https://img.shields.io/github/stars/ravizhan/MFA-WebUI?style=social">
+  <img alt="commit" src="https://img.shields.io/github/commit-activity/m/ravizhan/MWU">
+  <img alt="stars" src="https://img.shields.io/github/stars/ravizhan/MWU?style=social">
 </div>
 
 ## ✨ 项目特点
@@ -43,14 +43,14 @@ _✨ 基于 **[Vue](https://github.com/vuejs/vue)** 和 **[FastAPI](https://gith
 
 ## 🚀 快速开始
 
-使用 [MaaFramework 项目模板](https://github.com/MaaXYZ/MaaPracticeBoilerplate) 创建项目后，只需将 `.github/workflows/install.yml` 替换为本项目的 [deploy/install.yaml](https://github.com/ravizhan/MFA-WebUI/blob/main/deploy/install.yml) 即可
+使用 [MaaFramework 项目模板](https://github.com/MaaXYZ/MaaPracticeBoilerplate) 创建项目后，只需将 `.github/workflows/install.yml` 替换为本项目的 [deploy/install.yaml](https://github.com/ravizhan/MWU/blob/main/deploy/install.yml) 即可
 
 ### ⚙️ 配置清单
 
 | 配置         | 默认值                  | 修改方法                                                     |
 | ------------ | ----------------------- | ------------------------------------------------------------ |
-| 压缩包名     | 仓库名-版本号-平台-架构 | [deploy/install.yml#L170](https://github.com/ravizhan/MFA-WebUI/blob/baeec32ecc5db8ea6390ceb5575d73e2d2754ba6/deploy/install.yml#L170)，注意下方各处也要一并修改 |
-| 可执行文件名 | MFA-WebUI               | 暂不可修改                                                   |
+| 压缩包名     | 仓库名-版本号-平台-架构 | [deploy/install.yml#L170](https://github.com/ravizhan/MWU/blob/baeec32ecc5db8ea6390ceb5575d73e2d2754ba6/deploy/install.yml#L170)，注意下方各处也要一并修改 |
+| 可执行文件名 | MWU               | 暂不可修改                                                   |
 | LOGO         |                         | 暂不可修改                                                   |
 
 ## 🏗️ 项目架构与开发
@@ -88,7 +88,7 @@ uv run main.py  # 启动 FastAPI 服务
 #### 📁 项目文件目录
 
 ```
-MFA-WebUI/
+MWU/
 ├── main.py                      # FastAPI 应用入口，自动打开浏览器
 ├── maa_utils.py                 # MaaWorker 类，处理所有 MAA 框架交互
 │
@@ -132,7 +132,7 @@ MFA-WebUI/
 
 ## 📄 开源许可
 
-**MFA-WebUI** 基于 **[AGPL-3.0 许可证](./LICENSE)** 开源。
+**MWU** 基于 **[AGPL-3.0 许可证](./LICENSE)** 开源。
 
 ## 🙏 致谢
 
@@ -170,8 +170,8 @@ MFA-WebUI/
 
 ### 👥 开发者
 
-感谢所有为 **MFA-WebUI** 做出贡献的开发者，以及 MAA 社区各位小伙伴提供的无私帮助与建议。
+感谢所有为 **MWU** 做出贡献的开发者，以及 MAA 社区各位小伙伴提供的无私帮助与建议。
 
-<a href="https://github.com/ravizhan/MFA-WebUI/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=ravizhan/MFA-WebUI&max=1000" alt="Contributors to MFA-WebUI"/>
+<a href="https://github.com/ravizhan/MWU/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=ravizhan/MWU&max=1000" alt="Contributors to MWU"/>
 </a>

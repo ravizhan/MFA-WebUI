@@ -223,21 +223,21 @@
                 <n-button
                   text
                   tag="a"
-                  :href="settings.about.github || 'https://github.com/ravizhan/MFA-WebUI'"
+                  :href="settings.about.github || 'https://github.com/ravizhan/MWU'"
                   target="_blank"
                   type="primary"
                 >
                   <template #icon>
                     <n-icon><div class="i-mdi-github" /></n-icon>
                   </template>
-                  {{ settings.about.github || "https://github.com/ravizhan/MFA-WebUI" }}
+                  {{ settings.about.github || "https://github.com/ravizhan/MWU" }}
                 </n-button>
               </n-descriptions-item>
               <n-descriptions-item label="问题反馈">
                 <n-button
                   text
                   tag="a"
-                  :href="settings.about.issueUrl || 'https://github.com/ravizhan/MFA-WebUI/issues'"
+                  :href="settings.about.issueUrl || 'https://github.com/ravizhan/MWU/issues'"
                   target="_blank"
                   type="primary"
                 >

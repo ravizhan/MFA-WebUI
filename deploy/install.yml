@@ -133,20 +133,20 @@ jobs:
       - name: Copy Resources
         shell: bash
         run: |
-          curl -L https://github.com/ravizhan/MFA-WebUI/raw/refs/heads/main/deploy/copy_resources.py -o ./copy_resources.py
+          curl -L https://github.com/ravizhan/MWU/raw/refs/heads/main/deploy/copy_resources.py -o ./copy_resources.py
           uv run ./copy_resources.py
 
       - name: Compile Dependencies
         if: false
         shell: bash
         run: |
-          curl -L https://github.com/ravizhan/MFA-WebUI/raw/refs/heads/main/deploy/compile_deps.py -o ./compile_deps.py
+          curl -L https://github.com/ravizhan/MWU/raw/refs/heads/main/deploy/compile_deps.py -o ./compile_deps.py
           uv run ./compile_deps.py
 
       - name: Download Dependencies
         shell: bash
         run: |
-          curl -L https://github.com/ravizhan/MFA-WebUI/raw/refs/heads/main/deploy/download_deps.py -o ./download_deps.py
+          curl -L https://github.com/ravizhan/MWU/raw/refs/heads/main/deploy/download_deps.py -o ./download_deps.py
           uv run ./download_deps.py
 
       - name: Create Version file
@@ -156,9 +156,9 @@ jobs:
         id: download_artifact
         uses: robinraju/release-downloader@v1
         with:
-          repository: ravizhan/MFA-WebUI
+          repository: ravizhan/MWU
           latest: true
-          fileName: MFA-WebUI-*-${{ matrix.platform }}-${{ matrix.arch }}.7z
+          fileName: MWU-*-${{ matrix.platform }}-${{ matrix.arch }}.7z
           out-file-path: ./
           token: ${{ secrets.GITHUB_TOKEN }}
 
