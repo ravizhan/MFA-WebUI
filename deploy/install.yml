@@ -152,18 +152,19 @@ jobs:
       - name: Create Version file
         run: echo "${{ github.ref_name }}" >> build/version
 
-      - name: Download Artifact
-        uses: actions/download-artifact@v5
+      - name: Download Artifact from Release
+        id: download_artifact
+        uses: robinraju/release-downloader@v1
         with:
-          name: MFA-WebUI-${{ github.ref_name }}-${{ matrix.platform }}-${{ matrix.arch }}
           repository: ravizhan/MFA-WebUI
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          run-id: 20408449236
-          path: ./
+          latest: true
+          fileName: MFA-WebUI-*-${{ matrix.platform }}-${{ matrix.arch }}.7z
+          out-file-path: ./
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Decompress Artifact to build
         run: |
-          7z x MFA-WebUI-${{ github.ref_name }}-${{ matrix.platform }}-${{ matrix.arch }}.7z -obuild -y
+          7z x ${{ fromJson(steps.download_artifact.outputs.downloaded_files)[0] }} -obuild -y
 
       - name: Compress Final Artifact
         run: |
