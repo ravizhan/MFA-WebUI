@@ -7,8 +7,16 @@ class Update(BaseModel):
     proxy: str
 
 class Notification(BaseModel):
-    enabled: bool
+    systemNotification: bool = False
+    browserNotification: bool = False
+    externalNotification: bool = False
     webhook: str
+    contentType: Literal["application/json", "application/x-www-form-urlencoded"] = "application/json"
+    headers: str = ""
+    body: str = ""
+    username: str = ""
+    password: str = ""
+    method: Literal["POST", "GET"] = "POST"
     notifyOnComplete: bool
     notifyOnError: bool
 

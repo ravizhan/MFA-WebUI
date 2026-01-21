@@ -29,7 +29,7 @@
               <n-icon><div class="i-mdi-palette" /></n-icon>
             </template>
           </n-anchor-link>
-          <n-anchor-link title="外部通知" href="#notification-settings">
+          <n-anchor-link title="通知设置" href="#notification-settings">
             <template #icon>
               <n-icon><div class="i-mdi-bell" /></n-icon>
             </template>
@@ -154,40 +154,141 @@
             </n-form>
           </n-card>
 
-          <!-- 外部通知 -->
-          <n-card id="notification-settings" class="mb-6 scroll-mt-5 last:mb-0" title="外部通知">
+          <!-- 通知设置 -->
+          <n-card id="notification-settings" class="mb-6 scroll-mt-5 last:mb-0" title="通知设置">
             <template #header-extra>
               <n-button
                 size="small"
                 type="info"
                 @click="testNotification"
-                :disabled="!settings.notification.enabled || !settings.notification.webhook"
+                :disabled="
+                  !settings.notification.externalNotification || !settings.notification.webhook
+                "
               >
-                测试通知
+                测试外部通知
               </n-button>
             </template>
             <n-form label-placement="left" label-width="120">
               <n-form-item label="启用通知">
-                <n-switch
-                  v-model:value="settings.notification.enabled"
-                  @update:value="
-                    (val: boolean) => handleSettingChange('notification', 'enabled', val)
-                  "
-                />
+                <n-space>
+                  <n-checkbox
+                    v-model:checked="settings.notification.systemNotification"
+                    @update:checked="
+                      (val: boolean) =>
+                        handleSettingChange('notification', 'systemNotification', val)
+                    "
+                  >
+                    系统通知
+                  </n-checkbox>
+                  <n-checkbox
+                    v-model:checked="settings.notification.browserNotification"
+                    @update:checked="
+                      (val: boolean) =>
+                        handleSettingChange('notification', 'browserNotification', val)
+                    "
+                  >
+                    浏览器通知
+                  </n-checkbox>
+                  <n-checkbox
+                    v-model:checked="settings.notification.externalNotification"
+                    @update:checked="
+                      (val: boolean) =>
+                        handleSettingChange('notification', 'externalNotification', val)
+                    "
+                  >
+                    外部通知
+                  </n-checkbox>
+                </n-space>
               </n-form-item>
-              <template v-if="settings.notification.enabled">
-                <n-form-item label="Webhook 地址">
+            </n-form>
+            <template v-if="settings.notification.externalNotification">
+              <n-form label-placement="top">
+                <n-form-item label="url *">
                   <n-input
                     v-model:value="settings.notification.webhook"
-                    placeholder="https://your-webhook-url.com"
-                    type="textarea"
-                    :autosize="{ minRows: 2, maxRows: 4 }"
+                    placeholder="https://..."
                     @blur="
                       handleSettingChange('notification', 'webhook', settings.notification.webhook)
                     "
                   />
                 </n-form-item>
-                <n-form-item label="完成时通知">
+                <n-form-item label="content_type" v-if="settings.notification.method !== 'GET'">
+                  <n-select
+                    v-model:value="settings.notification.contentType"
+                    :options="contentTypeOptions"
+                    @update:value="
+                      (val: string) =>
+                        handleSettingChange(
+                          'notification',
+                          'contentType',
+                          val as SettingsModel['notification']['contentType'],
+                        )
+                    "
+                  />
+                </n-form-item>
+                <n-form-item label="headers">
+                  <n-input
+                    v-model:value="settings.notification.headers"
+                    placeholder="HTTP headers in JSON format"
+                    @blur="
+                      handleSettingChange('notification', 'headers', settings.notification.headers)
+                    "
+                  />
+                </n-form-item>
+                <n-form-item label="body">
+                  <n-input
+                    v-model:value="settings.notification.body"
+                    type="textarea"
+                    placeholder='{"desp":"{{message}}","title":"{{title}}"}'
+                    :autosize="{ minRows: 2, maxRows: 5 }"
+                    @blur="handleSettingChange('notification', 'body', settings.notification.body)"
+                  />
+                </n-form-item>
+                <n-form-item label="username">
+                  <n-input
+                    v-model:value="settings.notification.username"
+                    @blur="
+                      handleSettingChange(
+                        'notification',
+                        'username',
+                        settings.notification.username,
+                      )
+                    "
+                  />
+                </n-form-item>
+                <n-form-item label="password">
+                  <n-input
+                    v-model:value="settings.notification.password"
+                    type="password"
+                    show-password-on="click"
+                    @blur="
+                      handleSettingChange(
+                        'notification',
+                        'password',
+                        settings.notification.password,
+                      )
+                    "
+                  />
+                </n-form-item>
+                <n-form-item label="method">
+                  <n-select
+                    v-model:value="settings.notification.method"
+                    :options="methodOptions"
+                    @update:value="
+                      (val: string) =>
+                        handleSettingChange(
+                          'notification',
+                          'method',
+                          val as SettingsModel['notification']['method'],
+                        )
+                    "
+                  />
+                </n-form-item>
+              </n-form>
+            </template>
+            <n-divider />
+            <n-form label-placement="left" label-width="120">
+              <n-form-item label="完成时通知">
                   <n-switch
                     v-model:value="settings.notification.notifyOnComplete"
                     @update:value="
@@ -203,8 +304,7 @@
                     "
                   />
                 </n-form-item>
-              </template>
-            </n-form>
+              </n-form>
           </n-card>
 
           <!-- 关于我们 -->
@@ -294,6 +394,16 @@ const checkingUpdate = ref(false)
 const updateChannelOptions = [
   { label: "稳定版", value: "stable" },
   { label: "测试版", value: "beta" },
+]
+
+const methodOptions = [
+  { label: "POST", value: "POST" },
+  { label: "GET", value: "GET" },
+]
+
+const contentTypeOptions = [
+  { label: "application/json", value: "application/json" },
+  { label: "application/x-www-form-urlencoded", value: "application/x-www-form-urlencoded" },
 ]
 
 const darkModeOptions = [

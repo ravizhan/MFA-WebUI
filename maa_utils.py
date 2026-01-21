@@ -2,7 +2,7 @@ import os
 import time
 import traceback
 from queue import SimpleQueue
-
+import json
 import plyer
 from maa.controller import AdbController
 from maa.resource import Resource
@@ -13,6 +13,9 @@ import importlib.abc
 import re
 import sys
 from pathlib import Path
+import httpx
+
+from models.settings import SettingsModel
 
 resource = Resource()
 resource.set_cpu()
@@ -29,10 +32,54 @@ class MaaWorker:
         self.send_log("MAA初始化成功")
         self.load_custom_func()
         self.send_log("Agent加载完成")
+        self.http_client = httpx.Client(timeout=30)
 
     def send_log(self, msg):
         self.queue.put(f"{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())} {msg}")
         time.sleep(0.05)
+
+    def sned_notification(self, title, message):
+        with open("config/settings.json", "r", encoding="utf-8") as f:
+            config_data = json.load(f)
+        settings = SettingsModel(**config_data)
+        if settings.notification.systemNotification:
+            plyer.notification.notify(
+                title=title,
+                message=message,
+                app_name=self.interface.label,
+                timeout=30
+            )
+        if settings.notification.externalNotification:
+            try:
+                body = json.loads(settings.notification.body.replace("{{title}}", title).replace("{{message}}", message))
+                if settings.notification.method == "POST":
+                    headers = {}
+                    if settings.notification.headers:
+                        headers = json.loads(settings.notification.headers)
+                    auth = None
+                    if settings.notification.username and settings.notification.password:
+                        auth = (settings.notification.username, settings.notification.password)
+                    if settings.notification.contentType == "application/json":
+                        self.http_client.post(
+                            settings.notification.webhook,
+                            headers=headers,
+                            json=body,
+                            auth=auth
+                        )
+                    else:
+                        self.http_client.post(
+                            settings.notification.webhook,
+                            headers=headers,
+                            data=body,
+                            auth=auth
+                        )
+                else:
+                    self.http_client.get(
+                        settings.notification.webhook,
+                        params=body
+                    )
+            except Exception as e:
+                self.send_log(f"外部通知发送失败: {e}")
 
     @staticmethod
     def get_device():
@@ -66,11 +113,6 @@ class MaaWorker:
             return self.connected
         if self.tasker.bind(resource, controller):
             self.connected = True
-            # size = subprocess.run([device.adb_path, "shell", "wm", "size"], text=True, capture_output=True).stdout
-            # size = size.strip().split(": ")[1]
-            # dpi = subprocess.run([device.adb_path, "shell", "wm", "density"], text=True, capture_output=True).stdout
-            # dpi = dpi.strip().split(": ")[1]
-            # print(size,dpi)
             self.send_log("设备连接成功")
         else:
             plyer.notification.notify(

@@ -7,8 +7,16 @@ export interface UpdateSettings {
 
 // 外部通知设置
 export interface NotificationSettings {
-  enabled: boolean
+  systemNotification: boolean
+  browserNotification: boolean
+  externalNotification: boolean
   webhook: string
+  contentType: "application/json" | "application/x-www-form-urlencoded"
+  headers: string
+  body: string
+  username?: string
+  password?: string
+  method: "POST" | "GET"
   notifyOnComplete: boolean
   notifyOnError: boolean
 }
