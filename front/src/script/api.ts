@@ -251,3 +251,12 @@ export function resetUserConfig(): Promise<boolean> {
       return false
     })
 }
+
+export function testNotificationApi(): Promise<ApiResponse> {
+  return fetch("/api/test-notification", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+  }).then((res) => res.json())
+}

@@ -38,7 +38,7 @@ class MaaWorker:
         self.queue.put(f"{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())} {msg}")
         time.sleep(0.05)
 
-    def sned_notification(self, title, message):
+    def send_notification(self, title, message):
         with open("config/settings.json", "r", encoding="utf-8") as f:
             config_data = json.load(f)
         settings = SettingsModel(**config_data)

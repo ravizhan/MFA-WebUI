@@ -368,7 +368,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from "vue"
 import { useSettingsStore } from "../stores/settings"
-import { checkUpdate } from "../script/api"
+import { checkUpdate, testNotificationApi } from "../script/api"
 import { useMessage, useDialog } from "naive-ui"
 import type { SettingsModel } from "../types/settings"
 
@@ -451,9 +451,19 @@ const checkForUpdate = async () => {
   }
 }
 
-const testNotification = () => {
+const testNotification = async () => {
   message.info("正在发送测试通知...")
-  // TODO: 调用后端测试通知接口
+  try {
+    const result = await testNotificationApi()
+    if (result.status === "success") {
+      message.success("测试通知已发送")
+    } else {
+      message.error(`发送失败: ${result.message}`)
+    }
+  } catch (error) {
+    message.error("发送测试通知时发生错误")
+    console.error(error)
+  }
 }
 
 const handleResetSettings = () => {

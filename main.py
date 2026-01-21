@@ -134,6 +134,16 @@ def reset_user_config():
     except Exception as e:
         return {"status": "failed", "message": str(e)}
 
+@app.post("/api/test-notification")
+def test_notification():
+    if app_state.worker is None:
+        return {"status": "failed", "message": "Worker未初始化"}
+    try:
+        app_state.worker.send_notification("测试通知", "这是一条测试通知。")
+        return {"status": "success"}
+    except Exception as e:
+        return {"status": "failed", "message": str(e)}
+
 
 @app.post("/api/start")
 def start(tasks: list[str], options: dict[str, str]):
