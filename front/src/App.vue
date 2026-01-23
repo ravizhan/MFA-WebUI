@@ -1,11 +1,14 @@
 <template>
-  <n-config-provider :theme="naiveTheme">
+  <n-config-provider
+    :theme="naiveTheme"
+    class="lg:h-full lg:flex lg:flex-col lg:justify-center"
+  >
     <n-message-provider>
       <n-dialog-provider>
-        <div class="lg:pt-10 lg:pb-10 pt-0 pb-0">
-          <n-layout class="lg:shadow-3xl lg:w-[80vw] w-full m-auto m-0 pt-0">
+        <div>
+          <n-layout class="lg:shadow-3xl lg:w-[80vw] w-full mx-auto pt-0">
             <n-layout-header bordered>
-              <div class="text-align-center mt-3 text-2xl">{{ name }}</div>
+              <div class="text-center py-3 text-2xl">{{ name }}</div>
               <n-menu mode="horizontal" class="justify-between" :options="menuOptions" />
             </n-layout-header>
             <n-layout>
