@@ -10,7 +10,7 @@ jobs:
   vite-build:
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     outputs:
       cache-key: ${{ steps.Store-Cache-Key.outputs.cache-key }}
     defaults:
@@ -161,7 +161,7 @@ jobs:
     if: ${{ startsWith(github.ref, 'refs/tags/') }}
     permissions:
       contents: write
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     needs: build
     steps:
       - name: Download All Artifacts
