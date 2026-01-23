@@ -61,9 +61,9 @@ _✨ 基于 **[Vue](https://github.com/vuejs/vue)** 和 **[FastAPI](https://gith
 
 项目采用前后端分离架构：
 
-- **后端**：FastAPI (Python 3.12+)，提供 RESTful API 和 WebSocket 服务，运行在 `http://127.0.0.1:55666`
+- **后端**：FastAPI (Python 3.12+)，提供 RESTful API 和 Server-Sent Events (SSE) 服务，运行在 `http://127.0.0.1:55666`
 - **前端**：Vue 3 + NaiveUI + Vite + UnoCSS + Pinia，构建输出到 `page/` 目录
-- **核心交互**：通过 WebSocket 实现任务状态和日志的实时推送
+- **核心交互**：通过 SSE (Server-Sent Events) 实现任务状态和日志的实时推送
 
 ### 💻 开发指南
 

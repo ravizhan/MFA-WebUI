@@ -11,9 +11,8 @@
 import type { LogInst } from "naive-ui"
 import Clipboard from "clipboard"
 import { useMessage, useDialog } from "naive-ui"
-import { ws } from "../script/ws.ts"
-import { ref, onMounted, watchEffect, nextTick } from "vue"
-import { Websocket, WebsocketEvent } from "websocket-ts"
+import { sse } from "../script/sse"
+import { ref, onMounted, onUnmounted, watchEffect, nextTick } from "vue"
 import { useIndexStore } from "../stores"
 import { storeToRefs } from "pinia"
 
@@ -40,20 +39,17 @@ function is_now(date_string: string) {
   return date_string === formatDate(new Date())
 }
 
-const getsocketData = (i: Websocket, ev: MessageEvent) => {
-  const data: string = ev.data
-  if (data === "ping") {
-    return
-  }
-  indexStore.UpdateLog(data)
-  if (data.includes("请求接管") && is_now(data.split(" ")[0] + " " + data.split(" ")[1])) {
-    message.warning(data)
+const handleLog = (data: { message: string }) => {
+  const msg = data.message
+  indexStore.UpdateLog(msg)
+  if (msg.includes("请求接管") && is_now(msg.split(" ")[0] + " " + msg.split(" ")[1])) {
+    message.warning(msg)
     new Notification("请求接管", {
-      body: data + "\n" + "完成接管后请点击确定",
+      body: msg + "\n" + "完成接管后请点击确定",
     })
     dialog.warning({
       title: "请求接管",
-      content: data + "\n" + "完成接管后请点击确定",
+      content: msg + "\n" + "完成接管后请点击确定",
       positiveText: "确定",
       closable: false,
       maskClosable: false,
@@ -76,7 +72,7 @@ const getsocketData = (i: Websocket, ev: MessageEvent) => {
     })
   }
 }
-ws.addEventListener(WebsocketEvent.message, getsocketData)
+sse.addEventListener('log', handleLog)
 
 onMounted(() => {
   watchEffect(() => {
@@ -87,5 +83,9 @@ onMounted(() => {
       })
     }
   })
+})
+
+onUnmounted(() => {
+  sse.removeEventListener('log', handleLog)
 })
 </script>

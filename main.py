@@ -6,10 +6,9 @@ from contextlib import asynccontextmanager
 from queue import SimpleQueue
 import uvicorn
 import os
-from fastapi import FastAPI, websockets, Request
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from starlette.websockets import WebSocketState, WebSocketDisconnect
 from models.interfaceV2 import InterfaceModel
 from models.api import DeviceModel, UserConfig
 from models.settings import SettingsModel
@@ -21,6 +20,26 @@ with open("interface.json", "r", encoding="utf-8") as f:
 interface = InterfaceModel(**json_data)
 
 
+class LogBroadcaster:
+    def __init__(self):
+        self._queues: list[asyncio.Queue] = []
+
+    def add_client(self, history: list[str]) -> asyncio.Queue:
+        q = asyncio.Queue()
+        for msg in history:
+            q.put_nowait(msg)
+        self._queues.append(q)
+        return q
+
+    def remove_client(self, q: asyncio.Queue):
+        if q in self._queues:
+            self._queues.remove(q)
+
+    async def broadcast(self, message: str):
+        for q in self._queues:
+            await q.put(message)
+
+
 class AppState:
     def __init__(self):
         self.message_conn = SimpleQueue()
@@ -28,16 +47,35 @@ class AppState:
         self.worker: MaaWorker | None = None
         self.history_message = []
         self.current_status = None
+        self.broadcaster: LogBroadcaster | None = None
 
 
 app_state = AppState()
+
+async def log_monitor():
+    while True:
+        while not app_state.message_conn.empty():
+            msg = app_state.message_conn.get_nowait()
+            app_state.history_message.append(msg)
+            if app_state.broadcaster:
+                await app_state.broadcaster.broadcast(msg)
+            
+            if "所有任务完成" in msg:
+                if app_state.child_process:
+                    app_state.child_process.join()
+                    app_state.child_process = None
+        
+        await asyncio.sleep(0.1)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     webbrowser.open_new("http://127.0.0.1:55666")
     app_state.worker = MaaWorker(app_state.message_conn, interface)
+    app_state.broadcaster = LogBroadcaster()
+    monitor_task = asyncio.create_task(log_monitor())
     yield
+    monitor_task.cancel()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -172,38 +210,34 @@ def stop():
     return {"status": "success"}
 
 
-@app.websocket("/api/ws")
-async def websocket_endpoint(websocket: websockets.WebSocket):
-    await websocket.accept()
-    last_ping = asyncio.create_task(asyncio.sleep(0))
-    try:
-        await asyncio.sleep(0.5)
-        for msg in app_state.history_message:
-            await websocket.send_text(msg)
-        while websocket.client_state == WebSocketState.CONNECTED:
-            if not app_state.message_conn.empty():
-                data = app_state.message_conn.get_nowait()
-                app_state.history_message.append(data)
-                if "所有任务完成" in data:
-                    app_state.child_process.join()
-                    # 重置状态
-                    app_state.child_process = None
-                    await websocket.send_text(data)
+@app.get("/api/logs")
+async def stream_logs(request: Request):
+    q = app_state.broadcaster.add_client(app_state.history_message)
+
+    async def event_generator():
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    data = await asyncio.wait_for(q.get(), timeout=1.0)
+                    yield f"data: {json.dumps({'type': 'log', 'message': data}, ensure_ascii=False)}\n\n"
+                except asyncio.TimeoutError:
                     continue
-                await websocket.send_text(data)
-            if last_ping.done():
-                last_ping = asyncio.create_task(asyncio.sleep(5))
-                await websocket.send_text("ping")
-            await asyncio.sleep(0.01)
-    except WebSocketDisconnect:
-        print("WebSocket disconnect")
-        last_ping.cancel()
-    finally:
-        if websocket.client_state == WebSocketState.CONNECTED:
-            try:
-                await websocket.close()
-            except RuntimeError:
-                pass
+        except asyncio.CancelledError:
+            pass
+        finally:
+            app_state.broadcaster.remove_client(q)
+    
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*"
+        }
+    )
 
 
 if __name__ == '__main__':
