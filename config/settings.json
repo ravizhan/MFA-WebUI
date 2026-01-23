@@ -5,8 +5,16 @@
         "proxy": ""
     },
     "notification": {
-        "enabled": true,
+        "systemNotification": false,
+        "browserNotification": false,
+        "externalNotification": false,
         "webhook": "",
+        "contentType": "application/json",
+        "headers": "",
+        "body": "",
+        "username": "",
+        "password": "",
+        "method": "POST",
         "notifyOnComplete": true,
         "notifyOnError": true
     },
