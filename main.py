@@ -13,6 +13,7 @@ from models.interfaceV2 import InterfaceModel
 from models.api import DeviceModel, UserConfig
 from models.settings import SettingsModel
 from maa_utils import MaaWorker
+import httpx
 
 with open("interface.json", "r", encoding="utf-8") as f:
     json_data = json.load(f)
@@ -169,6 +170,24 @@ def reset_user_config():
         if os.path.exists(config_path):
             os.remove(config_path)
         return {"status": "success"}
+    except Exception as e:
+        return {"status": "failed", "message": str(e)}
+    
+@app.get("/api/check-update")
+def check_update():
+    try:
+        repo_name = interface.github.split("/")[3]+"/"+interface.github.split("/")[4]
+        response = httpx.get(f"https://api.github.com/repos/{repo_name}/releases/latest").json()
+        latest_version = response["tag_name"]
+        current_version = interface.version
+        update_info = {
+            "latest_version": latest_version,
+            "current_version": current_version,
+            "is_update_available": latest_version != current_version,
+            "release_notes": response["body"],
+            "download_url": response["html_url"]
+        }
+        return {"status": "success", "update_info": update_info}
     except Exception as e:
         return {"status": "failed", "message": str(e)}
 

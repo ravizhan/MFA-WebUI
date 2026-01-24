@@ -171,10 +171,22 @@ jobs:
           pattern: MWU-${{ github.ref_name }}-*
           merge-multiple: true
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Generate Release Notes
+        id: generate_notes
+        env:
+          API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
+        run: uv run python .github/scripts/generate_release_notes.py
+
       - name: Create Release
         uses: ncipollo/release-action@v1.16.0
         with:
           draft: true
           allowUpdates: true
           artifacts: artifacts/*.7z
+          body: ${{ steps.generate_notes.outputs.notes }}
           name: 'Release ${{ github.ref_name }}'
