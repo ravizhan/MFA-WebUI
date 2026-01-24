@@ -10,7 +10,7 @@ jobs:
   vite-build:
     permissions:
       contents: read
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-24.04
     outputs:
       cache-key: ${{ steps.Store-Cache-Key.outputs.cache-key }}
     defaults:
@@ -27,10 +27,10 @@ jobs:
           run_install: false
           package_json_file: 'front/package.json'
 
-      - name: Use Node.js 22
+      - name: Use Node.js 24
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: "pnpm"
           cache-dependency-path: 'front/pnpm-lock.yaml'
 
@@ -161,15 +161,23 @@ jobs:
     if: ${{ startsWith(github.ref, 'refs/tags/') }}
     permissions:
       contents: write
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-24.04
     needs: build
     steps:
+      - name: Check-out repository
+        uses: actions/checkout@v4
+
       - name: Download All Artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
           pattern: MWU-${{ github.ref_name }}-*
           merge-multiple: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: ".python-version"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v5
