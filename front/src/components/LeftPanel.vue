@@ -35,7 +35,7 @@
   <n-card hoverable>
     <n-list hoverable bordered>
       <template v-if="scroll_show">
-        <n-scrollbar class="max-h-80">
+        <n-scrollbar class="max-h-75">
           <VueDraggable v-model="configStore.taskList">
             <n-list-item v-for="item in configStore.taskList" :key="item.id">
               <n-checkbox size="large" :label="item.name" v-model:checked="item.checked" />

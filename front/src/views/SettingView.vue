@@ -1,7 +1,7 @@
 <template>
   <n-message-provider>
     <div
-      class="flex p-5 gap-6 min-h-[60vh] max-h-[65.5vh] overflow-y-auto max-md:flex-col max-md:p-3"
+      class="flex p-5 gap-6 h-[80vh] overflow-y-auto max-md:flex-col max-md:p-3"
     >
       <!-- 左侧锚点导航 -->
       <div

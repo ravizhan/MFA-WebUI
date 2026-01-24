@@ -1,21 +1,22 @@
 <template>
   <n-config-provider
     :theme="naiveTheme"
-    class="lg:h-full lg:flex lg:flex-col lg:justify-center"
+    :theme-overrides="themeOverrides"
+    class="lg:h-full lg:flex lg:flex-col lg:justify-center bg-gray-50 dark:bg-gray-900 transition-colors duration-300"
   >
     <n-message-provider>
       <n-dialog-provider>
         <div>
-          <n-layout class="lg:shadow-3xl lg:w-[80vw] w-full mx-auto pt-0">
-            <n-layout-header bordered>
-              <div class="text-center py-3 text-2xl">{{ name }}</div>
+          <n-layout class="lg:shadow-3xl lg:w-[80vw] w-full mx-auto pt-0 lg:rounded-xl transition-all duration-300">
+            <n-layout-header bordered class="backdrop-blur-sm bg-opacity-90">
+              <div class="text-center text-2xl font-bold tracking-wide">{{ name }}</div>
               <n-menu mode="horizontal" class="justify-between" :options="menuOptions" />
             </n-layout-header>
             <n-layout>
               <router-view></router-view>
             </n-layout>
-            <n-layout-footer bordered class="text-align-center">
-              <a href="https://github.com/ravizhan/MWU" target="_blank">
+            <n-layout-footer bordered class="text-center py-4 text-gray-500">
+              <a href="https://github.com/ravizhan/MWU" target="_blank" class="hover:text-blue-500 transition-colors">
                 Powered by MWU
               </a>
             </n-layout-footer>
@@ -35,6 +36,7 @@ import { useInterfaceStore } from "./stores/interface.ts"
 import { useUserConfigStore } from "./stores/userConfig.ts"
 import { useSettingsStore } from "./stores/settings"
 import { darkTheme } from "naive-ui"
+import { lightThemeOverrides, darkThemeOverrides } from "./theme"
 
 import githubMarkdownAutoUrl from "github-markdown-css/github-markdown.css?url"
 import githubMarkdownLightUrl from "github-markdown-css/github-markdown-light.css?url"
@@ -51,6 +53,7 @@ const offset = ref(0)
 const screenWidth = ref(window.innerWidth)
 
 const naiveTheme = computed(() => (settingsStore.isDarkMode ? darkTheme : null))
+const themeOverrides = computed(() => (settingsStore.isDarkMode ? darkThemeOverrides : lightThemeOverrides))
 
 const markdownCssHref = computed(() => {
   const mode = settingsStore.settings.ui.darkMode
@@ -87,6 +90,11 @@ onMounted(async () => {
 
 watchEffect(() => {
   ensureMarkdownStylesheet(markdownCssHref.value)
+  if (settingsStore.isDarkMode) {
+    document.documentElement.classList.add("dark")
+  } else {
+    document.documentElement.classList.remove("dark")
+  }
 })
 watch(screenWidth, (newValue) => {
   if (newValue < 450) {
