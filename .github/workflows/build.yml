@@ -174,16 +174,17 @@ jobs:
       - uses: nosovj/llm-release-action@v1
         id: release
         with:
-          model: zai/glm-4.7-flash
+          model: openai/deepseek-ai/DeepSeek-V3.2
           analyze_diffs: true
           context_max_tokens: 8000
           context_files: README.md
           changelog_config: |
             release-notes:
               preset: customer
-              languages: [zh]
+              languages: ["zh"]
         env:
-          ZAI_API_KEY: ${{ secrets.ZAI_API_KEY }}
+          OPENAI_BASE_URL: https://api.siliconflow.cn/v1
+          OPENAI_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
 
       - name: Create Release
         uses: ncipollo/release-action@v1.16.0
