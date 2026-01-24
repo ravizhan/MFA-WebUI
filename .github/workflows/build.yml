@@ -171,26 +171,10 @@ jobs:
           pattern: MWU-${{ github.ref_name }}-*
           merge-multiple: true
 
-      - uses: nosovj/llm-release-action@v1
-        id: release
-        with:
-          model: openai/deepseek-ai/DeepSeek-V3.2
-          analyze_diffs: true
-          context_max_tokens: 8000
-          context_files: README.md
-          changelog_config: |
-            release-notes:
-              preset: customer
-              languages: ["zh"]
-        env:
-          OPENAI_BASE_URL: https://api.siliconflow.cn/v1
-          OPENAI_API_KEY: ${{ secrets.SILICONFLOW_API_KEY }}
-
       - name: Create Release
         uses: ncipollo/release-action@v1.16.0
         with:
           draft: true
           allowUpdates: true
           artifacts: artifacts/*.7z
-          body: ${{ steps.release.outputs.changelog['release-notes']['zh'] }}
           name: 'Release ${{ github.ref_name }}'
