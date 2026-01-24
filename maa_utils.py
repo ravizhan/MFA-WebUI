@@ -14,7 +14,7 @@ import re
 import sys
 from pathlib import Path
 import httpx
-
+from models.interface import InterfaceModel
 from models.settings import SettingsModel
 
 resource = Resource()
@@ -23,7 +23,6 @@ resource.set_cpu()
 class MaaWorker:
     def __init__(self, queue: SimpleQueue, interface):
         Toolkit.init_option("./")
-        from models.interfaceV2 import InterfaceModel
         self.interface: InterfaceModel = interface
         self.queue = queue
         self.tasker = Tasker()

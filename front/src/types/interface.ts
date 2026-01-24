@@ -23,7 +23,20 @@ export interface Win32Controller {
   screencap?: Win32Screencap
 }
 
-export type ControllerType = "Adb" | "Win32"
+export interface PlayCoverController {
+  uuid?: string
+}
+
+export type GamepadType = "Xbox360" | "DualShock4" | "DS4"
+
+export interface GamepadController {
+  class_regex?: string
+  window_regex?: string
+  gamepad_type?: GamepadType
+  screencap?: Win32Screencap
+}
+
+export type ControllerType = "Adb" | "Win32" | "PlayCover" | "Gamepad"
 
 export interface Controller {
   name: string
@@ -31,10 +44,14 @@ export interface Controller {
   description?: string
   icon?: string
   type: ControllerType
+  adb?: Record<string, any>
   win32?: Win32Controller
+  playcover?: PlayCoverController
+  gamepad?: GamepadController
   display_short_side?: number
   display_long_side?: number
   display_raw?: boolean
+  permission_required?: boolean
 }
 
 export interface Resource {
@@ -44,6 +61,7 @@ export interface Resource {
   icon?: string
   path: string[]
   controller?: string[]
+  option?: string[]
 }
 
 export interface Agent {
@@ -58,8 +76,10 @@ export interface Task {
   entry: string
   default_check?: boolean
   description?: string
+  doc?: string | string[]
   icon?: string
   resource?: string[]
+  controller?: string[]
   pipeline_override?: Record<string, object>
   option?: string[]
 }
@@ -106,6 +126,7 @@ export interface InputOption extends OptionBase {
 export interface SwitchOption extends OptionBase {
   type: "switch"
   cases: [OptionCase, OptionCase]
+  default_case?: string
 }
 
 export type Option = SelectOption | InputOption | SwitchOption

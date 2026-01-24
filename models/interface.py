@@ -1,10 +1,10 @@
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, model_validator, ConfigDict
 from typing import List, Optional, Dict, Literal, Union
 
 
 class AdbController(BaseModel):
     """Adb 控制器配置，V2 协议中 input/screencap 由 MaaFramework 自动检测"""
-    pass
+    model_config = ConfigDict(extra='allow')
 
 
 class Win32Controller(BaseModel):

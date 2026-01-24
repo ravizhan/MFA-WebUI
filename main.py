@@ -9,7 +9,7 @@ import os
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from models.interfaceV2 import InterfaceModel
+from models.interface import InterfaceModel
 from models.api import DeviceModel, UserConfig
 from models.settings import SettingsModel
 from maa_utils import MaaWorker

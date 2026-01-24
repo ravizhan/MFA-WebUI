@@ -1,4 +1,4 @@
-import type { InterfaceModel } from "../types/interfaceV2"
+import type { InterfaceModel } from "../types/interface"
 
 interface ApiResponse {
   status: string
