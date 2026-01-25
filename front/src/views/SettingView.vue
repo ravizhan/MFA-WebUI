@@ -1,9 +1,6 @@
 <template>
   <n-message-provider>
-    <div
-      class="flex p-5 gap-6 h-[80vh] overflow-y-auto max-md:flex-col max-md:p-3"
-    >
-      <!-- 左侧锚点导航 -->
+    <div class="flex p-5 gap-6 h-[80vh] overflow-y-auto max-md:flex-col max-md:p-3">
       <div
         class="sticky top-5 w-45 shrink-0 h-fit max-md:relative max-md:top-0 max-md:w-full max-md:mb-4"
       >
@@ -41,10 +38,8 @@
           </n-anchor-link>
         </n-anchor>
       </div>
-
-      <!-- 右侧设置内容 -->
-      <div id="setting-content" class="flex-1 max-w-200 overflow-y-auto max-md:max-w-full">
-        <n-spin :show="settingsStore.loading">
+      <div id="setting-content" class="flex-1 overflow-y-auto max-md:max-w-full">
+        <n-scrollbar>
           <!-- 更新设置 -->
           <n-card id="update-settings" class="mb-6 scroll-mt-5 last:mb-0" title="更新设置">
             <template #header-extra>
@@ -289,22 +284,22 @@
             <n-divider />
             <n-form label-placement="left" label-width="120">
               <n-form-item label="完成时通知">
-                  <n-switch
-                    v-model:value="settings.notification.notifyOnComplete"
-                    @update:value="
-                      (val: boolean) => handleSettingChange('notification', 'notifyOnComplete', val)
-                    "
-                  />
-                </n-form-item>
-                <n-form-item label="错误时通知">
-                  <n-switch
-                    v-model:value="settings.notification.notifyOnError"
-                    @update:value="
-                      (val: boolean) => handleSettingChange('notification', 'notifyOnError', val)
-                    "
-                  />
-                </n-form-item>
-              </n-form>
+                <n-switch
+                  v-model:value="settings.notification.notifyOnComplete"
+                  @update:value="
+                    (val: boolean) => handleSettingChange('notification', 'notifyOnComplete', val)
+                  "
+                />
+              </n-form-item>
+              <n-form-item label="错误时通知">
+                <n-switch
+                  v-model:value="settings.notification.notifyOnError"
+                  @update:value="
+                    (val: boolean) => handleSettingChange('notification', 'notifyOnError', val)
+                  "
+                />
+              </n-form-item>
+            </n-form>
           </n-card>
 
           <!-- 关于我们 -->
@@ -359,7 +354,7 @@
               <n-button type="warning" @click="handleResetSettings"> 重置所有设置 </n-button>
             </n-space>
           </n-card>
-        </n-spin>
+        </n-scrollbar>
       </div>
     </div>
   </n-message-provider>
@@ -485,3 +480,8 @@ const handleResetSettings = () => {
   })
 }
 </script>
+<style scoped>
+.n-anchor-link {
+  line-height: 2;
+}
+</style>

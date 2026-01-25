@@ -1,8 +1,8 @@
 <template>
-  <n-card content-style="padding: 0;" hoverable>
+  <n-card content-style="padding: 0;margin: 5px" hoverable>
     <n-tabs type="segment" animated>
       <n-tab-pane name="device" tab="设备连接">
-        <n-flex class="px-[12px] pb-[12px]">
+        <n-flex class="pb-[12px]">
           <n-select
             v-model:value="device"
             placeholder="请选择一个设备"
@@ -16,7 +16,7 @@
         </n-flex>
       </n-tab-pane>
       <n-tab-pane name="resource" tab="资源选择">
-        <n-flex class="px-[12px] pb-[12px]">
+        <n-flex class="pb-[12px]">
           <n-select
             v-model:value="resource"
             placeholder="请选择一个资源"
