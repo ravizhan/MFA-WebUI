@@ -438,7 +438,11 @@ const checkForUpdate = async () => {
         positiveText: "前往更新",
         negativeText: "稍后",
         onPositiveClick: () => {
-          window.open(settings.value.about.github, "_blank")
+          if (result.downloadUrl) {
+            window.open(result.downloadUrl, "_blank")
+          } else {
+            window.open(settings.value.about.github, "_blank")
+          }
         },
       })
     } else {

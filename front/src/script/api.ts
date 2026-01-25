@@ -84,7 +84,7 @@ export function postDevices(device: Device): void {
         window.$message.success("设备连接成功")
       } else {
         // @ts-ignore
-        window.$message.error("设备连接成功，请检查终端日志")
+        window.$message.error("设备连接失败，请检查终端日志")
       }
     })
 }
@@ -159,19 +159,25 @@ export function updateSettings(settings: SettingsModel): Promise<boolean> {
     })
 }
 
-// 检查更新
 export function checkUpdate(): Promise<{
   hasUpdate: boolean
   version?: string
   changelog?: string
+  downloadUrl?: string
 }> {
-  return fetch("/api/update/check", { method: "GET" })
+  return fetch("/api/check-update", { method: "GET" })
     .then((res) => res.json())
-    .then((data) => ({
-      hasUpdate: data.has_update || false,
-      version: data.version,
-      changelog: data.changelog,
-    }))
+    .then((data) => {
+      if (data.status === "success" && data.update_info) {
+        return {
+          hasUpdate: data.update_info.is_update_available || false,
+          version: data.update_info.latest_version,
+          changelog: data.update_info.release_notes,
+          downloadUrl: data.update_info.download_url,
+        }
+      }
+      return { hasUpdate: false }
+    })
     .catch((error) => {
       console.error("Failed to check update:", error)
       return { hasUpdate: false }
