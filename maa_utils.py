@@ -1,4 +1,5 @@
 import os
+import subprocess
 import time
 import traceback
 from queue import SimpleQueue
@@ -32,7 +33,8 @@ class MaaWorker:
         self.connected = False
         self.stop_flag = False
         self.send_log("MAA初始化成功")
-        self.load_custom_func()
+        self.agent_process: subprocess.Popen | None = None
+        self.load_agent()
         self.send_log("Agent加载完成")
         self.http_client = httpx.Client(timeout=30)
 
@@ -161,19 +163,17 @@ class MaaWorker:
                 resource.override_pipeline(option.pipeline_override)
                 return
 
-    def load_custom_func(self):
+    def black_magic(self):
         """
-        通用的自定义函数加载器
-        使用自定义 Loader 机制，自动处理模块依赖关系、循环导入及装饰器去除
+        将Agent转换为custom的黑魔法
+        动态加载并注册自定义 Action 和 Recognition
         """
-        agent_args = getattr(self.interface, "agent", None)
-        assert agent_args and getattr(agent_args, "child_args", None), "Interface agent参数解析错误"
         agent_index_path = next(
             (Path(arg.replace("{PROJECT_DIR}", "./")).resolve().parent
-             for arg in agent_args.child_args if arg.endswith(".py")),
+             for arg in self.interface.agent.child_args if arg.endswith(".py")),
             None
         )
-        assert agent_index_path is not None, "Interface agent参数解析错误"
+        assert agent_index_path is not None, "Agent解析错误，无法找到Agent文件夹"
         
         # 将agent目录添加到sys.path的开头，确保优先级最高
         if str(agent_index_path) not in sys.path:
@@ -302,6 +302,28 @@ class MaaWorker:
             if loader in sys.meta_path:
                 sys.meta_path.remove(loader)
 
+    def load_agent(self):
+        if self.interface.agent is None:
+            return
+        if "python" in self.interface.agent.child_exec:
+            assert getattr(self.interface.agent, "child_args", None), "Agent解析错误，缺少child_args"
+            try:
+                self.black_magic()
+            except Exception as e:
+                self.send_log("黑魔法爆炸了！")
+                self.send_log(f"自定义Agent加载失败: {e}")
+                traceback.print_exc()
+        else:
+            if self.interface.agent.child_args:
+                command = [self.interface.agent.child_exec] + self.interface.agent.child_args
+            else:
+                command = [self.interface.agent.child_exec]
+            try:
+                self.agent_process = subprocess.Popen(command)
+            except Exception as e:
+                self.agent_process = None
+                self.send_log(f"Agent进程启动失败: {e}")
+                traceback.print_exc()
     def run(self, task_list):
         self.stop_flag = False
         self.send_log("任务开始")

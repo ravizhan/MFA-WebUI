@@ -77,6 +77,8 @@ async def lifespan(app: FastAPI):
     monitor_task = asyncio.create_task(log_monitor())
     yield
     monitor_task.cancel()
+    if app_state.worker and app_state.worker.agent_process:
+        app_state.worker.agent_process.terminate()
 
 
 app = FastAPI(lifespan=lifespan)
