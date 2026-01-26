@@ -37,7 +37,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build Executable
+      - name: Build Frontend
         run: pnpm run build
 
       - name: Store Cache Key
