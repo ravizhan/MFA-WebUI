@@ -21,9 +21,13 @@
           暂停
         </n-button>
       </n-flex>
-      <div class="flex justify-center items-center h-50 bg-gray-1/5">
+      <div ref="streamContainer" class="flex justify-center items-center h-50 bg-gray-1/5">
         <template v-if="connected">
-          <n-image v-if="streaming" :src="streamUrl" class="max-w-full h-auto" />
+          <n-image
+            v-if="streaming"
+            :src="streamUrl"
+            class="max-w-full h-auto"
+          />
           <n-empty v-else description="点击按钮开启实时画面预览" />
         </template>
         <n-empty v-else description="请先在左侧面板连接设备" />
@@ -81,6 +85,7 @@ onUnmounted(() => {
 
 const fps = ref(30);
 const streamUrl = ref('');
+const streamContainer = ref<HTMLElement | null>(null);
 
 const handleStartStream = () => {
   if (!connected.value) {
@@ -92,8 +97,11 @@ const handleStartStream = () => {
 }
 
 const handleStopStream = () => {
+  const img = streamContainer.value?.querySelector('img')
+  if (img) {
+    img.src = ''
+  }
   streaming.value = false
-  streamUrl.value = ''
 }
 
 watch(connected, (newVal) => {
