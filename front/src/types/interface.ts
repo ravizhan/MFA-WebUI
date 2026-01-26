@@ -109,6 +109,7 @@ interface OptionBase {
   label?: string
   description?: string
   icon?: string
+  pipeline_override?: Record<string, object>
 }
 
 export interface SelectOption extends OptionBase {
@@ -120,7 +121,6 @@ export interface SelectOption extends OptionBase {
 export interface InputOption extends OptionBase {
   type: "input"
   inputs: InputCase[]
-  pipeline_override?: Record<string, object>
 }
 
 export interface SwitchOption extends OptionBase {

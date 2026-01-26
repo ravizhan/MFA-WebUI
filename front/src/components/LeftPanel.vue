@@ -3,12 +3,14 @@
     <n-tabs type="segment" animated>
       <n-tab-pane name="device" tab="设备连接">
         <n-flex class="pb-[12px]">
-          <n-select
+          <n-tree-select
             v-model:value="device"
             placeholder="请选择一个设备"
-            :options="devices_list"
+            :options="devices_tree"
             :loading="loading"
+            :override-default-node-click-behavior="override"
             remote
+            indent="6"
             @click="get_device"
             class="max-w-80%"
           />
@@ -81,14 +83,15 @@ import {
   postDevices,
   startTask,
   stopTask,
-  type Device,
+  type AdbDevice,
+  type Win32Device,
   getResource,
   postResource,
 } from "../script/api"
 import { VueDraggable } from "vue-draggable-plus"
 import { useUserConfigStore } from "../stores/userConfig"
 import { useIndexStore } from "../stores"
-
+import type { TreeSelectOverrideNodeClickBehavior } from "naive-ui"
 import { useMessage, useDialog } from "naive-ui"
 if (typeof window !== "undefined") {
   window.$message = useMessage()
@@ -98,11 +101,17 @@ const dialog = useDialog()
 const configStore = useUserConfigStore()
 const indexStore = useIndexStore()
 const scroll_show = ref(window.innerWidth > 768)
-const device = ref<Device | null>(null)
+const device = ref<AdbDevice | Win32Device | null>(null)
 const resource = ref<string | null>(null)
-const devices_list = ref<object[]>([])
+const devices_tree = ref<object[]>([])
 const resources_list = ref<object[]>([])
 const loading = ref(false)
+const override: TreeSelectOverrideNodeClickBehavior = ({ option }) => {
+  if (option.children) {
+    return "toggleExpand"
+  }
+  return "default"
+}
 
 watch(
   () => configStore.taskList,
@@ -111,7 +120,7 @@ watch(
       indexStore.SelectTask(newList[0]!.id)
     }
   },
-  { immediate: true }
+  { immediate: true },
 )
 
 watch(
@@ -121,7 +130,7 @@ watch(
       configStore.debouncedSave()
     }
   },
-  { deep: true }
+  { deep: true },
 )
 
 watch(
@@ -131,25 +140,62 @@ watch(
       configStore.debouncedSave()
     }
   },
-  { deep: true }
+  { deep: true },
 )
 
 function get_device() {
-  devices_list.value = []
+  devices_tree.value = [
+    {
+      label: "Adb",
+      key: "Adb",
+      children: [],
+    },
+    {
+      label: "Win32",
+      key: "Win32",
+      children: [],
+    },
+  ]
   loading.value = true
   getDevices().then((devices_data) => {
-    for (const device of devices_data) {
-      devices_list.value?.push({
-        label: device.name + " " + device.address,
-        value: device,
+    for (const dev of devices_data.adb) {
+      (devices_tree.value[0] as any).children.push({
+        label: dev.name + " (" + dev.address + ")",
+        key: dev,
       })
     }
-    loading.value = false
+    for (const dev of devices_data.win32) {
+      (devices_tree.value[1] as any).children.push({
+        label: dev.window_name + " (" + dev.class_name + ")",
+        key: dev,
+      })
+    }
   })
+  if ((devices_tree.value[0] as any).children.length === 0) {
+    (devices_tree.value[0] as any).children.push({
+      label: "无可用设备",
+      key: "none",
+      disabled: true,
+    })
+  }
+  if ((devices_tree.value[1] as any).children.length === 0) {
+    (devices_tree.value[1] as any).children.push({
+      label: "无可用设备",
+      key: "none",
+      disabled: true,
+    })
+  }
+  loading.value = false
 }
 
 function connectDevices() {
-  postDevices(device.value as Device)
+  if (!device.value) {
+    // @ts-ignore
+    window.$message.error("请选择一个设备")
+    return
+  } else {
+    postDevices(device.value)
+  }
 }
 
 function get_resource() {
@@ -196,7 +242,7 @@ function resetConfig() {
       await configStore.resetConfig()
       // @ts-ignore
       window.$message.success("配置已重置")
-    }
+    },
   })
 }
 </script>

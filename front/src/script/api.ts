@@ -5,18 +5,29 @@ interface ApiResponse {
   message: string
 }
 
-export interface Device {
+export interface AdbDevice {
   name: string
   adb_path: string
   address: string
   screencap_methods: string
   input_methods: string
-  config: object
+  config: Record<string, any>
+}
+
+export interface Win32Device {
+  hwnd: number
+  class_name: string
+  window_name: string
+}
+
+interface Devices {
+  adb: AdbDevice[]
+  win32: Win32Device[]
 }
 
 interface DeviceResponse {
   status: string
-  devices: Device[]
+  devices: Devices
 }
 
 interface ResourceResponse {
@@ -63,13 +74,13 @@ export function stopTask(): void {
     })
 }
 
-export function getDevices(): Promise<Device[]> {
+export function getDevices(): Promise<Devices> {
   return fetch("/api/device", { method: "GET" })
     .then((res) => res.json())
     .then((data: DeviceResponse) => data.devices)
 }
 
-export function postDevices(device: Device): void {
+export function postDevices(device: AdbDevice|Win32Device): void {
   fetch("/api/device", {
     method: "POST",
     body: JSON.stringify(device),

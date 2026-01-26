@@ -80,18 +80,28 @@ class MaaWorker:
             except Exception as e:
                 self.send_log(f"外部通知发送失败: {e}")
 
-    @staticmethod
-    def get_device():
-        adb_devices = []
-        for device in Toolkit.find_adb_devices():
-            # 这两个字段的数字在JS里会整数溢出，转为字符串处理
-            device.input_methods = str(device.input_methods)
-            device.screencap_methods = str(device.screencap_methods)
-            if device not in adb_devices:
-                adb_devices.append(device)
-        return adb_devices
+    def get_device(self) -> dict:
+        devices = {
+            "adb": [],
+            "win32": []
+        }
+        for controller in self.interface.controller:
+            if controller.type == "adb":
+                for device in Toolkit.find_adb_devices():
+                    # 这两个字段的数字在JS里会整数溢出，转为字符串处理
+                    device.input_methods = str(device.input_methods)
+                    device.screencap_methods = str(device.screencap_methods)
+                    if device not in devices["adb"]:
+                        devices["adb"].append(device)
+            elif controller.type == "win32":
+                for device in Toolkit.find_desktop_windows():
+                    class_match = not controller.win32.class_regex or re.search(controller.win32.class_regex, device.class_name)
+                    window_match = not controller.win32.window_regex or re.search(controller.win32.window_regex, device.window_name)
+                    if class_match and window_match and device not in devices["win32"]:
+                        devices["win32"].append(device)
+        return devices
 
-    def connect_device(self, device):
+    def connect_device(self, device) -> bool:
         controller = AdbController(
             adb_path=device.adb_path,
             address=device.address,

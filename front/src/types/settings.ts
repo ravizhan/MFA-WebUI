@@ -1,7 +1,7 @@
 // 更新设置
 export interface UpdateSettings {
   autoUpdate: boolean
-  updateChannel: "stable" | "beta" | "dev"
+  updateChannel: "stable" | "beta"
   proxy: string
 }
 
@@ -14,8 +14,8 @@ export interface NotificationSettings {
   contentType: "application/json" | "application/x-www-form-urlencoded"
   headers: string
   body: string
-  username?: string
-  password?: string
+  username: string
+  password: string
   method: "POST" | "GET"
   notifyOnComplete: boolean
   notifyOnError: boolean

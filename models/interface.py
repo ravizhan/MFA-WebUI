@@ -1,5 +1,16 @@
-from pydantic import BaseModel, model_validator, ConfigDict
-from typing import List, Optional, Dict, Literal, Union
+import re
+
+from pydantic import BaseModel, model_validator, ConfigDict, field_validator, ValidationInfo
+from typing import List, Optional, Dict, Literal, Union, Any
+
+
+def validate_regex(v: Any, info: ValidationInfo) -> Any:
+    if v is None or isinstance(v, re.Pattern):
+        return v
+    try:
+        return re.compile(v)
+    except (re.error, TypeError):
+        raise ValueError(f"{info.field_name} 无法编译为正则表达式")
 
 
 class AdbController(BaseModel):
@@ -8,12 +19,16 @@ class AdbController(BaseModel):
 
 
 class Win32Controller(BaseModel):
-    class_regex: Optional[str] = None
-    window_regex: Optional[str] = None
+    class_regex: Optional[re.Pattern] = None
+    window_regex: Optional[re.Pattern] = None
     mouse: Optional[Literal["Seize", "SendMessage", "PostMessage", "LegacyEvent", "PostThreadMessage", "SendMessageWithCursorPos", "PostMessageWithCursorPos"]] = None
     keyboard: Optional[Literal["Seize", "SendMessage", "PostMessage", "LegacyEvent", "PostThreadMessage", "SendMessageWithCursorPos", "PostMessageWithCursorPos"]] = None
     screencap: Optional[Literal["GDI", "FramePool", "DXGI_DesktopDup", "DXGI_DesktopDup_Window", "PrintWindow", "ScreenDC"]] = None
 
+    @field_validator('class_regex', 'window_regex', mode='before')
+    @classmethod
+    def check_regex(cls, v: Any, info: ValidationInfo):
+        return validate_regex(v, info)
 
 class PlayCoverController(BaseModel):
     """PlayCover 控制器配置（仅 macOS）"""
@@ -22,10 +37,15 @@ class PlayCoverController(BaseModel):
 
 class GamepadController(BaseModel):
     """虚拟游戏手柄控制器配置（仅 Windows）"""
-    class_regex: Optional[str] = None
-    window_regex: Optional[str] = None
+    class_regex: Optional[re.Pattern] = None
+    window_regex: Optional[re.Pattern] = None
     gamepad_type: Optional[Literal["Xbox360", "DualShock4", "DS4"]] = "Xbox360"
     screencap: Optional[Literal["GDI", "FramePool", "DXGI_DesktopDup", "DXGI_DesktopDup_Window", "PrintWindow", "ScreenDC"]] = None
+
+    @field_validator('class_regex', 'window_regex', mode='before')
+    @classmethod
+    def check_regex(cls, v: Any, info: ValidationInfo):
+        return validate_regex(v, info)
 
 
 class Controller(BaseModel):
