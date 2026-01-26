@@ -80,8 +80,8 @@ export function getDevices(): Promise<Devices> {
     .then((data: DeviceResponse) => data.devices)
 }
 
-export function postDevices(device: AdbDevice|Win32Device): void {
-  fetch("/api/device", {
+export function postDevices(device: AdbDevice|Win32Device): Promise<boolean> {
+  return fetch("/api/device", {
     method: "POST",
     body: JSON.stringify(device),
     headers: {
@@ -93,9 +93,11 @@ export function postDevices(device: AdbDevice|Win32Device): void {
       if (data.status === "success") {
         // @ts-ignore
         window.$message.success("设备连接成功")
+        return true
       } else {
         // @ts-ignore
         window.$message.error("设备连接失败，请检查终端日志")
+        return false
       }
     })
 }

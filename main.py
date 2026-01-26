@@ -100,6 +100,25 @@ def get_interface():
     return interface.model_dump()
 
 
+async def video_stream_generator(fps: int = 15):
+    fps = max(1, min(60, fps))
+    interval = 1.0 / fps
+    
+    while True:
+        if app_state.worker and app_state.worker.connected:
+            frame_bytes = await asyncio.to_thread(app_state.worker.get_screencap_bytes)
+            if frame_bytes:
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                await asyncio.sleep(interval)
+                continue
+        await asyncio.sleep(0.5)
+
+@app.get("/api/stream/live")
+async def stream_live(fps: int = 15):
+    return StreamingResponse(video_stream_generator(fps), media_type="multipart/x-mixed-replace; boundary=frame")
+
+
 @app.get("/api/device")
 def get_device():
     devices = app_state.worker.get_device()

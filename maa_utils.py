@@ -14,6 +14,8 @@ import re
 import sys
 from pathlib import Path
 import httpx
+import io
+from PIL import Image
 from models.interface import InterfaceModel
 from models.settings import SettingsModel
 
@@ -26,6 +28,7 @@ class MaaWorker:
         self.interface: InterfaceModel = interface
         self.queue = queue
         self.tasker = Tasker()
+        self.controller = None 
         self.connected = False
         self.stop_flag = False
         self.send_log("MAA初始化成功")
@@ -86,14 +89,14 @@ class MaaWorker:
             "win32": []
         }
         for controller in self.interface.controller:
-            if controller.type == "adb":
+            if controller.type == "Adb":
                 for device in Toolkit.find_adb_devices():
                     # 这两个字段的数字在JS里会整数溢出，转为字符串处理
                     device.input_methods = str(device.input_methods)
                     device.screencap_methods = str(device.screencap_methods)
                     if device not in devices["adb"]:
                         devices["adb"].append(device)
-            elif controller.type == "win32":
+            elif controller.type == "Win32":
                 for device in Toolkit.find_desktop_windows():
                     class_match = not controller.win32.class_regex or re.search(controller.win32.class_regex, device.class_name)
                     window_match = not controller.win32.window_regex or re.search(controller.win32.window_regex, device.window_name)
@@ -122,6 +125,7 @@ class MaaWorker:
             return self.connected
         if self.tasker.bind(resource, controller):
             self.connected = True
+            self.controller = controller
             self.send_log("设备连接成功")
         else:
             plyer.notification.notify(
@@ -323,3 +327,17 @@ class MaaWorker:
             self.send_log(f"请将日志反馈至 {self.interface.github}/issues")
         self.send_log("所有任务完成")
         time.sleep(0.5)
+
+    def get_screencap_bytes(self):
+        if not self.connected or not self.controller:
+            return None
+        try:
+            image = self.controller.post_screencap().wait().get()
+            if image is not None:
+                image_pil = Image.fromarray(image[:, :, ::-1])
+                img_byte_arr = io.BytesIO()
+                image_pil.save(img_byte_arr, format='JPEG')
+                return img_byte_arr.getvalue()
+        except Exception as e:
+            pass
+        return None

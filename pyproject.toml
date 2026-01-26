@@ -10,6 +10,7 @@ dependencies = [
     "maafw>=5.4.3",
     "nuitka[all]>=2.8.10",
     "numpy>=2.3.5",
+    "pillow>=12.0.0",
     "plyer>=2.1.0",
     "uvicorn>=0.40.0",
     "websockets>=16.0",

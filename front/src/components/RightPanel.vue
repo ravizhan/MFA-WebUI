@@ -1,4 +1,6 @@
 <template>
+  <n-image v-if="connected" :src="streamUrl" />
+  <n-empty v-else description="等待设备连接..." />
   <div class="col-name">实时日志</div>
   <div>
     <n-card hoverable>
@@ -18,7 +20,7 @@ import { storeToRefs } from "pinia"
 
 const message = useMessage()
 const indexStore = useIndexStore()
-const log = storeToRefs(indexStore).RunningLog
+const { RunningLog: log, Connected: connected } = storeToRefs(indexStore)
 const logInstRef = ref<LogInst | null>(null)
 const btnCopy = new Clipboard("#btn")
 btnCopy.on("success", () => {
@@ -45,4 +47,7 @@ onMounted(() => {
 onUnmounted(() => {
   sse.removeEventListener('log', handleLog)
 })
+
+const fps = 60;
+const streamUrl = `/api/stream/live?fps=${fps}`;
 </script>

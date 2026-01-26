@@ -170,8 +170,8 @@ function get_device() {
         key: dev,
       })
     }
-  })
-  if ((devices_tree.value[0] as any).children.length === 0) {
+  }).then(() => {
+      if ((devices_tree.value[0] as any).children.length === 0) {
     (devices_tree.value[0] as any).children.push({
       label: "无可用设备",
       key: "none",
@@ -186,6 +186,7 @@ function get_device() {
     })
   }
   loading.value = false
+  })
 }
 
 function connectDevices() {
@@ -194,7 +195,9 @@ function connectDevices() {
     window.$message.error("请选择一个设备")
     return
   } else {
-    postDevices(device.value)
+    postDevices(device.value).then((success) => {
+      indexStore.setConnected(success)
+    })
   }
 }
 
