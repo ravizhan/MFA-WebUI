@@ -21,6 +21,11 @@
               <n-icon><div class="i-mdi-cog-play" /></n-icon>
             </template>
           </n-anchor-link>
+          <n-anchor-link title="定时任务" href="#scheduler-settings">
+            <template #icon>
+              <n-icon><div class="i-mdi-clock-outline" /></n-icon>
+            </template>
+          </n-anchor-link>
           <n-anchor-link title="界面设置" href="#ui-settings">
             <template #icon>
               <n-icon><div class="i-mdi-palette" /></n-icon>
@@ -130,6 +135,82 @@
                 />
               </n-form-item>
             </n-form>
+          </n-card>
+
+          <!-- 定时任务设置 -->
+          <n-card id="scheduler-settings" class="mb-6 scroll-mt-5 last:mb-0" title="定时任务">
+            <template #header-extra>
+              <n-button size="small" type="primary" @click="openCreateTaskDialog">
+                <template #icon>
+                  <n-icon><div class="i-mdi-plus" /></n-icon>
+                </template>
+                新建任务
+              </n-button>
+            </template>
+
+            <n-collapse>
+              <!-- 任务列表折叠面板 -->
+              <n-collapse-item title="任务列表" name="tasks">
+                <n-empty v-if="schedulerStore.tasks.length === 0" description="暂无定时任务" />
+                <n-list v-else>
+                  <n-list-item v-for="task in schedulerStore.tasks" :key="task.id">
+                    <template #prefix>
+                      <n-switch
+                        :value="task.enabled"
+                        @update:value="(val: boolean) => handleToggleTask(task.id, val)"
+                      />
+                    </template>
+                    <n-thing :title="task.name" :description="task.description">
+                      <template #header-extra>
+                        <n-space>
+                          <n-button size="tiny" @click="openEditTaskDialog(task)">编辑</n-button>
+                          <n-button size="tiny" type="error" @click="handleDeleteTask(task.id)"
+                            >删除</n-button
+                          >
+                        </n-space>
+                      </template>
+                      <template #description>
+                        <n-space vertical size="small">
+                          <n-text depth="3"
+                            >触发:
+                            {{ formatTrigger(task.trigger_type, task.trigger_config) }}</n-text
+                          >
+                          <n-text depth="3"
+                            >下次执行: {{ formatDateTime(task.next_run_time) }}</n-text
+                          >
+                        </n-space>
+                      </template>
+                    </n-thing>
+                  </n-list-item>
+                </n-list>
+              </n-collapse-item>
+
+              <!-- 执行历史折叠面板 -->
+              <n-collapse-item title="执行历史" name="history">
+                <n-empty v-if="schedulerStore.executions.length === 0" description="暂无执行记录" />
+                <n-timeline v-else>
+                  <n-timeline-item
+                    v-for="exec in schedulerStore.executions"
+                    :key="exec.id"
+                    :type="getStatusType(exec.status)"
+                    :title="exec.task_name"
+                    :time="formatDateTime(exec.started_at)"
+                  >
+                    <template #icon>
+                      <n-icon>
+                        <div :class="getStatusIcon(exec.status)" />
+                      </n-icon>
+                    </template>
+                    <n-text :type="getStatusTextType(exec.status)">
+                      {{ getStatusLabel(exec.status) }}
+                    </n-text>
+                    <n-text v-if="exec.error_message" type="error" depth="3">
+                      {{ exec.error_message }}
+                    </n-text>
+                  </n-timeline-item>
+                </n-timeline>
+              </n-collapse-item>
+            </n-collapse>
           </n-card>
 
           <!-- 界面设置 -->
@@ -357,15 +438,25 @@
         </n-scrollbar>
       </div>
     </div>
+
+    <!-- 定时任务弹窗 -->
+    <SchedulerTaskDialog
+      v-model:show="showTaskDialog"
+      :task="editingTask"
+      @saved="handleTaskSaved"
+    />
   </n-message-provider>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted, computed } from "vue"
 import { useSettingsStore } from "../stores/settings"
+import { useSchedulerStore } from "../stores/scheduler"
 import { checkUpdate, testNotificationApi } from "../script/api"
 import { useMessage, useDialog } from "naive-ui"
 import type { SettingsModel } from "../types/settings"
+import type { ScheduledTask, TriggerConfig, ExecutionStatus } from "../types/scheduler"
+import SchedulerTaskDialog from "../components/SchedulerTaskDialog.vue"
 
 type EditableCategory = Exclude<keyof SettingsModel, "about">
 type MaybeNullForNumbers<T> = T extends number ? T | null : T
@@ -377,6 +468,7 @@ type EditableSettingValue<
 const message = useMessage()
 const dialog = useDialog()
 const settingsStore = useSettingsStore()
+const schedulerStore = useSchedulerStore()
 
 if (typeof window !== "undefined") {
   window.$message = message
@@ -385,6 +477,8 @@ if (typeof window !== "undefined") {
 const settings = computed<SettingsModel>(() => settingsStore.settings)
 
 const checkingUpdate = ref(false)
+const showTaskDialog = ref(false)
+const editingTask = ref<ScheduledTask | null>(null)
 
 const updateChannelOptions = [
   { label: "稳定版", value: "stable" },
@@ -411,6 +505,9 @@ onMounted(() => {
   if (!settingsStore.initialized) {
     settingsStore.fetchSettings()
   }
+  // 加载定时任务数据
+  schedulerStore.fetchTasks()
+  schedulerStore.fetchExecutions()
 })
 
 const handleSettingChange = async <K extends EditableCategory, P extends keyof SettingsModel[K]>(
@@ -478,6 +575,140 @@ const handleResetSettings = () => {
       }
     },
   })
+}
+
+// ==================== 定时任务相关 ====================
+
+function openCreateTaskDialog() {
+  editingTask.value = null
+  showTaskDialog.value = true
+}
+
+function openEditTaskDialog(task: ScheduledTask) {
+  editingTask.value = task
+  showTaskDialog.value = true
+}
+
+async function handleToggleTask(taskId: string, enabled: boolean) {
+  await schedulerStore.toggleTask(taskId, enabled)
+  if (schedulerStore.error) {
+    message.error(schedulerStore.error)
+  }
+}
+
+async function handleDeleteTask(taskId: string) {
+  dialog.warning({
+    title: "确认删除",
+    content: "确定要删除这个定时任务吗？",
+    positiveText: "确定删除",
+    negativeText: "取消",
+    onPositiveClick: async () => {
+      const success = await schedulerStore.deleteTask(taskId)
+      if (success) {
+        message.success("任务已删除")
+      } else {
+        message.error(schedulerStore.error || "删除失败")
+      }
+    },
+  })
+}
+
+function handleTaskSaved() {
+  schedulerStore.fetchTasks()
+  schedulerStore.fetchExecutions()
+}
+
+function formatTrigger(triggerType: string, triggerConfig: TriggerConfig): string {
+  switch (triggerType) {
+    case "cron":
+      return `Cron ${(triggerConfig as any).cron}`
+    case "date":
+      return `指定时间 ${formatDateTime((triggerConfig as any).run_date)}`
+    case "interval":
+      const config = triggerConfig as any
+      const parts: string[] = []
+      if (config.hours) parts.push(`${config.hours}小时`)
+      if (config.minutes) parts.push(`${config.minutes}分钟`)
+      return `间隔 ${parts.join(" ")}`
+    default:
+      return "未知"
+  }
+}
+
+function formatDateTime(dateStr?: string): string {
+  if (!dateStr) return "未设置"
+  const date = new Date(dateStr)
+  return date.toLocaleString("zh-CN", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  })
+}
+
+function getStatusType(
+  status: ExecutionStatus,
+): "success" | "error" | "warning" | "info" | "default" {
+  switch (status) {
+    case "success":
+      return "success"
+    case "failed":
+      return "error"
+    case "running":
+      return "info"
+    case "stopped":
+      return "warning"
+    default:
+      return "default"
+  }
+}
+
+function getStatusIcon(status: ExecutionStatus): string {
+  switch (status) {
+    case "success":
+      return "i-mdi-check-circle"
+    case "failed":
+      return "i-mdi-close-circle"
+    case "running":
+      return "i-mdi-loading"
+    case "stopped":
+      return "i-mdi-pause-circle"
+    default:
+      return "i-mdi-help-circle"
+  }
+}
+
+function getStatusTextType(
+  status: ExecutionStatus,
+): "success" | "error" | "warning" | "info" | "default" {
+  switch (status) {
+    case "success":
+      return "success"
+    case "failed":
+      return "error"
+    case "running":
+      return "info"
+    case "stopped":
+      return "warning"
+    default:
+      return "default"
+  }
+}
+
+function getStatusLabel(status: ExecutionStatus): string {
+  switch (status) {
+    case "success":
+      return "成功"
+    case "failed":
+      return "失败"
+    case "running":
+      return "运行中"
+    case "stopped":
+      return "已停止"
+    default:
+      return "未知"
+  }
 }
 </script>
 <style scoped>

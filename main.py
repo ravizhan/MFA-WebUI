@@ -12,7 +12,9 @@ from fastapi.staticfiles import StaticFiles
 from models.interface import InterfaceModel
 from models.api import DeviceModel, UserConfig
 from models.settings import SettingsModel
+from models.scheduler import ScheduledTaskCreate, ScheduledTaskUpdate
 from maa_utils import MaaWorker
+from scheduler_manager import SchedulerManager
 import httpx
 
 with open("interface.json", "r", encoding="utf-8") as f:
@@ -49,6 +51,7 @@ class AppState:
         self.history_message = []
         self.current_status = None
         self.broadcaster: LogBroadcaster | None = None
+        self.scheduler_manager: SchedulerManager | None = None
 
 
 app_state = AppState()
@@ -75,11 +78,20 @@ async def lifespan(app: FastAPI):
     webbrowser.open_new("http://127.0.0.1:55666")
     app_state.worker = MaaWorker(app_state.message_conn, interface)
     app_state.broadcaster = LogBroadcaster()
+
+    # 初始化调度器
+    app_state.scheduler_manager = SchedulerManager()
+    app_state.scheduler_manager.set_worker(app_state.worker)
+    await app_state.scheduler_manager.initialize()
+
     monitor_task = asyncio.create_task(log_monitor())
     yield
     monitor_task.cancel()
     if app_state.worker and app_state.worker.agent_process:
         app_state.worker.agent_process.terminate()
+    # 关闭调度器
+    if app_state.scheduler_manager:
+        await app_state.scheduler_manager.shutdown()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -298,6 +310,104 @@ async def stream_logs(request: Request):
             "Access-Control-Allow-Origin": "*",
         },
     )
+
+
+# ==================== 调度器 API ====================
+
+
+@app.get("/api/scheduler/tasks")
+async def get_scheduler_tasks():
+    """获取所有定时任务"""
+    if app_state.scheduler_manager is None:
+        return {"status": "failed", "message": "调度器未初始化"}
+    try:
+        tasks = await app_state.scheduler_manager.get_all_tasks()
+        return {"status": "success", "tasks": [task.model_dump() for task in tasks]}
+    except Exception as e:
+        return {"status": "failed", "message": str(e)}
+
+
+@app.post("/api/scheduler/tasks")
+async def create_scheduler_task(task_create: ScheduledTaskCreate):
+    """创建定时任务"""
+    if app_state.scheduler_manager is None:
+        return {"status": "failed", "message": "调度器未初始化"}
+    try:
+        task = await app_state.scheduler_manager.create_task(task_create)
+        return {"status": "success", "task": task.model_dump()}
+    except Exception as e:
+        return {"status": "failed", "message": str(e)}
+
+
+@app.put("/api/scheduler/tasks/{task_id}")
+async def update_scheduler_task(task_id: str, task_update: ScheduledTaskUpdate):
+    """更新定时任务"""
+    if app_state.scheduler_manager is None:
+        return {"status": "failed", "message": "调度器未初始化"}
+    try:
+        task = await app_state.scheduler_manager.update_task(task_id, task_update)
+        if task is None:
+            return {"status": "failed", "message": "任务不存在"}
+        return {"status": "success", "task": task.model_dump()}
+    except Exception as e:
+        return {"status": "failed", "message": str(e)}
+
+
+@app.delete("/api/scheduler/tasks/{task_id}")
+async def delete_scheduler_task(task_id: str):
+    """删除定时任务"""
+    if app_state.scheduler_manager is None:
+        return {"status": "failed", "message": "调度器未初始化"}
+    try:
+        success = await app_state.scheduler_manager.delete_task(task_id)
+        if success:
+            return {"status": "success"}
+        return {"status": "failed", "message": "任务不存在"}
+    except Exception as e:
+        return {"status": "failed", "message": str(e)}
+
+
+@app.post("/api/scheduler/tasks/{task_id}/pause")
+async def pause_scheduler_task(task_id: str):
+    """暂停定时任务"""
+    if app_state.scheduler_manager is None:
+        return {"status": "failed", "message": "调度器未初始化"}
+    try:
+        success = await app_state.scheduler_manager.pause_task(task_id)
+        if success:
+            return {"status": "success"}
+        return {"status": "failed", "message": "任务不存在"}
+    except Exception as e:
+        return {"status": "failed", "message": str(e)}
+
+
+@app.post("/api/scheduler/tasks/{task_id}/resume")
+async def resume_scheduler_task(task_id: str):
+    """恢复定时任务"""
+    if app_state.scheduler_manager is None:
+        return {"status": "failed", "message": "调度器未初始化"}
+    try:
+        success = await app_state.scheduler_manager.resume_task(task_id)
+        if success:
+            return {"status": "success"}
+        return {"status": "failed", "message": "任务不存在"}
+    except Exception as e:
+        return {"status": "failed", "message": str(e)}
+
+
+@app.get("/api/scheduler/executions")
+async def get_scheduler_executions(limit: int = 50):
+    """获取执行历史"""
+    if app_state.scheduler_manager is None:
+        return {"status": "failed", "message": "调度器未初始化"}
+    try:
+        executions = await app_state.scheduler_manager.get_executions(limit)
+        return {
+            "status": "success",
+            "executions": [exec.model_dump() for exec in executions],
+        }
+    except Exception as e:
+        return {"status": "failed", "message": str(e)}
 
 
 if __name__ == "__main__":

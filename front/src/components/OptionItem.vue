@@ -62,11 +62,12 @@ import { storeToRefs } from "pinia"
 const props = defineProps<{
   name: string
   level?: number
+  options?: Record<string, any>
 }>()
 
 const interfaceStore = useInterfaceStore()
 const configStore = useUserConfigStore()
-const options = storeToRefs(configStore).options
+const options = props.options ? computed(() => props.options!) : storeToRefs(configStore).options
 
 const option = computed(() => interfaceStore.interface?.option?.[props.name])
 const label = computed(() => option.value?.label)
