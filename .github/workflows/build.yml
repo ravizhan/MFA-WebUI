@@ -119,23 +119,29 @@ jobs:
       - name: Install Dependencies
         run: uv sync
 
+      - name: Setup Environment Variables
+        shell: bash
+        run: |
+          echo "NUITKA_CACHE_DIR=${{ github.action_path }}/nuitka/cache" >> $GITHUB_ENV
+
+      - name: Cache Nuitka cache directory
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.NUITKA_CACHE_DIR }}
+          key: nuitka-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+          restore-keys: |
+            nuitka-${{ runner.os }}-${{ runner.arch }}-
+
       - name: Build Executable
         if: ${{ matrix.os == 'windows-11-arm' || matrix.os == 'windows-2025' }}
-        env:
-          NUITKA_CCACHE_BINARY: ${{ env.ccache_symlinks_path }}
-          NUITKA_CACHE_DIR: ${{ runner.temp }}/nuitka/cache
         run: uv run python -m nuitka --standalone --lto=no --windows-icon-from-ico=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --remove-output --output-dir=build --include-package=PIL --include-package=maa -o MWU main.py
 
       - name: Build Executable
         if: ${{ matrix.platform == 'linux' }}
-        env:
-          NUITKA_CACHE_DIR: ${{ runner.temp }}/nuitka/cache
         run: uv run python -m nuitka --standalone --lto=no --linux-icon=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --remove-output --output-dir=build --include-package=PIL --include-package=maa -o MWU main.py
 
       - name: Build Executable
         if: ${{ matrix.platform == 'osx' }}
-        env:
-          NUITKA_CACHE_DIR: ${{ runner.temp }}/nuitka/cache
         run: uv run python -m nuitka --standalone --lto=no --macos-app-icon=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --remove-output --output-dir=build --include-package=PIL --include-package=maa -o MWU main.py
 
       - name: Copy Resources to Build
