@@ -122,7 +122,7 @@ jobs:
       - name: Setup Environment Variables
         shell: bash
         run: |
-          echo "NUITKA_CACHE_DIR=${{ github.action_path }}/nuitka/cache" >> $GITHUB_ENV
+          echo "NUITKA_CACHE_DIR=${{ runner.temp }}/nuitka/cache" >> $GITHUB_ENV
 
       - name: Cache Nuitka cache directory
         uses: actions/cache@v4
