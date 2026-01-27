@@ -53,6 +53,7 @@ class AppState:
 
 app_state = AppState()
 
+
 async def log_monitor():
     while True:
         while not app_state.message_conn.empty():
@@ -60,12 +61,12 @@ async def log_monitor():
             app_state.history_message.append(msg)
             if app_state.broadcaster:
                 await app_state.broadcaster.broadcast(msg)
-            
+
             if "所有任务完成" in msg:
                 if app_state.child_process:
                     app_state.child_process.join()
                     app_state.child_process = None
-        
+
         await asyncio.sleep(0.1)
 
 
@@ -85,12 +86,18 @@ app = FastAPI(lifespan=lifespan)
 app.mount("/assets", StaticFiles(directory="page/assets"))
 app.mount("/resource", StaticFiles(directory="resource"))
 
+
 @app.middleware("http")
 async def spa_middleware(request: Request, call_next):
     response = await call_next(request)
-    if response.status_code == 404 and not ( request.url.path.startswith("/api/") or request.url.path.startswith("/assets/") or request.url.path.startswith("/resource/")):
+    if response.status_code == 404 and not (
+        request.url.path.startswith("/api/")
+        or request.url.path.startswith("/assets/")
+        or request.url.path.startswith("/resource/")
+    ):
         return FileResponse("page/index.html")
     return response
+
 
 @app.get("/")
 async def serve_homepage():
@@ -105,26 +112,32 @@ def get_interface():
 async def video_stream_generator(fps: int = 15):
     fps = max(1, min(60, fps))
     interval = 1.0 / fps
-    
+
     while True:
         if app_state.worker and app_state.worker.connected:
             frame_bytes = await asyncio.to_thread(app_state.worker.get_screencap_bytes)
             if frame_bytes:
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                yield (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n\r\n" + frame_bytes + b"\r\n"
+                )
                 await asyncio.sleep(interval)
                 continue
         await asyncio.sleep(0.5)
 
+
 @app.get("/api/stream/live")
 async def stream_live(fps: int = 15):
-    return StreamingResponse(video_stream_generator(fps), media_type="multipart/x-mixed-replace; boundary=frame")
+    return StreamingResponse(
+        video_stream_generator(fps),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
 
 
 @app.get("/api/device")
 def get_device():
     devices = app_state.worker.get_device()
-    return {"status": "success","devices": devices}
+    return {"status": "success", "devices": devices}
 
 
 @app.post("/api/device")
@@ -136,7 +149,8 @@ def connect_device(device: DeviceModel):
 
 @app.get("/api/resource")
 def get_resource():
-    return {"status": "success","resource":[i.name for i in interface.resource]}
+    return {"status": "success", "resource": [i.name for i in interface.resource]}
+
 
 @app.post("/api/resource")
 def set_resource(name: str):
@@ -147,12 +161,14 @@ def set_resource(name: str):
         return {"status": "failed", "message": str(e)}
     return {"status": "success"}
 
+
 @app.get("/api/settings")
 def get_settings():
     with open("config/settings.json", "r", encoding="utf-8") as f:
         config_data = json.load(f)
     settings = SettingsModel(**config_data)
     return {"status": "success", "settings": settings.model_dump()}
+
 
 @app.post("/api/settings")
 def set_settings(settings: SettingsModel):
@@ -193,12 +209,17 @@ def reset_user_config():
         return {"status": "success"}
     except Exception as e:
         return {"status": "failed", "message": str(e)}
-    
+
+
 @app.get("/api/check-update")
 def check_update():
     try:
-        repo_name = interface.github.split("/")[3]+"/"+interface.github.split("/")[4]
-        response = httpx.get(f"https://api.github.com/repos/{repo_name}/releases/latest").json()
+        repo_name = (
+            interface.github.split("/")[3] + "/" + interface.github.split("/")[4]
+        )
+        response = httpx.get(
+            f"https://api.github.com/repos/{repo_name}/releases/latest"
+        ).json()
         latest_version = response["tag_name"]
         current_version = interface.version
         update_info = {
@@ -206,11 +227,12 @@ def check_update():
             "current_version": current_version,
             "is_update_available": latest_version != current_version,
             "release_notes": response["body"],
-            "download_url": response["html_url"]
+            "download_url": response["html_url"],
         }
         return {"status": "success", "update_info": update_info}
     except Exception as e:
         return {"status": "failed", "message": str(e)}
+
 
 @app.post("/api/test-notification")
 def test_notification():
@@ -233,9 +255,7 @@ def start(tasks: list[str], options: dict[str, str]):
     for name, case in options.items():
         app_state.worker.set_option(name, case)
     app_state.child_process = threading.Thread(
-        target=app_state.worker.run,
-        args=(tasks,),
-        daemon=True
+        target=app_state.worker.run, args=(tasks,), daemon=True
     )
     app_state.child_process.start()
     return {"status": "success"}
@@ -268,17 +288,17 @@ async def stream_logs(request: Request):
             pass
         finally:
             app_state.broadcaster.remove_client(q)
-    
+
     return StreamingResponse(
         event_generator(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "Access-Control-Allow-Origin": "*"
-        }
+            "Access-Control-Allow-Origin": "*",
+        },
     )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=55666)

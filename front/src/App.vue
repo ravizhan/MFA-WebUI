@@ -7,7 +7,9 @@
     <n-message-provider>
       <n-dialog-provider>
         <div>
-          <n-layout class="xl:shadow-3xl xl:w-[80vw] w-full mx-auto pt-0 xl:rounded-xl transition-all duration-300">
+          <n-layout
+            class="xl:shadow-3xl xl:w-[80vw] w-full mx-auto pt-0 xl:rounded-xl transition-all duration-300"
+          >
             <n-layout-header bordered class="backdrop-blur-sm bg-opacity-90 h-[10vh] xl:h-auto">
               <div class="text-center text-2xl font-bold tracking-wide">{{ name }}</div>
               <n-menu mode="horizontal" class="justify-between" :options="menuOptions" />
@@ -15,8 +17,15 @@
             <n-layout>
               <router-view></router-view>
             </n-layout>
-            <n-layout-footer bordered class="text-center xl:py-4 py-2 h-[5vh] xl:h-auto text-gray-500">
-              <a href="https://github.com/ravizhan/MWU" target="_blank" class="hover:text-blue-500 transition-colors">
+            <n-layout-footer
+              bordered
+              class="text-center xl:py-4 py-2 h-[5vh] xl:h-auto text-gray-500"
+            >
+              <a
+                href="https://github.com/ravizhan/MWU"
+                target="_blank"
+                class="hover:text-blue-500 transition-colors"
+              >
                 Powered by MWU
               </a>
             </n-layout-footer>
@@ -53,7 +62,9 @@ const offset = ref(0)
 const screenWidth = ref(window.innerWidth)
 
 const naiveTheme = computed(() => (settingsStore.isDarkMode ? darkTheme : null))
-const themeOverrides = computed(() => (settingsStore.isDarkMode ? darkThemeOverrides : lightThemeOverrides))
+const themeOverrides = computed(() =>
+  settingsStore.isDarkMode ? darkThemeOverrides : lightThemeOverrides,
+)
 
 const markdownCssHref = computed(() => {
   const mode = settingsStore.settings.ui.darkMode

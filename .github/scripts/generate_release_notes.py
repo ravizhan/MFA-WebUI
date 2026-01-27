@@ -4,17 +4,21 @@ import sys
 import uuid
 import datetime
 
+
 def get_latest_version(repo, current_version):
     """获取上一个版本的 tag name"""
     try:
         # 尝试获取最新 release
-        resp = httpx.get(f"https://api.github.com/repos/{repo}/releases/latest", timeout=10)
+        resp = httpx.get(
+            f"https://api.github.com/repos/{repo}/releases/latest", timeout=10
+        )
         if resp.status_code == 200:
             latest_version = resp.json().get("tag_name")
             return latest_version
     except Exception as e:
         print(f"获取版本信息时出错: {e}", file=sys.stderr)
     return None
+
 
 def main():
     repo = "ravizhan/MWU"
@@ -23,7 +27,9 @@ def main():
 
     latest_version = get_latest_version(repo, current_version)
 
-    patch_url = f"https://github.com/{repo}/compare/{latest_version}...{current_version}.patch"
+    patch_url = (
+        f"https://github.com/{repo}/compare/{latest_version}...{current_version}.patch"
+    )
     try:
         resp = httpx.get(patch_url, timeout=30)
         resp.raise_for_status()
@@ -72,9 +78,9 @@ def main():
         "model": "deepseek-ai/DeepSeek-V3",
         "messages": [
             {"role": "system", "content": prompt},
-            {"role": "user", "content": f"以下是对比补丁内容：\n\n{patch}"}
+            {"role": "user", "content": f"以下是对比补丁内容：\n\n{patch}"},
         ],
-        "temperature": 0.2
+        "temperature": 0.2,
     }
 
     try:
@@ -82,7 +88,7 @@ def main():
             "https://api.siliconflow.cn/v1/chat/completions",
             headers={"Authorization": f"Bearer {api_key}"},
             json=data,
-            timeout=180
+            timeout=180,
         )
         resp.raise_for_status()
         result = resp.json()["choices"][0]["message"]["content"]
@@ -90,7 +96,7 @@ def main():
 
         release_notes = f"## 更新日志（{datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).date().strftime('%Y-%m-%d')}）\n\n{result}"
 
-        output_file = os.getenv('GITHUB_OUTPUT')
+        output_file = os.getenv("GITHUB_OUTPUT")
         delimiter = f"EOF_{uuid.uuid4().hex}"
         with open(output_file, "a", encoding="utf-8") as f:
             f.write(f"notes<<{delimiter}\n")
@@ -100,6 +106,6 @@ def main():
     except Exception as e:
         print(f"调用 AI 服务出错: {e}", file=sys.stderr)
 
+
 if __name__ == "__main__":
     main()
-

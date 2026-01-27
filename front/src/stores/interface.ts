@@ -34,7 +34,7 @@ export const useInterfaceStore = defineStore("interface", {
       const data = await getInterface()
       this.interface = data
     },
-    
+
     getOptionList(entry: string): Record<string, Option> {
       const result: Record<string, Option> = {}
       if (!this.interface?.option) return result

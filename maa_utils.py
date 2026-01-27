@@ -23,13 +23,14 @@ from models.settings import SettingsModel
 resource = Resource()
 resource.set_cpu()
 
+
 class MaaWorker:
     def __init__(self, queue: SimpleQueue, interface):
         Toolkit.init_option("./")
         self.interface: InterfaceModel = interface
         self.queue = queue
         self.tasker = Tasker()
-        self.controller = None 
+        self.controller = None
         self.connected = False
         self.stop_flag = False
         self.send_log("MAA初始化成功")
@@ -39,7 +40,7 @@ class MaaWorker:
         self.http_client = httpx.Client(timeout=30)
 
     def send_log(self, msg):
-        self.queue.put(f"{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())} {msg}")
+        self.queue.put(f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} {msg}")
         time.sleep(0.05)
 
     def send_notification(self, title, message):
@@ -48,48 +49,49 @@ class MaaWorker:
         settings = SettingsModel(**config_data)
         if settings.notification.systemNotification:
             plyer.notification.notify(
-                title=title,
-                message=message,
-                app_name=self.interface.label,
-                timeout=30
+                title=title, message=message, app_name=self.interface.label, timeout=30
             )
         if settings.notification.externalNotification:
             try:
-                body = json.loads(settings.notification.body.replace("{{title}}", title).replace("{{message}}", message))
+                body = json.loads(
+                    settings.notification.body.replace("{{title}}", title).replace(
+                        "{{message}}", message
+                    )
+                )
                 if settings.notification.method == "POST":
                     headers = {}
                     if settings.notification.headers:
                         headers = json.loads(settings.notification.headers)
                     auth = None
-                    if settings.notification.username and settings.notification.password:
-                        auth = (settings.notification.username, settings.notification.password)
+                    if (
+                        settings.notification.username
+                        and settings.notification.password
+                    ):
+                        auth = (
+                            settings.notification.username,
+                            settings.notification.password,
+                        )
                     if settings.notification.contentType == "application/json":
                         self.http_client.post(
                             settings.notification.webhook,
                             headers=headers,
                             json=body,
-                            auth=auth
+                            auth=auth,
                         )
                     else:
                         self.http_client.post(
                             settings.notification.webhook,
                             headers=headers,
                             data=body,
-                            auth=auth
+                            auth=auth,
                         )
                 else:
-                    self.http_client.get(
-                        settings.notification.webhook,
-                        params=body
-                    )
+                    self.http_client.get(settings.notification.webhook, params=body)
             except Exception as e:
                 self.send_log(f"外部通知发送失败: {e}")
 
     def get_device(self) -> dict:
-        devices = {
-            "adb": [],
-            "win32": []
-        }
+        devices = {"adb": [], "win32": []}
         for controller in self.interface.controller:
             if controller.type == "Adb":
                 for device in Toolkit.find_adb_devices():
@@ -100,8 +102,12 @@ class MaaWorker:
                         devices["adb"].append(device)
             elif controller.type == "Win32":
                 for device in Toolkit.find_desktop_windows():
-                    class_match = not controller.win32.class_regex or re.search(controller.win32.class_regex, device.class_name)
-                    window_match = not controller.win32.window_regex or re.search(controller.win32.window_regex, device.window_name)
+                    class_match = not controller.win32.class_regex or re.search(
+                        controller.win32.class_regex, device.class_name
+                    )
+                    window_match = not controller.win32.window_regex or re.search(
+                        controller.win32.window_regex, device.window_name
+                    )
                     if class_match and window_match and device not in devices["win32"]:
                         devices["win32"].append(device)
         return devices
@@ -121,7 +127,7 @@ class MaaWorker:
                 title=self.interface.title,
                 message=conn_fail_msg,
                 app_name=self.interface.label,
-                timeout=30
+                timeout=30,
             )
             self.send_log(conn_fail_msg)
             return self.connected
@@ -134,14 +140,15 @@ class MaaWorker:
                 title=self.interface.title,
                 message=conn_fail_msg,
                 app_name=self.interface.label,
-                timeout=30
+                timeout=30,
             )
             self.send_log(conn_fail_msg)
         return self.connected
 
     def set_resource(self, resource_name):
         def replace(path: str):
-            return os.path.realpath(path.replace("{PROJECT_DIR}",os.getcwd()))
+            return os.path.realpath(path.replace("{PROJECT_DIR}", os.getcwd()))
+
         for i in self.interface.resource:
             if i.name == resource_name:
                 resource.post_bundle(replace(i.path[0])).wait()
@@ -169,29 +176,38 @@ class MaaWorker:
         动态加载并注册自定义 Action 和 Recognition
         """
         agent_index_path = next(
-            (Path(arg.replace("{PROJECT_DIR}", "./")).resolve().parent
-             for arg in self.interface.agent.child_args if arg.endswith(".py")),
-            None
+            (
+                Path(arg.replace("{PROJECT_DIR}", "./")).resolve().parent
+                for arg in self.interface.agent.child_args
+                if arg.endswith(".py")
+            ),
+            None,
         )
         assert agent_index_path is not None, "Agent解析错误，无法找到Agent文件夹"
-        
+
         # 将agent目录添加到sys.path的开头，确保优先级最高
         if str(agent_index_path) not in sys.path:
             sys.path.insert(0, str(agent_index_path))
             sys.path.insert(1, str(Path("./deps").resolve()))
-        
+
         # 扫描所有 .py 文件建立映射
         module_map = {}  # module_name -> {path, is_pkg}
         for file_path in agent_index_path.glob("**/*.py"):
             try:
                 relative_path = file_path.relative_to(agent_index_path)
                 if file_path.name == "__init__.py":
-                    module_name = str(relative_path.parent).replace(os.sep, '.').replace('/', '.')
+                    module_name = (
+                        str(relative_path.parent).replace(os.sep, ".").replace("/", ".")
+                    )
                     if module_name in {"", "."}:
                         continue
                     is_pkg = True
                 else:
-                    module_name = str(relative_path.with_suffix('')).replace(os.sep, '.').replace('/', '.')
+                    module_name = (
+                        str(relative_path.with_suffix(""))
+                        .replace(os.sep, ".")
+                        .replace("/", ".")
+                    )
                     is_pkg = False
                 if module_name:
                     module_map[module_name] = {"path": str(file_path), "is_pkg": is_pkg}
@@ -212,9 +228,11 @@ class MaaWorker:
                         fullname,
                         record["path"],
                         loader=self,
-                        submodule_search_locations=[os.path.dirname(record["path"])]
+                        submodule_search_locations=[os.path.dirname(record["path"])],
                     )
-                return importlib.util.spec_from_file_location(fullname, record["path"], loader=self)
+                return importlib.util.spec_from_file_location(
+                    fullname, record["path"], loader=self
+                )
 
             def create_module(self, spec):
                 return None
@@ -227,8 +245,10 @@ class MaaWorker:
 
                 # 移除 @AgentServer 装饰器，避免注册时重复绑定
                 if "@AgentServer" in source:
-                    filtered_lines = [line for line in source.split('\n') if "AgentServer" not in line]
-                    source = '\n'.join(filtered_lines)
+                    filtered_lines = [
+                        line for line in source.split("\n") if "AgentServer" not in line
+                    ]
+                    source = "\n".join(filtered_lines)
 
                 module.__file__ = file_path
                 module.__loader__ = self
@@ -236,16 +256,18 @@ class MaaWorker:
                     module.__package__ = module.__name__
                     module.__path__ = [os.path.dirname(file_path)]
                 else:
-                    module.__package__ = module.__name__.rpartition('.')[0]
+                    module.__package__ = module.__name__.rpartition(".")[0]
 
-                exec(compile(source, file_path, 'exec'), module.__dict__)
+                exec(compile(source, file_path, "exec"), module.__dict__)
 
         loader = AgentLoader(module_map)
         sys.meta_path.insert(0, loader)
 
         # 收集需要注册的 Action 和 Recognition
         custom_action_pattern = re.compile(r"@AgentServer.custom_action\(\".*\"\)")
-        custom_recognition_pattern = re.compile(r"@AgentServer.custom_recognition\(\".*\"\)")
+        custom_recognition_pattern = re.compile(
+            r"@AgentServer.custom_recognition\(\".*\"\)"
+        )
         to_register = {"action": [], "recognition": []}
 
         for module_name, info in module_map.items():
@@ -253,23 +275,32 @@ class MaaWorker:
             try:
                 with open(file_path, "r", encoding="utf-8") as f:
                     lines = f.readlines()
-                
+
                 for i, line in enumerate(lines):
                     match_action = re.match(custom_action_pattern, line.strip())
-                    match_recognition = re.match(custom_recognition_pattern, line.strip())
-                    
+                    match_recognition = re.match(
+                        custom_recognition_pattern, line.strip()
+                    )
+
                     if match_action or match_recognition:
-                        name = line.split("(\"")[1].split("\")")[0]
+                        name = line.split('("')[1].split('")')[0]
                         if i + 1 < len(lines):
                             class_line = lines[i + 1].strip()
                             if class_line.startswith("class "):
-                                class_name = class_line.split("class ")[1].split("(")[0].strip().split(":")[0]
+                                class_name = (
+                                    class_line.split("class ")[1]
+                                    .split("(")[0]
+                                    .strip()
+                                    .split(":")[0]
+                                )
                                 key = "action" if match_action else "recognition"
-                                to_register[key].append({
-                                    "name": name,
-                                    "class_name": class_name,
-                                    "module_name": module_name
-                                })
+                                to_register[key].append(
+                                    {
+                                        "name": name,
+                                        "class_name": class_name,
+                                        "module_name": module_name,
+                                    }
+                                )
             except Exception as e:
                 print(f"Error scanning {file_path}: {e}")
 
@@ -293,9 +324,13 @@ class MaaWorker:
                             if key == "action":
                                 resource.register_custom_action(item["name"], instance)
                             else:
-                                resource.register_custom_recognition(item["name"], instance)
+                                resource.register_custom_recognition(
+                                    item["name"], instance
+                                )
                     except Exception as e:
-                        print(f"Warning: Failed to register {key} '{item['name']}': {e}")
+                        print(
+                            f"Warning: Failed to register {key} '{item['name']}': {e}"
+                        )
                         traceback.print_exc()
         finally:
             # 确保清理 loader，避免污染全局导入链
@@ -306,7 +341,9 @@ class MaaWorker:
         if self.interface.agent is None:
             return
         if "python" in self.interface.agent.child_exec:
-            assert getattr(self.interface.agent, "child_args", None), "Agent解析错误，缺少child_args"
+            assert getattr(self.interface.agent, "child_args", None), (
+                "Agent解析错误，缺少child_args"
+            )
             try:
                 self.black_magic()
             except Exception as e:
@@ -315,7 +352,9 @@ class MaaWorker:
                 traceback.print_exc()
         else:
             if self.interface.agent.child_args:
-                command = [self.interface.agent.child_exec] + self.interface.agent.child_args
+                command = [
+                    self.interface.agent.child_exec
+                ] + self.interface.agent.child_args
             else:
                 command = [self.interface.agent.child_exec]
             try:
@@ -324,6 +363,7 @@ class MaaWorker:
                 self.agent_process = None
                 self.send_log(f"Agent进程启动失败: {e}")
                 traceback.print_exc()
+
     def run(self, task_list):
         self.stop_flag = False
         self.send_log("任务开始")
@@ -343,7 +383,7 @@ class MaaWorker:
                 title=self.interface.title,
                 message="任务出现异常，请检查终端日志",
                 app_name=self.interface.label,
-                timeout=30
+                timeout=30,
             )
             self.send_log("任务出现异常，请检查终端日志")
             self.send_log(f"请将日志反馈至 {self.interface.github}/issues")
@@ -358,7 +398,7 @@ class MaaWorker:
             if image is not None:
                 image_pil = Image.fromarray(image[:, :, ::-1])
                 img_byte_arr = io.BytesIO()
-                image_pil.save(img_byte_arr, format='JPEG')
+                image_pil.save(img_byte_arr, format="JPEG")
                 return img_byte_arr.getvalue()
         except Exception as e:
             pass

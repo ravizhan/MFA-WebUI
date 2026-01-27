@@ -10,6 +10,7 @@ class DeviceModel(BaseModel):
     input_methods: int
     config: dict
 
+
 class UserConfig(BaseModel):
     taskOrder: Optional[List[str]] = None
     taskChecked: Optional[Dict[str, bool]] = None

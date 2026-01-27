@@ -1,4 +1,4 @@
-import type { GlobalThemeOverrides } from "naive-ui";
+import type { GlobalThemeOverrides } from "naive-ui"
 
 const commonThemeOverrides: GlobalThemeOverrides = {
   common: {
@@ -11,8 +11,8 @@ const commonThemeOverrides: GlobalThemeOverrides = {
     railColorActive: "#2080f0",
   },
   Anchor: {
-    linkFontSize: "0.95rem"
-  }
+    linkFontSize: "0.95rem",
+  },
 }
 
 export const lightThemeOverrides: GlobalThemeOverrides = {
@@ -26,7 +26,7 @@ export const lightThemeOverrides: GlobalThemeOverrides = {
     borderRadius: "12px",
     color: "#ffffff",
     borderColor: "#efeff5",
-    paddingMedium: "19px 12px 15px"
+    paddingMedium: "19px 12px 15px",
   },
 }
 

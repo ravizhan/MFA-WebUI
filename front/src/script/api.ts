@@ -80,7 +80,7 @@ export function getDevices(): Promise<Devices> {
     .then((data: DeviceResponse) => data.devices)
 }
 
-export function postDevices(device: AdbDevice|Win32Device): Promise<boolean> {
+export function postDevices(device: AdbDevice | Win32Device): Promise<boolean> {
   return fetch("/api/device", {
     method: "POST",
     body: JSON.stringify(device),

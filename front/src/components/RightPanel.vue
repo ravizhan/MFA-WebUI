@@ -2,11 +2,15 @@
   <div class="col-name">实时预览</div>
   <div>
     <n-card hoverable>
-      <n-flex class="pb-[12px]" justify="space-around" :size=[5,0]>
+      <n-flex class="pb-[12px]" justify="space-around" :size="[5, 0]">
         <n-select
           v-model:value="fps"
           placeholder="请选择帧率"
-          :options="[{ label: '15 FPS', value: 15 }, { label: '30 FPS', value: 30 }, { label: '60 FPS', value: 60 }]"
+          :options="[
+            { label: '15 FPS', value: 15 },
+            { label: '30 FPS', value: 30 },
+            { label: '60 FPS', value: 60 },
+          ]"
           class="w-40"
         />
         <n-button secondary type="info" :disabled="streaming" @click="handleStartStream">
@@ -24,11 +28,7 @@
       </n-flex>
       <div ref="streamContainer" class="flex justify-center items-center h-50 bg-gray-1/5">
         <template v-if="connected">
-          <n-image
-            v-if="streaming"
-            :src="streamUrl"
-            class="max-w-full h-auto"
-          />
+          <n-image v-if="streaming" :src="streamUrl" class="max-w-full h-auto" />
           <n-empty v-else description="点击按钮开启实时画面预览" />
         </template>
         <n-empty v-else description="请先在左侧面板连接设备" />
@@ -66,7 +66,7 @@ const handleLog = (data: { message: string }) => {
   const msg = data.message
   indexStore.UpdateLog(msg)
 }
-sse.addEventListener('log', handleLog)
+sse.addEventListener("log", handleLog)
 
 onMounted(() => {
   watchEffect(() => {
@@ -79,13 +79,13 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  sse.removeEventListener('log', handleLog)
+  sse.removeEventListener("log", handleLog)
   handleStopStream()
 })
 
-const fps = ref(30);
-const streamUrl = ref('');
-const streamContainer = ref<HTMLElement | null>(null);
+const fps = ref(30)
+const streamUrl = ref("")
+const streamContainer = ref<HTMLElement | null>(null)
 
 const handleStartStream = () => {
   if (!connected.value) {
@@ -97,9 +97,9 @@ const handleStartStream = () => {
 }
 
 const handleStopStream = () => {
-  const img = streamContainer.value?.querySelector('img')
+  const img = streamContainer.value?.querySelector("img")
   if (img) {
-    img.src = ''
+    img.src = ""
   }
   streaming.value = false
 }

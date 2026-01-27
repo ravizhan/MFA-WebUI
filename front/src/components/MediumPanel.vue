@@ -1,10 +1,6 @@
 <template>
   <div class="col-name">任务设置</div>
-  <n-card
-    hoverable
-    content-style="padding: 0;"
-    class="transition-all duration-300 overflow-hidden"
-  >
+  <n-card hoverable content-style="padding: 0;" class="transition-all duration-300 overflow-hidden">
     <n-scrollbar trigger="none" class="max-h-65 !rounded-[12px]">
       <n-list v-if="!isEmpty" hoverable>
         <OptionItem v-for="optName in rootOptions" :key="optName" :name="optName" />
@@ -14,11 +10,7 @@
   </n-card>
 
   <div class="col-name">任务说明</div>
-  <n-card
-    hoverable
-    content-style="padding: 0.5rem 1rem;"
-    class="transition-all duration-300"
-  >
+  <n-card hoverable content-style="padding: 0.5rem 1rem;" class="transition-all duration-300">
     <n-scrollbar trigger="none">
       <div ref="mdContainer" class="markdown-body min-h-50 max-h-65" v-html="md"></div>
     </n-scrollbar>
@@ -72,7 +64,6 @@ marked.setOptions({
   pedantic: false,
 })
 
-
 watch(
   () => indexStore.SelectedTaskID,
   async (newTaskId) => {
@@ -89,10 +80,10 @@ watch(
         } else {
           md.value = await marked("空空如也")
         }
-        
+
         rootOptions.value = i.option || []
         isEmpty.value = rootOptions.value.length === 0
-        
+
         nextTick(() => {
           setupImagePreview()
         })

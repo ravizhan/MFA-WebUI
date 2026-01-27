@@ -157,36 +157,38 @@ function get_device() {
     },
   ]
   loading.value = true
-  getDevices().then((devices_data) => {
-    for (const dev of devices_data.adb) {
-      (devices_tree.value[0] as any).children.push({
-        label: dev.name + " (" + dev.address + ")",
-        key: dev,
-      })
-    }
-    for (const dev of devices_data.win32) {
-      (devices_tree.value[1] as any).children.push({
-        label: dev.window_name + " (" + dev.class_name + ")",
-        key: dev,
-      })
-    }
-  }).then(() => {
+  getDevices()
+    .then((devices_data) => {
+      for (const dev of devices_data.adb) {
+        ;(devices_tree.value[0] as any).children.push({
+          label: dev.name + " (" + dev.address + ")",
+          key: dev,
+        })
+      }
+      for (const dev of devices_data.win32) {
+        ;(devices_tree.value[1] as any).children.push({
+          label: dev.window_name + " (" + dev.class_name + ")",
+          key: dev,
+        })
+      }
+    })
+    .then(() => {
       if ((devices_tree.value[0] as any).children.length === 0) {
-    (devices_tree.value[0] as any).children.push({
-      label: "无可用设备",
-      key: "none",
-      disabled: true,
+        ;(devices_tree.value[0] as any).children.push({
+          label: "无可用设备",
+          key: "none",
+          disabled: true,
+        })
+      }
+      if ((devices_tree.value[1] as any).children.length === 0) {
+        ;(devices_tree.value[1] as any).children.push({
+          label: "无可用设备",
+          key: "none",
+          disabled: true,
+        })
+      }
+      loading.value = false
     })
-  }
-  if ((devices_tree.value[1] as any).children.length === 0) {
-    (devices_tree.value[1] as any).children.push({
-      label: "无可用设备",
-      key: "none",
-      disabled: true,
-    })
-  }
-  loading.value = false
-  })
 }
 
 function connectDevices() {
@@ -257,5 +259,4 @@ function resetConfig() {
   text-align: center;
   padding-top: 5%;
 }
-
 </style>

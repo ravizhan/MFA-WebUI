@@ -1,25 +1,32 @@
 <template>
   <template v-if="option">
     <n-list-item>
-      <div :style="{ paddingLeft: (level || 0) * 20 + 'px' }" class="flex items-center justify-between w-full">
+      <div
+        :style="{ paddingLeft: (level || 0) * 20 + 'px' }"
+        class="flex items-center justify-between w-full"
+      >
         <div class="mr-4">{{ label || name }}</div>
         <div class="flex-1 flex justify-end">
           <!-- Switch -->
           <template v-if="option.type === 'switch'">
             <n-switch
-              :checked-value="['Yes','yes','Y','y'].includes(option.cases[1].name) ? option.cases[1].name : option.cases[0].name"
-              :unchecked-value="['Yes','yes','Y','y'].includes(option.cases[1].name) ? option.cases[0].name : option.cases[1].name"
+              :checked-value="
+                ['Yes', 'yes', 'Y', 'y'].includes(option.cases[1].name)
+                  ? option.cases[1].name
+                  : option.cases[0].name
+              "
+              :unchecked-value="
+                ['Yes', 'yes', 'Y', 'y'].includes(option.cases[1].name)
+                  ? option.cases[0].name
+                  : option.cases[1].name
+              "
               :round="false"
               v-model:value="options[name]"
             />
           </template>
           <!-- Select -->
           <template v-else-if="option.type === 'select'">
-            <n-select
-              class="w-40"
-              :options="selectOptions"
-              v-model:value="options[name]"
-            />
+            <n-select class="w-40" :options="selectOptions" v-model:value="options[name]" />
           </template>
           <!-- Input -->
           <template v-else-if="option.type === 'input'">
@@ -33,7 +40,7 @@
         </div>
       </div>
     </n-list-item>
-    
+
     <!-- Recursive children -->
     <template v-if="nestedOptions.length > 0">
       <OptionItem
@@ -47,7 +54,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed } from "vue"
 import { useInterfaceStore } from "../stores/interface"
 import { useUserConfigStore } from "../stores/userConfig"
 import { storeToRefs } from "pinia"
@@ -66,10 +73,10 @@ const label = computed(() => option.value?.label)
 
 const selectOptions = computed(() => {
   const opt = option.value
-  if (opt?.type === 'select') {
-    return opt.cases.map(c => ({
+  if (opt?.type === "select") {
+    return opt.cases.map((c) => ({
       label: c.label || c.name,
-      value: c.name
+      value: c.name,
     }))
   }
   return []
@@ -79,17 +86,17 @@ const nestedOptions = computed(() => {
   const opt = option.value
   if (!opt) return []
   const currentVal = options.value[props.name]
-  
-  if (opt.type === 'switch') {
-    const activeCase = opt.cases.find(c => c.name === currentVal)
+
+  if (opt.type === "switch") {
+    const activeCase = opt.cases.find((c) => c.name === currentVal)
     return activeCase?.option || []
   }
-  
-  if (opt.type === 'select') {
-    const activeCase = opt.cases.find(c => c.name === currentVal)
+
+  if (opt.type === "select") {
+    const activeCase = opt.cases.find((c) => c.name === currentVal)
     return activeCase?.option || []
   }
-  
+
   return []
 })
 </script>
