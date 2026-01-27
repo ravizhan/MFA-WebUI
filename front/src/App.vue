@@ -2,20 +2,20 @@
   <n-config-provider
     :theme="naiveTheme"
     :theme-overrides="themeOverrides"
-    class="lg:h-full lg:flex lg:flex-col lg:justify-center bg-gray-50 dark:bg-gray-900 transition-colors duration-300"
+    class="h-full xl:flex xl:flex-col xl:justify-center bg-gray-50 dark:bg-gray-900 transition-colors duration-300"
   >
     <n-message-provider>
       <n-dialog-provider>
         <div>
-          <n-layout class="lg:shadow-3xl lg:w-[80vw] w-full mx-auto pt-0 lg:rounded-xl transition-all duration-300">
-            <n-layout-header bordered class="backdrop-blur-sm bg-opacity-90">
+          <n-layout class="xl:shadow-3xl xl:w-[80vw] w-full mx-auto pt-0 xl:rounded-xl transition-all duration-300">
+            <n-layout-header bordered class="backdrop-blur-sm bg-opacity-90 h-[10vh] xl:h-auto">
               <div class="text-center text-2xl font-bold tracking-wide">{{ name }}</div>
               <n-menu mode="horizontal" class="justify-between" :options="menuOptions" />
             </n-layout-header>
             <n-layout>
               <router-view></router-view>
             </n-layout>
-            <n-layout-footer bordered class="text-center py-4 text-gray-500">
+            <n-layout-footer bordered class="text-center xl:py-4 py-2 h-[5vh] xl:h-auto text-gray-500">
               <a href="https://github.com/ravizhan/MWU" target="_blank" class="hover:text-blue-500 transition-colors">
                 Powered by MWU
               </a>

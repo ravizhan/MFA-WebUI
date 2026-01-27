@@ -37,7 +37,7 @@
   <n-card hoverable>
     <n-list hoverable bordered>
       <template v-if="scroll_show">
-        <n-scrollbar class="max-h-75">
+        <n-scrollbar trigger="none" class="max-h-75">
           <VueDraggable v-model="configStore.taskList">
             <n-list-item v-for="item in configStore.taskList" :key="item.id">
               <n-checkbox size="large" :label="item.name" v-model:checked="item.checked" />
@@ -68,11 +68,11 @@
       </template>
     </n-list>
     <n-flex class="form-btn" justify="center">
-      <n-button strong secondary type="info" size="large" @click="StartTask"> 开始任务</n-button>
-      <n-button strong secondary type="info" size="large" @click="stopTask"> 中止任务</n-button>
+      <n-button strong secondary type="info" size="large" @click="StartTask">开始任务</n-button>
+      <n-button strong secondary type="info" size="large" @click="stopTask">中止任务</n-button>
     </n-flex>
     <n-flex class="form-btn" justify="center">
-      <n-button quaternary type="warning" size="small" @click="resetConfig"> 重置配置</n-button>
+      <n-button quaternary type="warning" size="small" @click="resetConfig">重置配置</n-button>
     </n-flex>
   </n-card>
 </template>
@@ -253,4 +253,9 @@ function resetConfig() {
 .list-group-item i {
   cursor: pointer;
 }
+.form-btn {
+  text-align: center;
+  padding-top: 5%;
+}
+
 </style>

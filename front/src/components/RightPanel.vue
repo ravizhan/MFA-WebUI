@@ -1,4 +1,5 @@
 <template>
+  <div class="col-name">实时预览</div>
   <div>
     <n-card hoverable>
       <n-flex class="pb-[12px]" justify="space-around" :size=[5,0]>
@@ -69,7 +70,6 @@ sse.addEventListener('log', handleLog)
 
 onMounted(() => {
   watchEffect(() => {
-    // console.log(log.value)
     if (log.value) {
       nextTick(() => {
         logInstRef.value?.scrollTo({ position: "bottom", silent: true })
@@ -110,3 +110,12 @@ watch(connected, (newVal) => {
   }
 })
 </script>
+<style scoped>
+.log {
+  margin-top: 0.5rem;
+  border: 1px solid rgba(140, 140, 140, 0.2);
+  border-radius: 8px;
+  padding: 0.5rem;
+  transition: border-color 0.3s ease;
+}
+</style>

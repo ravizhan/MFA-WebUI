@@ -1,15 +1,15 @@
 <template>
   <n-message-provider>
     <n-dialog-provider>
-      <n-layout class="p-3 lg:p-5 h-[80vh]">
-        <n-grid x-gap="30" cols="1 m:3" class="p-1 lg:p-2 h-full grid-container" responsive="screen">
-          <n-grid-item class="h-full">
+      <n-layout class="px-1 pt-3 h-[85vh] xl:h-[80vh]">
+        <n-grid x-gap="20" cols="1 m:3" class="px-2" responsive="screen">
+          <n-grid-item>
             <LeftPanel></LeftPanel>
           </n-grid-item>
-          <n-grid-item class="h-full">
+          <n-grid-item>
             <MediumPanel></MediumPanel>
           </n-grid-item>
-          <n-grid-item class="h-full">
+          <n-grid-item>
             <RightPanel></RightPanel>
           </n-grid-item>
         </n-grid>
@@ -28,11 +28,3 @@ onMounted(() => {
   }
 })
 </script>
-
-<style scoped>
-@media (min-width: 768px) {
-  .grid-container {
-    grid-template-rows: minmax(0, 1fr) !important;
-  }
-}
-</style>
