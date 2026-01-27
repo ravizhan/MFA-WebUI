@@ -1,0 +1,20 @@
+repos:
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    # uv version.
+    rev: 0.9.27
+    hooks:
+      - id: uv-lock
+  - repo: local
+    hooks:
+      - id: uv-format
+        name: uv-format
+        entry: uv format
+        language: system
+        types: [python]
+        pass_filenames: false
+      - id: pnpm-format
+        name: pnpm-format
+        entry: pnpm --dir front run format
+        language: system
+        files: ^front/.*
+        pass_filenames: false
