@@ -1,15 +1,15 @@
 <template>
-  <div class="col-name">任务设置</div>
+  <div class="col-name">{{ t("panel.taskSettings") }}</div>
   <n-card hoverable content-style="padding: 0;" class="transition-all duration-300 overflow-hidden">
     <n-scrollbar trigger="none" class="max-h-65 !rounded-[12px]">
       <n-list v-if="!isEmpty" hoverable>
         <OptionItem v-for="optName in rootOptions" :key="optName" :name="optName" />
       </n-list>
-      <div v-else class="py-[12px] px-[20px] min-h-50">空空如也</div>
+      <div v-else class="py-[12px] px-[20px] min-h-50">{{ t("panel.empty") }}</div>
     </n-scrollbar>
   </n-card>
 
-  <div class="col-name">任务说明</div>
+  <div class="col-name">{{ t("panel.taskDescription") }}</div>
   <n-card hoverable content-style="padding: 0.5rem 1rem;" class="transition-all duration-300">
     <n-scrollbar trigger="none">
       <div ref="mdContainer" class="markdown-body min-h-50 max-h-65" v-html="md"></div>
@@ -22,11 +22,13 @@
 import { marked } from "marked"
 import type { Tokens } from "marked"
 import { ref, watch, nextTick } from "vue"
+import { useI18n } from "vue-i18n"
 import { useInterfaceStore } from "../stores/interface.ts"
 import { useIndexStore } from "../stores"
 import { NImage } from "naive-ui"
 import OptionItem from "./OptionItem.vue"
 
+const { t } = useI18n()
 const interfaceStore = useInterfaceStore()
 const indexStore = useIndexStore()
 const md = ref("")
@@ -78,7 +80,7 @@ watch(
         if (i.description) {
           md.value = await marked(i.description)
         } else {
-          md.value = await marked("空空如也")
+          md.value = await marked(t("panel.empty"))
         }
 
         rootOptions.value = i.option || []

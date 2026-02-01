@@ -2,6 +2,8 @@
   <n-config-provider
     :theme="naiveTheme"
     :theme-overrides="themeOverrides"
+    :locale="naiveLocale"
+    :date-locale="naiveDateLocale"
     class="h-full xl:flex xl:flex-col xl:justify-center bg-gray-50 dark:bg-gray-900 transition-colors duration-300"
   >
     <n-message-provider>
@@ -38,9 +40,10 @@
 </template>
 
 <script setup lang="ts">
-import { NIcon } from "naive-ui"
+import { NIcon, zhCN, dateZhCN } from "naive-ui"
 import { h, ref, onMounted, watch, computed, watchEffect } from "vue"
 import { RouterLink } from "vue-router"
+import { useI18n } from "vue-i18n"
 import { useInterfaceStore } from "./stores/interface.ts"
 import { useUserConfigStore } from "./stores/userConfig.ts"
 import { useSettingsStore } from "./stores/settings"
@@ -54,6 +57,7 @@ import githubMarkdownDarkUrl from "github-markdown-css/github-markdown-dark.css?
 function renderIcon(icon: string) {
   return () => h(NIcon, null, { default: () => h("div", { class: icon }) })
 }
+const { t, locale } = useI18n()
 const interfaceStore = useInterfaceStore()
 const configStore = useUserConfigStore()
 const settingsStore = useSettingsStore()
@@ -65,6 +69,9 @@ const naiveTheme = computed(() => (settingsStore.isDarkMode ? darkTheme : null))
 const themeOverrides = computed(() =>
   settingsStore.isDarkMode ? darkThemeOverrides : lightThemeOverrides,
 )
+
+const naiveLocale = computed(() => (locale.value === "zh-CN" ? zhCN : null))
+const naiveDateLocale = computed(() => (locale.value === "zh-CN" ? dateZhCN : null))
 
 const markdownCssHref = computed(() => {
   const mode = settingsStore.settings.ui.darkMode
@@ -117,7 +124,7 @@ watch(screenWidth, (newValue) => {
   }
 })
 
-const menuOptions = [
+const menuOptions = computed(() => [
   {
     label: () =>
       h(
@@ -127,7 +134,7 @@ const menuOptions = [
             name: "panel",
           },
         },
-        { default: () => "首页" },
+        { default: () => t("menu.home") },
       ),
     key: "panel",
     icon: renderIcon("i-mdi-home"),
@@ -141,10 +148,10 @@ const menuOptions = [
             name: "setting",
           },
         },
-        { default: () => "设置" },
+        { default: () => t("menu.settings") },
       ),
     key: "setting",
     icon: renderIcon("i-mdi-cog"),
   },
-]
+])
 </script>

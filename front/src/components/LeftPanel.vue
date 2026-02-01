@@ -1,11 +1,11 @@
 <template>
   <n-card content-style="padding: 0;margin: 5px" hoverable>
     <n-tabs type="segment" animated>
-      <n-tab-pane name="device" tab="设备连接">
+      <n-tab-pane name="device" :tab="t('panel.device')">
         <n-flex class="pb-[12px]">
           <n-tree-select
             v-model:value="device"
-            placeholder="请选择一个设备"
+            :placeholder="t('panel.selectDevice')"
             :options="devices_tree"
             :loading="loading"
             :override-default-node-click-behavior="override"
@@ -14,26 +14,30 @@
             @click="get_device"
             class="max-w-80%"
           />
-          <n-button strong secondary type="info" @click="connectDevices">连接</n-button>
+          <n-button strong secondary type="info" @click="connectDevices">{{
+            t("panel.connect")
+          }}</n-button>
         </n-flex>
       </n-tab-pane>
-      <n-tab-pane name="resource" tab="资源选择">
+      <n-tab-pane name="resource" :tab="t('panel.resource')">
         <n-flex class="pb-[12px]">
           <n-select
             v-model:value="resource"
-            placeholder="请选择一个资源"
+            :placeholder="t('panel.selectResource')"
             :options="resources_list"
             :loading="loading"
             remote
             @click="get_resource"
             class="max-w-80%"
           />
-          <n-button strong secondary type="info" @click="post_resource">确定</n-button>
+          <n-button strong secondary type="info" @click="post_resource">{{
+            t("panel.confirm")
+          }}</n-button>
         </n-flex>
       </n-tab-pane>
     </n-tabs>
   </n-card>
-  <div class="col-name">任务列表</div>
+  <div class="col-name">{{ t("panel.taskList") }}</div>
   <n-card hoverable>
     <n-list hoverable bordered>
       <template v-if="scroll_show">
@@ -68,16 +72,23 @@
       </template>
     </n-list>
     <n-flex class="form-btn" justify="center">
-      <n-button strong secondary type="info" size="large" @click="StartTask">开始任务</n-button>
-      <n-button strong secondary type="info" size="large" @click="stopTask">中止任务</n-button>
+      <n-button strong secondary type="info" size="large" @click="StartTask">{{
+        t("panel.start")
+      }}</n-button>
+      <n-button strong secondary type="info" size="large" @click="stopTask">{{
+        t("panel.stop")
+      }}</n-button>
     </n-flex>
     <n-flex class="form-btn" justify="center">
-      <n-button quaternary type="warning" size="small" @click="resetConfig">重置配置</n-button>
+      <n-button quaternary type="warning" size="small" @click="resetConfig">{{
+        t("panel.resetConfig")
+      }}</n-button>
     </n-flex>
   </n-card>
 </template>
 <script setup lang="ts">
 import { watch, ref } from "vue"
+import { useI18n } from "vue-i18n"
 import {
   getDevices,
   postDevices,
@@ -98,6 +109,7 @@ if (typeof window !== "undefined") {
 }
 
 const dialog = useDialog()
+const { t } = useI18n()
 const configStore = useUserConfigStore()
 const indexStore = useIndexStore()
 const scroll_show = ref(window.innerWidth > 768)
@@ -175,14 +187,14 @@ function get_device() {
     .then(() => {
       if ((devices_tree.value[0] as any).children.length === 0) {
         ;(devices_tree.value[0] as any).children.push({
-          label: "无可用设备",
+          label: t("panel.noDevice"),
           key: "none",
           disabled: true,
         })
       }
       if ((devices_tree.value[1] as any).children.length === 0) {
         ;(devices_tree.value[1] as any).children.push({
-          label: "无可用设备",
+          label: t("panel.noDevice"),
           key: "none",
           disabled: true,
         })
@@ -194,7 +206,7 @@ function get_device() {
 function connectDevices() {
   if (!device.value) {
     // @ts-ignore
-    window.$message.error("请选择一个设备")
+    window.$message.error(t("panel.selectDevice"))
     return
   } else {
     postDevices(device.value).then((success) => {
@@ -220,7 +232,7 @@ function get_resource() {
 function post_resource() {
   if (!resource.value) {
     // @ts-ignore
-    window.$message.error("请选择一个资源")
+    window.$message.error(t("panel.selectResource"))
     return
   } else {
     postResource(resource.value)
@@ -231,7 +243,7 @@ function StartTask() {
   const selectedTasks = configStore.taskList.filter((task) => task.checked).map((task) => task.id)
   if (selectedTasks.length === 0) {
     // @ts-ignore
-    window.$message.error("请至少选择一个任务")
+    window.$message.error(t("panel.selectTask"))
     return
   }
   startTask(selectedTasks, configStore.options)
@@ -239,14 +251,14 @@ function StartTask() {
 
 function resetConfig() {
   dialog.warning({
-    title: "重置配置",
-    content: "确定要重置所有任务配置吗？此操作不可撤销。",
-    positiveText: "确定",
-    negativeText: "取消",
+    title: t("panel.resetConfig"),
+    content: t("panel.resetConfigConfirm"),
+    positiveText: t("common.confirm"),
+    negativeText: t("common.cancel"),
     onPositiveClick: async () => {
       await configStore.resetConfig()
       // @ts-ignore
-      window.$message.success("配置已重置")
+      window.$message.success(t("panel.configReset"))
     },
   })
 }

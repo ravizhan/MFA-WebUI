@@ -1,0 +1,212 @@
+{
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "delete": "Delete",
+    "edit": "Edit",
+    "add": "Add",
+    "success": "Success",
+    "fail": "Failed",
+    "error": "Error",
+    "title": "Notice",
+    "unknown": "Unknown",
+    "loading": "Loading",
+    "none": "None",
+    "copy": "Copy",
+    "start": "Start",
+    "pause": "Pause"
+  },
+  "menu": {
+    "home": "Home",
+    "settings": "Settings"
+  },
+  "settings": {
+    "title": "Settings",
+    "language": "Language",
+    "theme": "Theme",
+    "general": "General",
+    "anchor": {
+      "update": "Update Settings",
+      "runtime": "Runtime Settings",
+      "scheduler": "Scheduler",
+      "ui": "UI Settings",
+      "notification": "Notification",
+      "about": "About"
+    },
+    "update": {
+      "title": "Update Settings",
+      "check": "Check for Updates",
+      "auto": "Auto Update",
+      "channel": "Update Channel",
+      "proxy": "Proxy Address",
+      "checking": "Checking...",
+      "latest": "You are using the latest version",
+      "failed": "Failed to check for updates",
+      "newVersion": "New version found",
+      "updateLog": "Changelog",
+      "goUpdate": "Update Now",
+      "later": "Later",
+      "channelOptions": {
+        "stable": "Stable",
+        "beta": "Beta"
+      }
+    },
+    "runtime": {
+      "title": "Runtime Settings",
+      "timeout": "Timeout",
+      "timeoutSuffix": "sec",
+      "reminderInterval": "Reminder Interval",
+      "reminderSuffix": "min",
+      "autoRetry": "Auto Retry",
+      "maxRetryCount": "Max Retries"
+    },
+    "scheduler": {
+      "title": "Scheduler",
+      "create": "New Task",
+      "taskList": "Task List",
+      "noTasks": "No scheduled tasks",
+      "trigger": "Trigger",
+      "nextRun": "Next Run",
+      "history": "Execution History",
+      "noHistory": "No execution records",
+      "deleteConfirm": "Are you sure you want to delete this task?",
+      "deleted": "Task deleted",
+      "formatter": {
+        "cron": "Cron",
+        "date": "Specific Time",
+        "interval": "Interval",
+        "hour": "hr",
+        "minute": "min",
+        "unset": "Not Set"
+      },
+      "status": {
+        "success": "Success",
+        "failed": "Failed",
+        "running": "Running",
+        "stopped": "Stopped"
+      },
+      "dialog": {
+        "editTitle": "Edit Task",
+        "createTitle": "New Task",
+        "taskName": "Task Name",
+        "taskNamePlaceholder": "Enter task name",
+        "taskDesc": "Description",
+        "taskDescPlaceholder": "Enter description",
+        "triggerType": "Trigger Type",
+        "cronExpression": "Cron Expression",
+        "specificTime": "Specific Time",
+        "intervalExecution": "Interval",
+        "cronPlaceholder": "* * * * * (min hr day mon week)",
+        "quickSelect": "Quick Select",
+        "presets": {
+          "daily": "Daily at 0:00",
+          "daily9am": "Daily at 9:00",
+          "weekly": "Mondays at 0:00",
+          "hourly": "Hourly"
+        },
+        "executionTime": "Time",
+        "selectTime": "Select Time",
+        "intervalTime": "Interval",
+        "currentSetting": "Current Setting: ",
+        "selectTaskHint": "Select a task from list to configure",
+        "saveSuccess": "Saved successfully",
+        "saveFail": "Save failed",
+        "selectTaskRequired": "Please select at least one task",
+        "taskUpdated": "Task Updated",
+        "taskCreated": "Task Created",
+        "tab": {
+          "taskList": "Task List",
+          "taskSettings": "Task Settings"
+        },
+        "selectTaskTip": "Please select a task from the list and click settings button first",
+        "noOptions": "Nothing here",
+        "actions": {
+          "cancel": "Cancel",
+          "save": "Save"
+        }
+      },
+      "rules": {
+        "nameRequired": "Please enter task name",
+        "nameLength": "Task name length must be 1-100 characters",
+        "cronRequired": "Please enter Cron expression",
+        "cronInvalid": "Invalid Cron expression format",
+        "taskListRequired": "Please select at least one task"
+      },
+      "messages": {
+        "successUpdate": "Task updated",
+        "successCreate": "Task created",
+        "failSave": "Save failed",
+        "failRetry": "Save failed, please try again later"
+      }
+    },
+    "ui": {
+      "title": "UI Settings",
+      "darkMode": "Dark Mode",
+      "darkModeOptions": {
+        "auto": "System",
+        "on": "On",
+        "off": "Off"
+      }
+    },
+    "notification": {
+      "title": "Notification",
+      "test": "Test External Notification",
+      "enable": "Enable Notification",
+      "system": "System",
+      "browser": "Browser",
+      "external": "External",
+      "onComplete": "Notify on Complete",
+      "onError": "Notify on Error",
+      "testSending": "Sending test notification...",
+      "testSuccess": "Test notification sent",
+      "testResult": "Send failed: {message}",
+      "testError": "Error sending test notification"
+    },
+    "about": {
+      "title": "About",
+      "version": "Version",
+      "author": "Author",
+      "license": "License",
+      "homepage": "Homepage",
+      "issue": "Report Issue",
+      "contact": "Contact",
+      "description": "Description",
+      "defaultDescription": "General GUI for MaaFramework based on Vue",
+      "reset": "Reset All Settings",
+      "resetConfirm": "Are you sure you want to reset all settings? This cannot be undone.",
+      "resetSuccess": "Settings have been reset to default"
+    }
+  },
+  "panel": {
+    "device": "Connect Device",
+    "resource": "Select Resource",
+    "selectDevice": "Please select a device",
+    "selectResource": "Please select a resource",
+    "connect": "Connect",
+    "confirm": "Confirm",
+    "taskList": "Task List",
+    "start": "Start Task",
+    "stop": "Stop Task",
+    "resetConfig": "Reset Config",
+    "noDevice": "No available device",
+    "connectSuccess": "Connected successfully",
+    "connectFail": "Connection failed",
+    "resourceSuccess": "Resource loaded successfully",
+    "resourceFail": "Resource load failed",
+    "selectTask": "Please select at least one task",
+    "resetConfigConfirm": "Are you sure you want to reset all task configurations? This cannot be undone.",
+    "configReset": "Configuration reset",
+    "taskSettings": "Task Settings",
+    "taskDescription": "Task Description",
+    "empty": "Empty",
+    "preview": "Live Preview",
+    "selectFPS": "Select FPS",
+    "startStream": "Start Preview",
+    "stopStream": "Pause Preview",
+    "previewHint": "Click start to view live stream",
+    "connectFirstHint": "Please connect device in left panel first",
+    "log": "Live Log",
+    "copySuccess": "Copied successfully"
+  }
+}

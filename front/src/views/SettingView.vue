@@ -11,32 +11,32 @@
           type="block"
           offset-target="#setting-content"
         >
-          <n-anchor-link title="更新设置" href="#update-settings">
+          <n-anchor-link :title="t('settings.anchor.update')" href="#update-settings">
             <template #icon>
               <n-icon><div class="i-mdi-update" /></n-icon>
             </template>
           </n-anchor-link>
-          <n-anchor-link title="运行设置" href="#runtime-settings">
+          <n-anchor-link :title="t('settings.anchor.runtime')" href="#runtime-settings">
             <template #icon>
               <n-icon><div class="i-mdi-cog-play" /></n-icon>
             </template>
           </n-anchor-link>
-          <n-anchor-link title="定时任务" href="#scheduler-settings">
+          <n-anchor-link :title="t('settings.anchor.scheduler')" href="#scheduler-settings">
             <template #icon>
               <n-icon><div class="i-mdi-clock-outline" /></n-icon>
             </template>
           </n-anchor-link>
-          <n-anchor-link title="界面设置" href="#ui-settings">
+          <n-anchor-link :title="t('settings.anchor.ui')" href="#ui-settings">
             <template #icon>
               <n-icon><div class="i-mdi-palette" /></n-icon>
             </template>
           </n-anchor-link>
-          <n-anchor-link title="通知设置" href="#notification-settings">
+          <n-anchor-link :title="t('settings.anchor.notification')" href="#notification-settings">
             <template #icon>
               <n-icon><div class="i-mdi-bell" /></n-icon>
             </template>
           </n-anchor-link>
-          <n-anchor-link title="关于我们" href="#about">
+          <n-anchor-link :title="t('settings.anchor.about')" href="#about">
             <template #icon>
               <n-icon><div class="i-mdi-information" /></n-icon>
             </template>
@@ -46,7 +46,11 @@
       <div id="setting-content" class="flex-1 overflow-y-auto max-md:max-w-full">
         <n-scrollbar>
           <!-- 更新设置 -->
-          <n-card id="update-settings" class="mb-6 scroll-mt-5 last:mb-0" title="更新设置">
+          <n-card
+            id="update-settings"
+            class="mb-6 scroll-mt-5 last:mb-0"
+            :title="t('settings.update.title')"
+          >
             <template #header-extra>
               <n-button
                 size="small"
@@ -54,17 +58,17 @@
                 @click="checkForUpdate"
                 :loading="checkingUpdate"
               >
-                检查更新
+                {{ t("settings.update.check") }}
               </n-button>
             </template>
             <n-form label-placement="left" label-width="120">
-              <n-form-item label="自动更新">
+              <n-form-item :label="t('settings.update.auto')">
                 <n-switch
                   v-model:value="settings.update.autoUpdate"
                   @update:value="(val: boolean) => handleSettingChange('update', 'autoUpdate', val)"
                 />
               </n-form-item>
-              <n-form-item label="更新渠道">
+              <n-form-item :label="t('settings.update.channel')">
                 <n-select
                   v-model:value="settings.update.updateChannel"
                   :options="updateChannelOptions"
@@ -78,7 +82,7 @@
                   "
                 />
               </n-form-item>
-              <n-form-item label="代理地址">
+              <n-form-item :label="t('settings.update.proxy')">
                 <n-input
                   v-model:value="settings.update.proxy"
                   placeholder="http://127.0.0.1:7890"
@@ -90,9 +94,13 @@
           </n-card>
 
           <!-- 运行设置 -->
-          <n-card id="runtime-settings" class="mb-6 scroll-mt-5 last:mb-0" title="运行设置">
+          <n-card
+            id="runtime-settings"
+            class="mb-6 scroll-mt-5 last:mb-0"
+            :title="t('settings.runtime.title')"
+          >
             <n-form label-placement="left" label-width="120">
-              <n-form-item label="超时时间">
+              <n-form-item :label="t('settings.runtime.timeout')">
                 <n-input-number
                   v-model:value="settings.runtime.timeout"
                   :min="60"
@@ -102,10 +110,10 @@
                     (val: number | null) => handleSettingChange('runtime', 'timeout', val)
                   "
                 >
-                  <template #suffix>秒</template>
+                  <template #suffix>{{ t("settings.runtime.timeoutSuffix") }}</template>
                 </n-input-number>
               </n-form-item>
-              <n-form-item label="提醒间隔">
+              <n-form-item :label="t('settings.runtime.reminderInterval')">
                 <n-input-number
                   v-model:value="settings.runtime.reminderInterval"
                   :min="5"
@@ -115,16 +123,19 @@
                     (val: number | null) => handleSettingChange('runtime', 'reminderInterval', val)
                   "
                 >
-                  <template #suffix>分钟</template>
+                  <template #suffix>{{ t("settings.runtime.reminderSuffix") }}</template>
                 </n-input-number>
               </n-form-item>
-              <n-form-item label="自动重试">
+              <n-form-item :label="t('settings.runtime.autoRetry')">
                 <n-switch
                   v-model:value="settings.runtime.autoRetry"
                   @update:value="(val: boolean) => handleSettingChange('runtime', 'autoRetry', val)"
                 />
               </n-form-item>
-              <n-form-item label="最大重试次数" v-if="settings.runtime.autoRetry">
+              <n-form-item
+                :label="t('settings.runtime.maxRetryCount')"
+                v-if="settings.runtime.autoRetry"
+              >
                 <n-input-number
                   v-model:value="settings.runtime.maxRetryCount"
                   :min="1"
@@ -138,20 +149,27 @@
           </n-card>
 
           <!-- 定时任务设置 -->
-          <n-card id="scheduler-settings" class="mb-6 scroll-mt-5 last:mb-0" title="定时任务">
+          <n-card
+            id="scheduler-settings"
+            class="mb-6 scroll-mt-5 last:mb-0"
+            :title="t('settings.scheduler.title')"
+          >
             <template #header-extra>
               <n-button size="small" type="primary" @click="openCreateTaskDialog">
                 <template #icon>
                   <n-icon><div class="i-mdi-plus" /></n-icon>
                 </template>
-                新建任务
+                {{ t("settings.scheduler.create") }}
               </n-button>
             </template>
 
             <n-collapse>
               <!-- 任务列表折叠面板 -->
-              <n-collapse-item title="任务列表" name="tasks">
-                <n-empty v-if="schedulerStore.tasks.length === 0" description="暂无定时任务" />
+              <n-collapse-item :title="t('settings.scheduler.taskList')" name="tasks">
+                <n-empty
+                  v-if="schedulerStore.tasks.length === 0"
+                  :description="t('settings.scheduler.noTasks')"
+                />
                 <n-list v-else>
                   <n-list-item v-for="task in schedulerStore.tasks" :key="task.id">
                     <template #prefix>
@@ -163,20 +181,23 @@
                     <n-thing :title="task.name" :description="task.description">
                       <template #header-extra>
                         <n-space>
-                          <n-button size="tiny" @click="openEditTaskDialog(task)">编辑</n-button>
-                          <n-button size="tiny" type="error" @click="handleDeleteTask(task.id)"
-                            >删除</n-button
-                          >
+                          <n-button size="tiny" @click="openEditTaskDialog(task)">{{
+                            t("common.edit")
+                          }}</n-button>
+                          <n-button size="tiny" type="error" @click="handleDeleteTask(task.id)">{{
+                            t("common.delete")
+                          }}</n-button>
                         </n-space>
                       </template>
                       <template #description>
                         <n-space vertical size="small">
                           <n-text depth="3"
-                            >触发:
+                            >{{ t("settings.scheduler.trigger") }}:
                             {{ formatTrigger(task.trigger_type, task.trigger_config) }}</n-text
                           >
                           <n-text depth="3"
-                            >下次执行: {{ formatDateTime(task.next_run_time) }}</n-text
+                            >{{ t("settings.scheduler.nextRun") }}:
+                            {{ formatDateTime(task.next_run_time) }}</n-text
                           >
                         </n-space>
                       </template>
@@ -186,8 +207,11 @@
               </n-collapse-item>
 
               <!-- 执行历史折叠面板 -->
-              <n-collapse-item title="执行历史" name="history">
-                <n-empty v-if="schedulerStore.executions.length === 0" description="暂无执行记录" />
+              <n-collapse-item :title="t('settings.scheduler.history')" name="history">
+                <n-empty
+                  v-if="schedulerStore.executions.length === 0"
+                  :description="t('settings.scheduler.noHistory')"
+                />
                 <n-timeline v-else>
                   <n-timeline-item
                     v-for="exec in schedulerStore.executions"
@@ -214,9 +238,20 @@
           </n-card>
 
           <!-- 界面设置 -->
-          <n-card id="ui-settings" class="mb-6 scroll-mt-5 last:mb-0" title="界面设置">
+          <n-card
+            id="ui-settings"
+            class="mb-6 scroll-mt-5 last:mb-0"
+            :title="t('settings.ui.title')"
+          >
             <n-form label-placement="left" label-width="120">
-              <n-form-item label="深色模式">
+              <n-form-item :label="t('settings.ui.language')">
+                <n-select
+                  :value="locale"
+                  :options="localeOptions"
+                  @update:value="handleLocaleChange"
+                />
+              </n-form-item>
+              <n-form-item :label="t('settings.ui.darkMode')">
                 <n-select
                   v-model:value="settings.ui.darkMode"
                   :options="darkModeOptions"
@@ -231,7 +266,11 @@
           </n-card>
 
           <!-- 通知设置 -->
-          <n-card id="notification-settings" class="mb-6 scroll-mt-5 last:mb-0" title="通知设置">
+          <n-card
+            id="notification-settings"
+            class="mb-6 scroll-mt-5 last:mb-0"
+            :title="t('settings.notification.title')"
+          >
             <template #header-extra>
               <n-button
                 size="small"
@@ -241,11 +280,11 @@
                   !settings.notification.externalNotification || !settings.notification.webhook
                 "
               >
-                测试外部通知
+                {{ t("settings.notification.test") }}
               </n-button>
             </template>
             <n-form label-placement="left" label-width="120">
-              <n-form-item label="启用通知">
+              <n-form-item :label="t('settings.notification.enable')">
                 <n-space>
                   <n-checkbox
                     v-model:checked="settings.notification.systemNotification"
@@ -254,7 +293,7 @@
                         handleSettingChange('notification', 'systemNotification', val)
                     "
                   >
-                    系统通知
+                    {{ t("settings.notification.system") }}
                   </n-checkbox>
                   <n-checkbox
                     v-model:checked="settings.notification.browserNotification"
@@ -263,7 +302,7 @@
                         handleSettingChange('notification', 'browserNotification', val)
                     "
                   >
-                    浏览器通知
+                    {{ t("settings.notification.browser") }}
                   </n-checkbox>
                   <n-checkbox
                     v-model:checked="settings.notification.externalNotification"
@@ -272,7 +311,7 @@
                         handleSettingChange('notification', 'externalNotification', val)
                     "
                   >
-                    外部通知
+                    {{ t("settings.notification.external") }}
                   </n-checkbox>
                 </n-space>
               </n-form-item>
@@ -364,7 +403,7 @@
             </template>
             <n-divider />
             <n-form label-placement="left" label-width="120">
-              <n-form-item label="完成时通知">
+              <n-form-item :label="t('settings.notification.onComplete')">
                 <n-switch
                   v-model:value="settings.notification.notifyOnComplete"
                   @update:value="
@@ -372,7 +411,7 @@
                   "
                 />
               </n-form-item>
-              <n-form-item label="错误时通知">
+              <n-form-item :label="t('settings.notification.onError')">
                 <n-switch
                   v-model:value="settings.notification.notifyOnError"
                   @update:value="
@@ -384,18 +423,18 @@
           </n-card>
 
           <!-- 关于我们 -->
-          <n-card id="about" class="mb-6 scroll-mt-5 last:mb-0" title="关于我们">
+          <n-card id="about" class="mb-6 scroll-mt-5 last:mb-0" :title="t('settings.about.title')">
             <n-descriptions bordered :column="1">
-              <n-descriptions-item label="版本">
-                {{ settings.about.version || "未知" }}
+              <n-descriptions-item :label="t('settings.about.version')">
+                {{ settings.about.version || t("common.unknown") }}
               </n-descriptions-item>
-              <n-descriptions-item label="作者">
-                {{ settings.about.author || "未知" }}
+              <n-descriptions-item :label="t('settings.about.author')">
+                {{ settings.about.author || t("common.unknown") }}
               </n-descriptions-item>
-              <n-descriptions-item label="开源协议">
+              <n-descriptions-item :label="t('settings.about.license')">
                 {{ settings.about.license || "MIT" }}
               </n-descriptions-item>
-              <n-descriptions-item label="项目主页">
+              <n-descriptions-item :label="t('settings.about.homepage')">
                 <n-button
                   text
                   tag="a"
@@ -409,7 +448,7 @@
                   {{ settings.about.github || "https://github.com/ravizhan/MWU" }}
                 </n-button>
               </n-descriptions-item>
-              <n-descriptions-item label="问题反馈">
+              <n-descriptions-item :label="t('settings.about.issue')">
                 <n-button
                   text
                   tag="a"
@@ -423,16 +462,21 @@
                   GitHub Issues
                 </n-button>
               </n-descriptions-item>
-              <n-descriptions-item label="联系方式" v-if="settings.about.contact">
+              <n-descriptions-item
+                :label="t('settings.about.contact')"
+                v-if="settings.about.contact"
+              >
                 {{ settings.about.contact }}
               </n-descriptions-item>
-              <n-descriptions-item label="项目简介">
-                {{ settings.about.description || "基于 Vue 的 MAAFramework 通用 GUI 项目" }}
+              <n-descriptions-item :label="t('settings.about.description')">
+                {{ settings.about.description || t("settings.about.defaultDescription") }}
               </n-descriptions-item>
             </n-descriptions>
             <n-divider />
             <n-space>
-              <n-button type="warning" @click="handleResetSettings"> 重置所有设置 </n-button>
+              <n-button type="warning" @click="handleResetSettings">
+                {{ t("settings.about.reset") }}
+              </n-button>
             </n-space>
           </n-card>
         </n-scrollbar>
@@ -454,6 +498,7 @@ import { useSettingsStore } from "../stores/settings"
 import { useSchedulerStore } from "../stores/scheduler"
 import { checkUpdate, testNotificationApi } from "../script/api"
 import { useMessage, useDialog } from "naive-ui"
+import { useI18n } from "vue-i18n"
 import type { SettingsModel } from "../types/settings"
 import type { ScheduledTask, TriggerConfig, ExecutionStatus } from "../types/scheduler"
 import SchedulerTaskDialog from "../components/SchedulerTaskDialog.vue"
@@ -467,7 +512,19 @@ type EditableSettingValue<
 
 const message = useMessage()
 const dialog = useDialog()
+const { t, locale } = useI18n()
 const settingsStore = useSettingsStore()
+
+const localeOptions = [
+  { label: "简体中文", value: "zh-CN" },
+  { label: "English", value: "en-US" },
+]
+
+const handleLocaleChange = (val: string) => {
+  locale.value = val
+  localStorage.setItem("locale", val)
+}
+
 const schedulerStore = useSchedulerStore()
 
 if (typeof window !== "undefined") {
@@ -480,10 +537,10 @@ const checkingUpdate = ref(false)
 const showTaskDialog = ref(false)
 const editingTask = ref<ScheduledTask | null>(null)
 
-const updateChannelOptions = [
-  { label: "稳定版", value: "stable" },
-  { label: "测试版", value: "beta" },
-]
+const updateChannelOptions = computed(() => [
+  { label: t("settings.update.channelOptions.stable"), value: "stable" },
+  { label: t("settings.update.channelOptions.beta"), value: "beta" },
+])
 
 const methodOptions = [
   { label: "POST", value: "POST" },
@@ -495,11 +552,11 @@ const contentTypeOptions = [
   { label: "application/x-www-form-urlencoded", value: "application/x-www-form-urlencoded" },
 ]
 
-const darkModeOptions = [
-  { label: "跟随系统", value: "auto" },
-  { label: "关", value: false },
-  { label: "开", value: true },
-]
+const darkModeOptions = computed(() => [
+  { label: t("settings.ui.darkModeOptions.auto"), value: "auto" },
+  { label: t("settings.ui.darkModeOptions.off"), value: false },
+  { label: t("settings.ui.darkModeOptions.on"), value: true },
+])
 
 onMounted(() => {
   if (!settingsStore.initialized) {
@@ -525,10 +582,10 @@ const checkForUpdate = async () => {
     const result = await checkUpdate()
     if (result.hasUpdate) {
       dialog.info({
-        title: "发现新版本",
-        content: `新版本 ${result.version} 已发布！\n\n更新日志：\n${result.changelog || "暂无"}`,
-        positiveText: "前往更新",
-        negativeText: "稍后",
+        title: t("settings.update.newVersion"),
+        content: `${t("settings.update.newVersion")} ${result.version} !\n\n${t("settings.update.updateLog")}：\n${result.changelog || t("common.none")}`,
+        positiveText: t("settings.update.goUpdate"),
+        negativeText: t("settings.update.later"),
         onPositiveClick: () => {
           if (result.downloadUrl) {
             window.open(result.downloadUrl, "_blank")
@@ -538,40 +595,40 @@ const checkForUpdate = async () => {
         },
       })
     } else {
-      message.success("当前已是最新版本")
+      message.success(t("settings.update.latest"))
     }
   } catch (error) {
-    message.error("检查更新失败")
+    message.error(t("settings.update.failed"))
   } finally {
     checkingUpdate.value = false
   }
 }
 
 const testNotification = async () => {
-  message.info("正在发送测试通知...")
+  message.info(t("settings.notification.testSending"))
   try {
     const result = await testNotificationApi()
     if (result.status === "success") {
-      message.success("测试通知已发送")
+      message.success(t("settings.notification.testSuccess"))
     } else {
-      message.error(`发送失败: ${result.message}`)
+      message.error(t("settings.notification.testResult", { message: result.message }))
     }
   } catch (error) {
-    message.error("发送测试通知时发生错误")
+    message.error(t("settings.notification.testError"))
     console.error(error)
   }
 }
 
 const handleResetSettings = () => {
   dialog.warning({
-    title: "确认重置",
-    content: "确定要将所有设置重置为默认值吗？此操作不可撤销。",
-    positiveText: "确定重置",
-    negativeText: "取消",
+    title: t("common.confirm"),
+    content: t("settings.about.resetConfirm"),
+    positiveText: t("common.confirm"),
+    negativeText: t("common.cancel"),
     onPositiveClick: async () => {
       const success = await settingsStore.resetSettings()
       if (success) {
-        message.success("设置已重置为默认值")
+        message.success(t("settings.about.resetSuccess"))
       }
     },
   })
@@ -598,16 +655,16 @@ async function handleToggleTask(taskId: string, enabled: boolean) {
 
 async function handleDeleteTask(taskId: string) {
   dialog.warning({
-    title: "确认删除",
-    content: "确定要删除这个定时任务吗？",
-    positiveText: "确定删除",
-    negativeText: "取消",
+    title: t("common.delete"),
+    content: t("settings.scheduler.deleteConfirm"),
+    positiveText: t("common.confirm"),
+    negativeText: t("common.cancel"),
     onPositiveClick: async () => {
       const success = await schedulerStore.deleteTask(taskId)
       if (success) {
-        message.success("任务已删除")
+        message.success(t("settings.scheduler.deleted"))
       } else {
-        message.error(schedulerStore.error || "删除失败")
+        message.error(schedulerStore.error || t("common.fail"))
       }
     },
   })
@@ -621,24 +678,24 @@ function handleTaskSaved() {
 function formatTrigger(triggerType: string, triggerConfig: TriggerConfig): string {
   switch (triggerType) {
     case "cron":
-      return `Cron ${(triggerConfig as any).cron}`
+      return `${t("settings.scheduler.formatter.cron")} ${(triggerConfig as any).cron}`
     case "date":
-      return `指定时间 ${formatDateTime((triggerConfig as any).run_date)}`
+      return `${t("settings.scheduler.formatter.date")} ${formatDateTime((triggerConfig as any).run_date)}`
     case "interval":
       const config = triggerConfig as any
       const parts: string[] = []
-      if (config.hours) parts.push(`${config.hours}小时`)
-      if (config.minutes) parts.push(`${config.minutes}分钟`)
-      return `间隔 ${parts.join(" ")}`
+      if (config.hours) parts.push(`${config.hours}${t("settings.scheduler.formatter.hour")}`)
+      if (config.minutes) parts.push(`${config.minutes}${t("settings.scheduler.formatter.minute")}`)
+      return `${t("settings.scheduler.formatter.interval")} ${parts.join(" ")}`
     default:
-      return "未知"
+      return t("common.unknown")
   }
 }
 
 function formatDateTime(dateStr?: string): string {
-  if (!dateStr) return "未设置"
+  if (!dateStr) return t("settings.scheduler.formatter.unset")
   const date = new Date(dateStr)
-  return date.toLocaleString("zh-CN", {
+  return date.toLocaleString(locale.value, {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -699,15 +756,15 @@ function getStatusTextType(
 function getStatusLabel(status: ExecutionStatus): string {
   switch (status) {
     case "success":
-      return "成功"
+      return t("settings.scheduler.status.success")
     case "failed":
-      return "失败"
+      return t("settings.scheduler.status.failed")
     case "running":
-      return "运行中"
+      return t("settings.scheduler.status.running")
     case "stopped":
-      return "已停止"
+      return t("settings.scheduler.status.stopped")
     default:
-      return "未知"
+      return t("common.unknown")
   }
 }
 </script>

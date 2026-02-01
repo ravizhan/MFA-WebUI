@@ -2,7 +2,11 @@
   <n-modal
     v-model:show="showDialog"
     preset="card"
-    :title="isEditMode ? '编辑定时任务' : '新建定时任务'"
+    :title="
+      isEditMode
+        ? t('settings.scheduler.dialog.editTitle')
+        : t('settings.scheduler.dialog.createTitle')
+    "
     class="xl:w-45% w-95"
   >
     <n-form
@@ -12,54 +16,71 @@
       label-placement="left"
       label-width="100"
     >
-      <n-form-item label="任务名称" path="name">
-        <n-input v-model:value="formData.name" placeholder="请输入任务名称" />
+      <n-form-item :label="t('settings.scheduler.dialog.taskName')" path="name">
+        <n-input
+          v-model:value="formData.name"
+          :placeholder="t('settings.scheduler.dialog.taskNamePlaceholder')"
+        />
       </n-form-item>
 
-      <n-form-item label="任务描述" path="description">
+      <n-form-item :label="t('settings.scheduler.dialog.taskDesc')" path="description">
         <n-input
           v-model:value="formData.description"
           type="textarea"
-          placeholder="请输入任务描述"
+          :placeholder="t('settings.scheduler.dialog.taskDescPlaceholder')"
           :autosize="{ minRows: 2, maxRows: 4 }"
         />
       </n-form-item>
 
-      <n-form-item label="触发器类型" path="trigger_type">
+      <n-form-item :label="t('settings.scheduler.dialog.triggerType')" path="trigger_type">
         <n-radio-group v-model:value="formData.trigger_type">
-          <n-radio value="cron">Cron 表达式</n-radio>
-          <n-radio value="date">指定时间</n-radio>
-          <n-radio value="interval">间隔执行</n-radio>
+          <n-radio value="cron">{{ t("settings.scheduler.dialog.cronExpression") }}</n-radio>
+          <n-radio value="date">{{ t("settings.scheduler.dialog.specificTime") }}</n-radio>
+          <n-radio value="interval">{{ t("settings.scheduler.dialog.intervalExecution") }}</n-radio>
         </n-radio-group>
       </n-form-item>
 
       <!-- Cron 表达式编辑器 -->
       <template v-if="formData.trigger_type === 'cron'">
-        <n-form-item label="Cron 表达式" path="trigger_config.cron">
+        <n-form-item
+          :label="t('settings.scheduler.dialog.cronExpression')"
+          path="trigger_config.cron"
+        >
           <n-input
             :value="cronConfig.cron"
             @update:value="updateCronConfig"
-            placeholder="* * * * * (分 时 日 月 周)"
+            :placeholder="t('settings.scheduler.dialog.cronPlaceholder')"
           />
         </n-form-item>
-        <n-form-item label="快速选择">
+        <n-form-item :label="t('settings.scheduler.dialog.quickSelect')">
           <n-space>
-            <n-button size="small" @click="setCronPreset('daily')">每天 0 点</n-button>
-            <n-button size="small" @click="setCronPreset('daily9am')">每天 9 点</n-button>
-            <n-button size="small" @click="setCronPreset('weekly')">每周一 0 点</n-button>
-            <n-button size="small" @click="setCronPreset('hourly')">每小时</n-button>
+            <n-button size="small" @click="setCronPreset('daily')">{{
+              t("settings.scheduler.dialog.presets.daily")
+            }}</n-button>
+            <n-button size="small" @click="setCronPreset('daily9am')">{{
+              t("settings.scheduler.dialog.presets.daily9am")
+            }}</n-button>
+            <n-button size="small" @click="setCronPreset('weekly')">{{
+              t("settings.scheduler.dialog.presets.weekly")
+            }}</n-button>
+            <n-button size="small" @click="setCronPreset('hourly')">{{
+              t("settings.scheduler.dialog.presets.hourly")
+            }}</n-button>
           </n-space>
         </n-form-item>
       </template>
 
       <!-- Date 触发器 -->
       <template v-if="formData.trigger_type === 'date'">
-        <n-form-item label="执行时间" path="trigger_config.run_date">
+        <n-form-item
+          :label="t('settings.scheduler.dialog.executionTime')"
+          path="trigger_config.run_date"
+        >
           <n-date-picker
             :value="dateConfigTimestamp"
             @update:value="updateDateConfig"
             type="datetime"
-            placeholder="选择执行时间"
+            :placeholder="t('settings.scheduler.dialog.selectTime')"
             style="width: 100%"
           />
         </n-form-item>
@@ -67,7 +88,7 @@
 
       <!-- Interval 触发器 -->
       <template v-if="formData.trigger_type === 'interval'">
-        <n-form-item label="间隔时间" path="trigger_config">
+        <n-form-item :label="t('settings.scheduler.dialog.intervalTime')" path="trigger_config">
           <n-flex>
             <n-input-number
               :value="intervalConfig.hours"
@@ -75,7 +96,7 @@
               :min="0"
               style="width: 45%"
             >
-              <template #suffix>小时</template>
+              <template #suffix>{{ t("settings.scheduler.formatter.hour") }}</template>
             </n-input-number>
             <n-input-number
               :value="intervalConfig.minutes"
@@ -83,7 +104,7 @@
               :min="0"
               style="width: 45%"
             >
-              <template #suffix>分钟</template>
+              <template #suffix>{{ t("settings.scheduler.formatter.minute") }}</template>
             </n-input-number>
           </n-flex>
         </n-form-item>
@@ -91,7 +112,7 @@
 
       <n-tabs v-model:value="activeTab" type="segment" animated>
         <!-- Tab 1: 任务列表 -->
-        <n-tab-pane name="task-list" tab="任务列表">
+        <n-tab-pane name="task-list" :tab="t('settings.scheduler.dialog.tab.taskList')">
           <n-scrollbar trigger="none" class="max-h-65 !rounded-[12px]">
             <n-list hoverable bordered>
               <n-list-item v-for="task in availableTasks" :key="task.id">
@@ -114,13 +135,15 @@
         </n-tab-pane>
 
         <!-- Tab 2: 任务设置 -->
-        <n-tab-pane name="task-settings" tab="任务设置">
+        <n-tab-pane name="task-settings" :tab="t('settings.scheduler.dialog.tab.taskSettings')">
           <div v-if="currentSettingTaskName" class="text-center">
-            <n-tag type="info" size="large"> 当前设置: {{ currentSettingTaskName }} </n-tag>
+            <n-tag type="info" size="large">
+              {{ t("settings.scheduler.dialog.currentSetting") }}{{ currentSettingTaskName }}
+            </n-tag>
           </div>
           <n-scrollbar trigger="none" class="max-h-65 !rounded-[12px]">
             <div v-if="currentSettingTaskId === null">
-              <n-empty description="请先在任务列表中选择任务并点击设置按钮" />
+              <n-empty :description="t('settings.scheduler.dialog.selectTaskTip')" />
             </div>
             <div v-else>
               <n-list v-if="currentTaskOptions.length > 0" hoverable>
@@ -131,7 +154,7 @@
                   :options="formData.task_options"
                 />
               </n-list>
-              <n-empty v-else description="空空如也" />
+              <n-empty v-else :description="t('settings.scheduler.dialog.noOptions')" />
             </div>
           </n-scrollbar>
         </n-tab-pane>
@@ -140,8 +163,12 @@
 
     <template #footer>
       <n-space justify="end">
-        <n-button @click="handleCancel">取消</n-button>
-        <n-button type="primary" @click="handleSave" :loading="loading">保存</n-button>
+        <n-button @click="handleCancel">{{
+          t("settings.scheduler.dialog.actions.cancel")
+        }}</n-button>
+        <n-button type="primary" @click="handleSave" :loading="loading">{{
+          t("settings.scheduler.dialog.actions.save")
+        }}</n-button>
       </n-space>
     </template>
   </n-modal>
@@ -150,6 +177,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue"
 import { useMessage, type FormInst, type FormRules } from "naive-ui"
+import { useI18n } from "vue-i18n"
 import { useSchedulerStore } from "../stores/scheduler"
 import { useInterfaceStore } from "../stores/interface"
 import OptionItem from "./OptionItem.vue"
@@ -176,6 +204,7 @@ const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
 
 const message = useMessage()
+const { t } = useI18n()
 const schedulerStore = useSchedulerStore()
 const interfaceStore = useInterfaceStore()
 
@@ -226,18 +255,18 @@ const isTaskSelected = (taskId: string) => {
 
 const formData = ref<ScheduledTaskCreate>(initFormData())
 
-const formRules: FormRules = {
+const formRules = computed<FormRules>(() => ({
   name: [
-    { required: true, message: "请输入任务名称", trigger: "blur" },
-    { min: 1, max: 100, message: "任务名称长度为 1-100 个字符", trigger: "blur" },
+    { required: true, message: t("settings.scheduler.rules.nameRequired"), trigger: "blur" },
+    { min: 1, max: 100, message: t("settings.scheduler.rules.nameLength"), trigger: "blur" },
   ],
   trigger_config: {
     cron: [
-      { required: true, message: "请输入 Cron 表达式", trigger: "blur" },
+      { required: true, message: t("settings.scheduler.rules.cronRequired"), trigger: "blur" },
       {
         pattern:
           /^(\*|[0-9\-\*,\/]+)\s+(\*|[0-9\-\*,\/]+)\s+(\*|[0-9\-\*,\/]+)\s+(\*|[0-9\-\*,\/]+)\s+(\*|[0-9\-\*,\/]+)$/,
-        message: "Cron 表达式格式不正确",
+        message: t("settings.scheduler.rules.cronInvalid"),
         trigger: "blur",
       },
     ],
@@ -247,11 +276,11 @@ const formRules: FormRules = {
       type: "array",
       required: true,
       min: 1,
-      message: "请至少选择一个任务",
+      message: t("settings.scheduler.rules.taskListRequired"),
       trigger: "change",
     },
   ],
-}
+}))
 
 // 监听触发器类型变化，更新 trigger_config
 watch(
@@ -418,15 +447,19 @@ async function handleSave() {
     }
 
     if (success) {
-      message.success(isEditMode.value ? "任务已更新" : "任务已创建")
+      message.success(
+        isEditMode.value
+          ? t("settings.scheduler.messages.successUpdate")
+          : t("settings.scheduler.messages.successCreate"),
+      )
       showDialog.value = false
       emit("saved")
       resetForm()
     } else {
-      message.error(schedulerStore.error || "保存失败")
+      message.error(schedulerStore.error || t("settings.scheduler.messages.failSave"))
     }
   } catch (e) {
-    message.error("保存失败，请稍后重试")
+    message.error(t("settings.scheduler.messages.failRetry"))
     console.error("Failed to save task:", e)
   } finally {
     loading.value = false
