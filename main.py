@@ -75,7 +75,6 @@ async def log_monitor():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    webbrowser.open_new("http://127.0.0.1:55666")
     app_state.worker = MaaWorker(app_state.message_conn, interface)
     app_state.broadcaster = LogBroadcaster()
 
@@ -85,6 +84,7 @@ async def lifespan(app: FastAPI):
     await app_state.scheduler_manager.initialize()
 
     monitor_task = asyncio.create_task(log_monitor())
+    webbrowser.open_new("http://127.0.0.1:55666")
     yield
     monitor_task.cancel()
     if app_state.worker and app_state.worker.agent_process:

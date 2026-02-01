@@ -147,7 +147,8 @@
         "auto": "跟随系统",
         "on": "开",
         "off": "关"
-      }
+      },
+      "language": "语言"
     },
     "notification": {
       "title": "通知设置",
