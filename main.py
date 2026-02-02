@@ -6,6 +6,9 @@ from contextlib import asynccontextmanager
 from queue import SimpleQueue
 import uvicorn
 import os
+import signal
+import sys
+import platform
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -16,6 +19,9 @@ from models.scheduler import ScheduledTaskCreate, ScheduledTaskUpdate
 from maa_utils import MaaWorker
 from scheduler_manager import SchedulerManager
 import httpx
+import subprocess
+import time
+import hashlib
 
 with open("interface.json", "r", encoding="utf-8") as f:
     json_data = json.load(f)
@@ -52,6 +58,10 @@ class AppState:
         self.current_status = None
         self.broadcaster: LogBroadcaster | None = None
         self.scheduler_manager: SchedulerManager | None = None
+        self.settings: SettingsModel | None = None
+        self.subprocess_pipe: subprocess.Popen | None = None
+        self.update_status: dict | None = None
+        self.update_info = None
 
 
 app_state = AppState()
@@ -77,7 +87,9 @@ async def log_monitor():
 async def lifespan(app: FastAPI):
     app_state.worker = MaaWorker(app_state.message_conn, interface)
     app_state.broadcaster = LogBroadcaster()
-
+    with open("config/settings.json", "r", encoding="utf-8") as f:
+        config_data = json.load(f)
+    app_state.settings = SettingsModel(**config_data)
     # 初始化调度器
     app_state.scheduler_manager = SchedulerManager()
     app_state.scheduler_manager.set_worker(app_state.worker)
@@ -178,8 +190,8 @@ def set_resource(name: str):
 def get_settings():
     with open("config/settings.json", "r", encoding="utf-8") as f:
         config_data = json.load(f)
-    settings = SettingsModel(**config_data)
-    return {"status": "success", "settings": settings.model_dump()}
+    app_state.settings = SettingsModel(**config_data)
+    return {"status": "success", "settings": app_state.settings.model_dump()}
 
 
 @app.post("/api/settings")
@@ -223,7 +235,7 @@ def reset_user_config():
         return {"status": "failed", "message": str(e)}
 
 
-@app.get("/api/check-update")
+@app.get("/api/update/check")
 def check_update():
     try:
         repo_name = (
@@ -234,16 +246,161 @@ def check_update():
         ).json()
         latest_version = response["tag_name"]
         current_version = interface.version
-        update_info = {
-            "latest_version": latest_version,
-            "current_version": current_version,
-            "is_update_available": latest_version != current_version,
-            "release_notes": response["body"],
-            "download_url": response["html_url"],
+
+        plat = "linux"
+        arch = "x64"
+        match platform.system():
+            case "Windows":
+                plat = "win"
+            case "Darwin":
+                plat = "osx"
+            case "Linux":
+                plat = "linux"
+
+        machine = platform.machine().lower()
+        match machine:
+            case "x86_64" | "amd64":
+                arch = "x64"
+            case "arm" | "aarch64" | "arm64":
+                arch = "arm64"
+
+        asset_suffix = f"-{plat}-{arch}.7z"
+        for asset in response.get("assets", []):
+            if asset["name"].endswith(asset_suffix):
+                download_url = asset["browser_download_url"]
+                file_hash = asset["digest"].replace("sha256:", "").strip()
+                app_state.update_info = {
+                    "latest_version": latest_version,
+                    "current_version": current_version,
+                    "is_update_available": latest_version != current_version,
+                    "release_notes": response["body"],
+                    "download_url": download_url,
+                    "file_hash": file_hash,
+                    "file_name": asset["name"],
+                }
+                return {"status": "success", "update_info": app_state.update_info}
+        return {
+            "status": "failed",
+            "message": f"未找到适合当前平台的更新包:{plat}-{arch}",
         }
-        return {"status": "success", "update_info": update_info}
     except Exception as e:
         return {"status": "failed", "message": str(e)}
+
+
+async def download_file(url: str, dest: str):
+    async with httpx.AsyncClient(
+        follow_redirects=True, proxy=app_state.settings.update.proxy
+    ) as client:
+        async with client.stream("GET", url) as resp:
+            resp.raise_for_status()
+            with open(dest, "wb") as f:
+                async for chunk in resp.aiter_bytes():
+                    f.write(chunk)
+
+
+@app.get("/api/update")
+async def perform_update():
+    try:
+        update_package_path = app_state.update_info["file_name"]
+        download_url = app_state.update_info["download_url"]
+        if os.path.exists(update_package_path):
+            os.remove(update_package_path)
+        app_state.update_status = {
+            "status": "downloading",
+            "message": "正在下载更新包...",
+        }
+
+        try:
+            await download_file(download_url, update_package_path)
+            with open(update_package_path, "rb") as f:
+                file_bytes = f.read()
+                sha256_hash = hashlib.sha256(file_bytes).hexdigest()
+                if sha256_hash != app_state.update_info["file_hash"]:
+                    raise ValueError("文件哈希校验失败，下载的文件可能已损坏。")
+        except Exception as e:
+            app_state.update_status = {"status": "failed", "message": f"下载失败: {e}"}
+            return {"status": "failed", "message": str(e)}
+
+        def run_updater_loop():
+            app_state.update_status = {
+                "status": "updating",
+                "message": "正在运行更新器...",
+            }
+            while True:
+                cmd = [
+                    "./mwu-updater",
+                    "-archive",
+                    os.path.abspath(update_package_path),
+                    "-webhook",
+                    "http://127.0.0.1:55666/api/system/shutdown",
+                    "-restart-cmd",
+                    sys.executable,
+                ]
+
+                try:
+                    process = subprocess.Popen(
+                        cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        encoding="utf-8",
+                        errors="replace",
+                    )
+
+                    if process.stdout:
+                        for line in process.stdout:
+                            print(f"[Updater] {line.strip()}")
+                            try:
+                                data = json.loads(line)
+                                if "status" in data:
+                                    app_state.update_status = data
+                            except json.JSONDecodeError:
+                                pass
+                except Exception as e:
+                    app_state.update_status = {
+                        "status": "failed",
+                        "message": f"启动更新器失败: {e}",
+                    }
+                    break
+
+                process.wait()
+
+                if process.returncode == 10:
+                    app_state.update_status = {
+                        "status": "updating",
+                        "message": "更新器自更新完成，正在重启更新器...",
+                    }
+                    continue
+                else:
+                    if process.returncode != 0:
+                        app_state.update_status = {
+                            "status": "failed",
+                            "message": f"更新器异常退出: {process.returncode}，请查看updater.log",
+                        }
+                    break
+
+        threading.Thread(target=run_updater_loop, daemon=True).start()
+        return {"status": "success", "message": "正在后台更新程序..."}
+    except Exception as e:
+        app_state.update_status = {"status": "failed", "message": str(e)}
+        return {"status": "failed", "message": str(e)}
+
+
+@app.get("/api/update/status")
+def get_update_status():
+    if app_state.update_status is None:
+        return {"status": "idle", "message": "没有正在进行的更新"}
+    return app_state.update_status
+
+
+@app.get("/api/system/shutdown")
+def system_shutdown():
+    def _shutdown():
+        time.sleep(1)
+        os.kill(os.getpid(), signal.SIGTERM)
+
+    threading.Thread(target=_shutdown, daemon=True).start()
+    return {"status": "success", "message": "Shutting down"}
 
 
 @app.post("/api/test-notification")

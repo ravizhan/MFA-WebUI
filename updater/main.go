@@ -7,439 +7,135 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
-	"net/url"
 	"os"
-	"path"
+	"os/exec"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/mholt/archives"
 	"github.com/zeebo/xxh3"
-	"golang.org/x/mod/semver"
 )
 
 const (
-	defaultRepo          = "ravizhan/MWU"
-	defaultVersionFile   = "version"
-	defaultChangesFile   = "changes.json"
-	defaultHTTPTimeout   = 10 * time.Second
-	jsonTypeCheckResult  = "check"
-	jsonTypeUpdateResult = "update"
+	exitCodeSelfUpdate = 10
+	exitCodeError      = 1
+	defaultChangesFile = "changes.json"
 )
 
 type Config struct {
-	Repo  string
-	Proxy string
-	Check bool
-}
-
-type CheckResult struct {
-	Type           string `json:"type"`
-	Status         string `json:"status"`
-	HasUpdate      bool   `json:"has_update"`
-	CurrentVersion string `json:"current_version"`
-	LatestVersion  string `json:"latest_version,omitempty"`
-	AssetName      string `json:"asset_name,omitempty"`
-	AssetURL       string `json:"asset_url,omitempty"`
-	Platform       string `json:"platform"`
-	Arch           string `json:"arch"`
-	Message        string `json:"message,omitempty"`
+	Archive    string
+	WebhookURL string
+	RestartCmd string
 }
 
 type UpdateResult struct {
-	Type              string `json:"type"`
-	Status            string `json:"status"`
-	Applied           bool   `json:"applied"`
-	SelfUpdatePending bool   `json:"self_update_pending"`
-	RestartRequired   bool   `json:"restart_required"`
-	ChangesPath       string `json:"changes_path,omitempty"`
-	Message           string `json:"message,omitempty"`
-}
-
-type Release struct {
-	TagName string         `json:"tag_name"`
-	Assets  []ReleaseAsset `json:"assets"`
-}
-
-type ReleaseAsset struct {
-	Name string `json:"name"`
-	URL  string `json:"browser_download_url"`
-}
-
-type Changes struct {
-	Added    []string `json:"added"`
-	Deleted  []string `json:"deleted"`
-	Modified []string `json:"modified"`
-}
-
-type FileHash struct {
-	Hash string
+	Status          string `json:"status"`
+	Message         string `json:"message,omitempty"`
+	RestartRequired bool   `json:"restart_required"`
 }
 
 func main() {
+	logFile, _ := os.OpenFile("updater.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if logFile != nil {
+		log.SetOutput(logFile)
+	}
+
 	cfg := parseFlags()
-	platform, arch := detectPlatform()
 	ctx := context.Background()
 
-	client, err := newHTTPClient(cfg.Proxy)
-	if err != nil {
-		outputJSON(CheckResult{
-			Type:     jsonTypeCheckResult,
-			Status:   "failed",
-			Message:  fmt.Sprintf("创建 HTTP 客户端失败: %v", err),
-			Platform: platform,
-			Arch:     arch,
-		})
-		outputJSON(UpdateResult{
-			Type:    jsonTypeUpdateResult,
-			Status:  "failed",
-			Applied: false,
-			Message: "更新器初始化失败",
-		})
-		return
+	if cfg.Archive == "" {
+		fail("Missing -archive argument")
+	}
+	if cfg.WebhookURL == "" {
+		fail("Missing -webhook argument")
+	}
+	if cfg.RestartCmd == "" {
+		fail("Missing -restart-cmd argument")
 	}
 
 	installDir, err := os.Getwd()
 	if err != nil {
-		outputJSON(CheckResult{
-			Type:     jsonTypeCheckResult,
-			Status:   "failed",
-			Message:  fmt.Sprintf("获取工作目录失败: %v", err),
-			Platform: platform,
-			Arch:     arch,
-		})
-		outputJSON(UpdateResult{
-			Type:    jsonTypeUpdateResult,
-			Status:  "failed",
-			Applied: false,
-			Message: "获取工作目录失败",
-		})
-		return
+		fail("Failed to get working directory: %v", err)
 	}
 
-	currentVersion, err := resolveCurrentVersion(installDir)
-	if err != nil {
-		outputJSON(CheckResult{
-			Type:     jsonTypeCheckResult,
-			Status:   "failed",
-			Message:  err.Error(),
-			Platform: platform,
-			Arch:     arch,
-		})
-		outputJSON(UpdateResult{
-			Type:    jsonTypeUpdateResult,
-			Status:  "failed",
-			Applied: false,
-			Message: "无法解析当前版本",
-		})
-		return
+	extractDir := filepath.Join(installDir, "update_temp")
+	_ = os.RemoveAll(extractDir)
+	if err := os.MkdirAll(extractDir, 0o755); err != nil {
+		fail("Failed to create temp dir: %v", err)
 	}
 
-	checkResult := CheckResult{
-		Type:           jsonTypeCheckResult,
-		Status:         "success",
-		HasUpdate:      false,
-		CurrentVersion: currentVersion,
-		Platform:       platform,
-		Arch:           arch,
+	log.Printf("正在将 %s 解压到 %s", cfg.Archive, extractDir)
+	if err := extractArchive(ctx, cfg.Archive, extractDir); err != nil {
+		fail("Failed to extract archive: %v", err)
 	}
 
-	release, err := fetchLatestRelease(ctx, client, cfg)
-	if err != nil {
-		checkResult.Status = "failed"
-		checkResult.Message = err.Error()
-		outputJSON(checkResult)
-		outputJSON(UpdateResult{
-			Type:    jsonTypeUpdateResult,
-			Status:  "failed",
-			Applied: false,
-			Message: "更新检查失败",
-		})
-		return
+	log.Println("检查自更新...")
+	if performedSelfUpdate, err := handleSelfUpdate(installDir, extractDir); err != nil {
+		fail("Self update failed: %v", err)
+	} else if performedSelfUpdate {
+		log.Println("已执行自更新。以代码 10 退出。")
+		os.RemoveAll(extractDir)
+		os.Exit(exitCodeSelfUpdate)
 	}
 
-	latestVersion := normalizeVersion(release.TagName)
-	checkResult.LatestVersion = latestVersion
-
-	asset, err := selectAsset(release.Assets, platform, arch)
-	if err != nil {
-		checkResult.Status = "failed"
-		checkResult.Message = err.Error()
-		outputJSON(checkResult)
-		outputJSON(UpdateResult{
-			Type:    jsonTypeUpdateResult,
-			Status:  "failed",
-			Applied: false,
-			Message: "查找更新包失败",
-		})
-		return
-	}
-	checkResult.AssetName = asset.Name
-	checkResult.AssetURL = asset.URL
-
-	if semver.Compare(normalizeVersion(currentVersion), latestVersion) < 0 {
-		checkResult.HasUpdate = true
-	}
-
-	outputJSON(checkResult)
-
-	if !checkResult.HasUpdate {
-		outputJSON(UpdateResult{
-			Type:    jsonTypeUpdateResult,
-			Status:  "success",
-			Applied: false,
-			Message: "已是最新版本",
-		})
-		return
-	}
-
-	if cfg.Check {
-		outputJSON(UpdateResult{
-			Type:    jsonTypeUpdateResult,
-			Status:  "success",
-			Applied: false,
-			Message: "发现新版本: " + latestVersion,
-		})
-		return
-	}
-
-	updateResult, err := runUpdate(ctx, client, cfg, installDir, asset, latestVersion)
-	if err != nil {
-		updateResult.Status = "failed"
-		if updateResult.Message == "" {
-			updateResult.Message = err.Error()
+	log.Println("通知主程序退出...")
+	if cfg.WebhookURL != "" {
+		if err := notifyShutdown(cfg.WebhookURL); err != nil {
+			log.Printf("警告：通知关闭失败：%v。", err)
+		} else {
+			time.Sleep(2 * time.Second)
 		}
 	}
-	outputJSON(updateResult)
+
+	log.Println("等待文件锁释放...")
+	if err := waitForLocks(installDir, cfg.RestartCmd); err != nil {
+		fail("Could not acquire file locks: %v", err)
+	}
+
+	log.Println("计算更改...")
+	changes, err := getChanges(installDir, extractDir)
+	if err != nil {
+		fail("Failed to get changes: %v", err)
+	}
+
+	log.Println("应用更新...")
+	if err := applyChanges(installDir, extractDir, changes); err != nil {
+		fail("Failed to apply changes: %v", err)
+	}
+
+	changesPath := filepath.Join(installDir, defaultChangesFile)
+	writeChanges(changesPath, changes)
+
+	os.RemoveAll(extractDir)
+	os.Remove(cfg.Archive)
+
+	if cfg.RestartCmd != "" {
+		log.Printf("重启主程序：%s", cfg.RestartCmd)
+		if err := restartMain(cfg.RestartCmd); err != nil {
+			log.Printf("Failed to restart main program: %v", err)
+		}
+	}
+
+	log.Println("更新完成。")
+	outputJSON(UpdateResult{
+		Status:          "success",
+		Message:         "更新成功完成",
+		RestartRequired: true,
+	})
 }
 
 func parseFlags() Config {
 	cfg := Config{}
-	flag.StringVar(&cfg.Repo, "repo", defaultRepo, "GitHub owner/repo")
-	flag.StringVar(&cfg.Proxy, "proxy", "", "HTTP 代理，例如 http://127.0.0.1:7890")
-	flag.BoolVar(&cfg.Check, "check", false, "仅检查更新")
+	flag.StringVar(&cfg.Archive, "archive", "", "更新包路径（zip/7z）")
+	flag.StringVar(&cfg.WebhookURL, "webhook", "", "用于请求主程序关闭的URL")
+	flag.StringVar(&cfg.RestartCmd, "restart-cmd", "", "重启主程序的命令")
 	flag.Parse()
 	return cfg
-}
-
-func resolveCurrentVersion(installDir string) (string, error) {
-	versionPath := filepath.Join(installDir, defaultVersionFile)
-	data, err := os.ReadFile(versionPath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return "v0.0.0", nil
-		}
-		return "", fmt.Errorf("读取版本文件失败: %w", err)
-	}
-	version := strings.TrimSpace(string(data))
-	if version == "" {
-		return "v0.0.0", nil
-	}
-	return normalizeVersion(version), nil
-}
-
-func normalizeVersion(version string) string {
-	v := strings.TrimSpace(version)
-	if v == "" {
-		return "v0.0.0"
-	}
-	if !strings.HasPrefix(v, "v") {
-		return "v" + v
-	}
-	return v
-}
-
-func detectPlatform() (string, string) {
-	platform := "linux"
-	arch := "x64"
-	switch runtime.GOOS {
-	case "windows":
-		platform = "win"
-	case "darwin":
-		platform = "osx"
-	case "linux":
-		platform = "linux"
-	default:
-		platform = runtime.GOOS
-	}
-
-	switch runtime.GOARCH {
-	case "amd64":
-		arch = "x64"
-	case "arm64":
-		arch = "arm64"
-	default:
-		arch = runtime.GOARCH
-	}
-
-	return platform, arch
-}
-
-func fetchLatestRelease(ctx context.Context, client *http.Client, cfg Config) (Release, error) {
-	repo := strings.TrimSpace(cfg.Repo)
-	if repo == "" {
-		return Release{}, errors.New("缺少 --repo 参数")
-	}
-	parts := strings.Split(repo, "/")
-	if len(parts) != 2 {
-		return Release{}, fmt.Errorf("非法 repo 格式: %s", repo)
-	}
-	url := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", repo)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return Release{}, err
-	}
-	req.Header.Set("Accept", "application/vnd.github+json")
-	req.Header.Set("User-Agent", "mwu-updater")
-
-	resp, err := client.Do(req)
-	if err != nil {
-		return Release{}, fmt.Errorf("请求 GitHub 失败: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
-		return Release{}, fmt.Errorf("GitHub 返回错误: %s", strings.TrimSpace(string(body)))
-	}
-
-	var release Release
-	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
-		return Release{}, fmt.Errorf("解析 Release 失败: %w", err)
-	}
-	if release.TagName == "" {
-		return Release{}, errors.New("Release 缺少 tag_name")
-	}
-	return release, nil
-}
-
-func selectAsset(assets []ReleaseAsset, platform, arch string) (ReleaseAsset, error) {
-	suffix := fmt.Sprintf("-%s-%s.7z", platform, arch)
-	for _, asset := range assets {
-		if strings.HasSuffix(asset.Name, suffix) {
-			return asset, nil
-		}
-	}
-	return ReleaseAsset{}, fmt.Errorf("未找到匹配资产: *%s", suffix)
-}
-
-func runUpdate(ctx context.Context, client *http.Client, cfg Config, installDir string, asset ReleaseAsset, latestVersion string) (UpdateResult, error) {
-	updateResult := UpdateResult{
-		Type:    jsonTypeUpdateResult,
-		Status:  "failed",
-		Applied: false,
-	}
-
-	downloadPath := filepath.Join(installDir, asset.Name)
-	if err := downloadAsset(ctx, client, asset.URL, downloadPath); err != nil {
-		updateResult.Message = "更新包下载失败"
-		return updateResult, err
-	}
-	defer os.Remove(downloadPath)
-
-	extractDir := filepath.Join(installDir, "update")
-	if err := os.MkdirAll(extractDir, 0o755); err != nil {
-		return updateResult, fmt.Errorf("创建解压目录失败: %w", err)
-	}
-	defer os.RemoveAll(extractDir)
-
-	if err := extractArchive(ctx, downloadPath, extractDir); err != nil {
-		updateResult.Message = "解压失败"
-		return updateResult, err
-	}
-
-	selfUpdateResult, err := handleSelfUpdate(installDir, extractDir)
-	if err != nil {
-		updateResult.Message = "自更新失败"
-		return updateResult, err
-	}
-	if selfUpdateResult.SelfUpdatePending {
-		updateResult.SelfUpdatePending = true
-		updateResult.RestartRequired = true
-		updateResult.Status = "self_update_pending"
-		updateResult.Message = "更新器已准备更新，请重启后再继续"
-		return updateResult, nil
-	}
-
-	changes, err := diffDirectories(ctx, installDir, extractDir, []string{"update", asset.Name})
-	if err != nil {
-		updateResult.Message = "差异计算失败"
-		return updateResult, err
-	}
-
-	changesPath := filepath.Join(installDir, defaultChangesFile)
-	if err := writeChanges(changesPath, changes); err != nil {
-		updateResult.Message = "写入 changes.json 失败"
-		return updateResult, err
-	}
-	updateResult.ChangesPath = changesPath
-
-	err = applyChanges(installDir, extractDir, changes)
-	if err != nil {
-		updateResult.Message = "应用更新失败"
-		return updateResult, err
-	}
-
-	if err := os.WriteFile(filepath.Join(installDir, defaultVersionFile), []byte(latestVersion+"\n"), 0o644); err != nil {
-		updateResult.Message = "更新版本文件失败"
-		return updateResult, err
-	}
-
-	updateResult.Status = "success"
-	updateResult.Applied = true
-	updateResult.Message = "更新完成"
-	return updateResult, nil
-}
-
-func downloadAsset(ctx context.Context, client *http.Client, assetURL, outputPath string) error {
-	const maxRetries = 3
-	var lastErr error
-
-	for i := 1; i <= maxRetries; i++ {
-		err := func() error {
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, assetURL, nil)
-			if err != nil {
-				return err
-			}
-			req.Header.Set("User-Agent", "mwu-updater")
-
-			resp, err := client.Do(req)
-			if err != nil {
-				return err
-			}
-			defer resp.Body.Close()
-
-			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-				body, _ := io.ReadAll(resp.Body)
-				return fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-			}
-
-			out, err := os.Create(outputPath)
-			if err != nil {
-				return err
-			}
-			defer out.Close()
-
-			_, err = io.Copy(out, resp.Body)
-			return err
-		}()
-
-		if err == nil {
-			return nil
-		}
-		lastErr = err
-
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
-	}
-
-	return fmt.Errorf("在重试 %d 次后依然失败: %w", maxRetries, lastErr)
 }
 
 func extractArchive(ctx context.Context, archivePath, destDir string) error {
@@ -455,377 +151,354 @@ func extractArchive(ctx context.Context, archivePath, destDir string) error {
 	}
 	extractor, ok := format.(archives.Extractor)
 	if !ok {
-		return errors.New("不支持的压缩格式")
+		return errors.New("不支持的归档格式")
 	}
 
 	return extractor.Extract(ctx, reader, func(ctx context.Context, f archives.FileInfo) error {
 		if f.NameInArchive == "" {
 			return nil
 		}
-		outPath, err := safeJoin(destDir, f.NameInArchive)
+		pathInArchive := f.NameInArchive
+		if runtime.GOOS == "windows" {
+			pathInArchive = strings.ReplaceAll(pathInArchive, "\\", "/")
+		}
+
+		outPath, err := safeJoin(destDir, pathInArchive)
 		if err != nil {
 			return err
 		}
 		if f.IsDir() {
 			return os.MkdirAll(outPath, 0o755)
 		}
-		if !f.Mode().IsRegular() {
-			return fmt.Errorf("不支持的文件类型: %s", f.NameInArchive)
-		}
 
 		if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
 			return err
 		}
-		reader, err := f.Open()
-		if err != nil {
-			return err
-		}
-		defer reader.Close()
+
 		outFile, err := os.OpenFile(outPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, f.Mode())
 		if err != nil {
 			return err
 		}
 		defer outFile.Close()
-		_, err = io.Copy(outFile, reader)
+
+		rc, err := f.Open()
+		if err != nil {
+			return err
+		}
+		defer rc.Close()
+
+		_, err = io.Copy(outFile, rc)
 		return err
 	})
 }
 
-func safeJoin(baseDir, name string) (string, error) {
-	cleanName := path.Clean(name)
-	if cleanName == "" || cleanName == "." {
-		return "", errors.New("非法路径")
-	}
-	joined := filepath.Join(baseDir, filepath.FromSlash(cleanName))
-	baseClean := filepath.Clean(baseDir) + string(os.PathSeparator)
-	joinedClean := filepath.Clean(joined)
-	if !strings.HasPrefix(joinedClean+string(os.PathSeparator), baseClean) {
-		return "", fmt.Errorf("非法路径: %s", name)
-	}
-	return joinedClean, nil
-}
-
-func handleSelfUpdate(installDir string, extractDir string) (UpdateResult, error) {
-	result := UpdateResult{}
+func handleSelfUpdate(installDir, extractDir string) (bool, error) {
 	exePath, err := os.Executable()
 	if err != nil {
-		return result, nil
+		return false, err
 	}
+
 	relPath, err := filepath.Rel(installDir, exePath)
-	if err != nil || strings.HasPrefix(relPath, "..") {
-		return result, nil
+	if err != nil {
+		return false, nil
 	}
+
 	candidate := filepath.Join(extractDir, relPath)
+	if _, err := os.Stat(candidate); os.IsNotExist(err) {
+		candidate = filepath.Join(extractDir, filepath.Base(exePath))
+	}
+
 	if _, err := os.Stat(candidate); err != nil {
-		return result, nil
+		return false, nil
 	}
 
-	currentHash, err := hashFile(exePath)
-	if err != nil {
-		return result, nil
-	}
-	candidateHash, err := hashFile(candidate)
-	if err != nil {
-		return result, nil
-	}
+	currentHash, _ := hashFile(exePath)
+	candidateHash, _ := hashFile(candidate)
+
 	if currentHash == candidateHash {
-		return result, nil
+		return false, nil
 	}
 
-	if runtime.GOOS == "windows" {
-		pendingPath := exePath + ".new"
-		mode := os.FileMode(0o755)
-		if info, err := os.Stat(candidate); err == nil {
-			mode = info.Mode()
-		}
-		if err := copyFile(candidate, pendingPath, mode); err != nil {
-			return result, err
-		}
-		result.SelfUpdatePending = true
-		return result, nil
+	oldPath := exePath + ".old"
+	_ = os.Remove(oldPath)
+
+	if err := os.Rename(exePath, oldPath); err != nil {
+		return false, fmt.Errorf("移动当前可执行文件失败：%w", err)
 	}
 
-	backupPath := exePath + ".old"
-	_ = os.Remove(backupPath)
-	if err := os.Rename(exePath, backupPath); err != nil {
-		return result, err
+	if err := copyFile(candidate, exePath, 0755); err != nil {
+		_ = os.Rename(oldPath, exePath)
+		return false, fmt.Errorf("复制新可执行文件失败：%w", err)
 	}
-	if err := os.Rename(candidate, exePath); err != nil {
-		_ = os.Rename(backupPath, exePath)
-		return result, err
-	}
-	_ = os.Remove(backupPath)
-	return result, nil
+
+	return true, nil
 }
 
-func diffDirectories(ctx context.Context, installDir, extractDir string, ignores []string) (Changes, error) {
-	installFiles, err := listFiles(installDir, ignores)
+func notifyShutdown(urlStr string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, "GET", urlStr, nil)
 	if err != nil {
-		return Changes{}, err
+		return err
 	}
-	extractFiles, err := listFiles(extractDir, nil)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return Changes{}, err
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("服务器返回 %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func waitForLocks(installDir, restartCmd string) error {
+	deadline := time.Now().Add(30 * time.Second)
+	executable := strings.TrimSpace(restartCmd)
+
+	var path string
+	if filepath.IsAbs(executable) {
+		path = executable
+	} else {
+		path = filepath.Join(installDir, executable)
 	}
 
-	installHashes, err := hashFiles(ctx, installDir, installFiles)
-	if err != nil {
-		return Changes{}, err
-	}
-	extractHashes, err := hashFiles(ctx, extractDir, extractFiles)
-	if err != nil {
-		return Changes{}, err
-	}
-
-	changes := Changes{}
-	for rel := range extractHashes {
-		if _, ok := installHashes[rel]; !ok {
-			changes.Added = append(changes.Added, rel)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(path); err != nil {
+			return nil
 		}
+		f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0644)
+		if err == nil {
+			f.Close()
+			return nil
+		}
+		time.Sleep(1 * time.Second)
 	}
-	for rel := range installHashes {
-		if _, ok := extractHashes[rel]; !ok {
+	return errors.New("等待文件锁超时")
+}
+
+type ChangeLog struct {
+	Added    []string `json:"added"`
+	Deleted  []string `json:"deleted"`
+	Modified []string `json:"modified"`
+}
+
+func getChanges(installDir, extractDir string) (ChangeLog, error) {
+	changesPath := filepath.Join(extractDir, defaultChangesFile)
+	changes := ChangeLog{
+		Added:    []string{},
+		Deleted:  []string{},
+		Modified: []string{},
+	}
+
+	if _, err := os.Stat(changesPath); err == nil {
+		data, err := os.ReadFile(changesPath)
+		if err != nil {
+			return changes, err
+		}
+		if err := json.Unmarshal(data, &changes); err != nil {
+			return changes, err
+		}
+		if changes.Added == nil {
+			changes.Added = []string{}
+		}
+		if changes.Deleted == nil {
+			changes.Deleted = []string{}
+		}
+		if changes.Modified == nil {
+			changes.Modified = []string{}
+		}
+		return changes, nil
+	}
+
+	type fileInfo struct {
+		path string
+		rel  string
+	}
+
+	type localChanges struct {
+		added    []string
+		modified []string
+	}
+
+	pkgFiles := make(chan fileInfo, 100)
+	pkgFileMap := make(map[string]bool)
+	var mapMu sync.Mutex
+
+	numWorkers := runtime.NumCPU()
+	var wg sync.WaitGroup
+
+	// 使用通道收集每个 worker 的结果
+	results := make(chan localChanges, numWorkers)
+
+	go func() {
+		filepath.WalkDir(extractDir, func(path string, d os.DirEntry, err error) error {
+			if err != nil || d.IsDir() {
+				return nil
+			}
+			rel, _ := filepath.Rel(extractDir, path)
+			rel = filepath.ToSlash(rel)
+			if rel == defaultChangesFile || rel == filepath.Base(os.Args[0]) {
+				return nil
+			}
+
+			mapMu.Lock()
+			pkgFileMap[rel] = true
+			mapMu.Unlock()
+
+			pkgFiles <- fileInfo{path, rel}
+			return nil
+		})
+		close(pkgFiles)
+	}()
+
+	for i := 0; i < numWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			local := localChanges{
+				added:    make([]string, 0),
+				modified: make([]string, 0),
+			}
+
+			for f := range pkgFiles {
+				targetPath := filepath.Join(installDir, f.rel)
+				if _, err := os.Stat(targetPath); err != nil {
+					local.added = append(local.added, f.rel)
+					continue
+				}
+
+				h1, _ := hashFile(f.path)
+				h2, _ := hashFile(targetPath)
+				if h1 != h2 {
+					local.modified = append(local.modified, f.rel)
+				}
+			}
+
+			results <- local
+		}()
+	}
+
+	// 等待所有 worker 完成并关闭结果通道
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// 合并所有结果
+	for local := range results {
+		changes.Added = append(changes.Added, local.added...)
+		changes.Modified = append(changes.Modified, local.modified...)
+	}
+
+	filepath.WalkDir(installDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		rel, _ := filepath.Rel(installDir, path)
+		rel = filepath.ToSlash(rel)
+
+		if strings.HasPrefix(rel, "config/") ||
+			rel == "update_temp" ||
+			strings.HasPrefix(rel, "update_temp/") ||
+			strings.HasPrefix(rel, "debug/") ||
+			rel == filepath.Base(os.Args[0]) ||
+			rel == "updater.log" ||
+			strings.HasSuffix(rel, ".old") ||
+			rel == defaultChangesFile {
+			return nil
+		}
+
+		mapMu.Lock()
+		exists := pkgFileMap[rel]
+		mapMu.Unlock()
+
+		if !exists {
 			changes.Deleted = append(changes.Deleted, rel)
 		}
-	}
-	for rel, newHash := range extractHashes {
-		if oldHash, ok := installHashes[rel]; ok {
-			if oldHash.Hash != newHash.Hash {
-				changes.Modified = append(changes.Modified, rel)
-			}
-		}
-	}
+		return nil
+	})
 
-	sort.Strings(changes.Added)
-	sort.Strings(changes.Deleted)
-	sort.Strings(changes.Modified)
 	return changes, nil
 }
 
-func listFiles(root string, ignores []string) ([]string, error) {
-	var files []string
-	ignoreMap := make(map[string]bool)
-	for _, ig := range ignores {
-		ignoreMap[filepath.ToSlash(ig)] = true
-	}
-
-	err := filepath.WalkDir(root, func(fullPath string, entry os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(root, fullPath)
-		if err != nil {
-			return err
-		}
-		rel = filepath.ToSlash(rel)
-
-		if ignoreMap[rel] {
-			if entry.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-
-		if entry.IsDir() {
-			return nil
-		}
-		if rel == defaultChangesFile {
-			return nil
-		}
-		files = append(files, rel)
-		return nil
-	})
-	return files, err
-}
-
-func hashFiles(ctx context.Context, root string, files []string) (map[string]FileHash, error) {
-	results := make(map[string]FileHash, len(files))
-	if len(files) == 0 {
-		return results, nil
-	}
-
-	workerCount := runtime.NumCPU() / 2
-	if workerCount < 1 {
-		workerCount = 1
-	}
-	if workerCount > 8 {
-		workerCount = 8
-	}
-	jobs := make(chan string)
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	var firstErr error
-	var errMu sync.Mutex
-
-	worker := func() {
-		defer wg.Done()
-		for rel := range jobs {
-			if ctx.Err() != nil {
-				return
-			}
-			fullPath := filepath.Join(root, filepath.FromSlash(rel))
-			hashValue, err := hashFile(fullPath)
-			if err != nil {
-				errMu.Lock()
-				if firstErr == nil {
-					firstErr = err
-				}
-				errMu.Unlock()
-				return
-			}
-			mu.Lock()
-			results[rel] = FileHash{Hash: hashValue}
-			mu.Unlock()
-		}
-	}
-
-	wg.Add(workerCount)
-	for i := 0; i < workerCount; i++ {
-		go worker()
-	}
-
-	for _, rel := range files {
-		errMu.Lock()
-		if firstErr != nil {
-			errMu.Unlock()
-			break
-		}
-		errMu.Unlock()
-		jobs <- rel
-	}
-	close(jobs)
-	wg.Wait()
-
-	if firstErr != nil {
-		return nil, firstErr
-	}
-	return results, nil
-}
-
-func hashFile(path string) (string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-
-	hasher := xxh3.New128()
-	if _, err := io.Copy(hasher, file); err != nil {
-		return "", err
-	}
-	sum := hasher.Sum128()
-	return fmt.Sprintf("%016x%016x", sum.Hi, sum.Lo), nil
-}
-
-func applyChanges(installDir, extractDir string, changes Changes) error {
-	backupDir, err := os.MkdirTemp(installDir, "update-backup-")
-	if err != nil {
-		return err
-	}
-	rollbackNeeded := false
-	defer func() {
-		if !rollbackNeeded {
-			_ = os.RemoveAll(backupDir)
-		}
-	}()
-
-	rollback := func() {
-		rollbackNeeded = true
-		_ = filepath.WalkDir(backupDir, func(fullPath string, entry os.DirEntry, err error) error {
-			if err != nil {
-				return err
-			}
-			if entry.IsDir() {
-				return nil
-			}
-			rel, err := filepath.Rel(backupDir, fullPath)
-			if err != nil {
-				return err
-			}
-			target := filepath.Join(installDir, rel)
-			_ = os.MkdirAll(filepath.Dir(target), 0o755)
-			_ = os.Rename(fullPath, target)
-			return nil
-		})
-	}
-
-	copyWithBackup := func(rel string, mode os.FileMode) error {
-		installPath := filepath.Join(installDir, filepath.FromSlash(rel))
-		extractPath := filepath.Join(extractDir, filepath.FromSlash(rel))
-
-		if _, err := os.Stat(installPath); err == nil {
-			backupPath := filepath.Join(backupDir, filepath.FromSlash(rel))
-			if err := os.MkdirAll(filepath.Dir(backupPath), 0o755); err != nil {
-				return err
-			}
-			if err := os.Rename(installPath, backupPath); err != nil {
-				return err
-			}
-		}
-
-		if err := os.MkdirAll(filepath.Dir(installPath), 0o755); err != nil {
-			return err
-		}
-		return copyFile(extractPath, installPath, mode)
-	}
-
+func applyChanges(installDir, extractDir string, changes ChangeLog) error {
 	for _, rel := range append(changes.Added, changes.Modified...) {
-		src := filepath.Join(extractDir, filepath.FromSlash(rel))
-		info, err := os.Stat(src)
-		if err != nil {
-			rollback()
+		src := filepath.Join(extractDir, rel)
+		dst := filepath.Join(installDir, rel)
+
+		if rel == filepath.Base(os.Args[0]) || rel == defaultChangesFile {
+			continue
+		}
+
+		if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
 			return err
 		}
-		if err := copyWithBackup(rel, info.Mode()); err != nil {
-			rollback()
+
+		if err := copyFile(src, dst, 0755); err != nil {
 			return err
 		}
 	}
 
 	for _, rel := range changes.Deleted {
-		installPath := filepath.Join(installDir, filepath.FromSlash(rel))
-		if _, err := os.Stat(installPath); err != nil {
-			continue
-		}
-		backupPath := filepath.Join(backupDir, filepath.FromSlash(rel))
-		if err := os.MkdirAll(filepath.Dir(backupPath), 0o755); err != nil {
-			rollback()
-			return err
-		}
-		if err := os.Rename(installPath, backupPath); err != nil {
-			rollback()
-			return err
-		}
+		dst := filepath.Join(installDir, rel)
+		_ = os.Remove(dst)
 	}
-
-	rollbackNeeded = false
-	_ = os.RemoveAll(backupDir)
-
-	_ = removeEmptyDirs(installDir)
 
 	return nil
 }
 
-func removeEmptyDirs(root string) error {
-	var dirs []string
-	_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
-		if err == nil && d.IsDir() && p != root {
-			dirs = append(dirs, p)
-		}
-		return nil
-	})
-
-	sort.Slice(dirs, func(i, j int) bool {
-		return len(dirs[i]) > len(dirs[j])
-	})
-
-	for _, d := range dirs {
-		entries, err := os.ReadDir(d)
-		if err == nil && len(entries) == 0 {
-			_ = os.Remove(d)
-		}
+func restartMain(cmdStr string) error {
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("cmd", "/c", "start", "/b", "cmd", "/c", cmdStr)
+	} else {
+		cmd = exec.Command("sh", "-c", cmdStr+" &")
 	}
-	return nil
+	return cmd.Start()
+}
+
+func writeChanges(path string, changes ChangeLog) {
+	data, _ := json.MarshalIndent(changes, "", "  ")
+	_ = os.WriteFile(path, data, 0644)
+}
+
+func safeJoin(baseDir, name string) (string, error) {
+	// 清理路径，移除多余的斜杠和点
+	cleanName := filepath.Clean(name)
+
+	// 转换为统一的路径分隔符进行验证
+	cleanNameSlash := filepath.ToSlash(cleanName)
+
+	// 检查路径是否以 ".." 开头，防止路径遍历
+	if strings.HasPrefix(cleanNameSlash, "..") {
+		return "", errors.New("非法路径：路径遍历攻击")
+	}
+
+	// 检查是否包含 "../"
+	if strings.Contains(cleanNameSlash, "../") {
+		return "", errors.New("非法路径：包含路径遍历")
+	}
+
+	// 构建最终路径
+	joined := filepath.Join(baseDir, cleanName)
+
+	// 使用 filepath.Rel 进行二次验证，确保结果在 baseDir 内
+	rel, err := filepath.Rel(baseDir, joined)
+	if err != nil {
+		return "", fmt.Errorf("路径解析失败: %w", err)
+	}
+
+	// 规范化相对路径，统一使用正斜杠进行比较
+	relSlash := filepath.ToSlash(rel)
+
+	// 如果相对路径以 ".." 开头，说明路径在 baseDir 之外
+	if strings.HasPrefix(relSlash, "..") {
+		return "", errors.New("非法路径：路径超出目标目录")
+	}
+
+	return joined, nil
 }
 
 func copyFile(src, dst string, mode os.FileMode) error {
@@ -835,53 +508,41 @@ func copyFile(src, dst string, mode os.FileMode) error {
 	}
 	defer in.Close()
 
-	tmp, err := os.CreateTemp(filepath.Dir(dst), ".tmp-*")
+	_ = os.Remove(dst)
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
 	if err != nil {
 		return err
 	}
-	defer func() {
-		_ = tmp.Close()
-		_ = os.Remove(tmp.Name())
-	}()
+	defer out.Close()
 
-	if _, err := io.Copy(tmp, in); err != nil {
+	if _, err := io.Copy(out, in); err != nil {
 		return err
 	}
-	if err := tmp.Chmod(mode); err != nil {
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), dst)
+	return out.Chmod(mode)
 }
 
-func writeChanges(path string, changes Changes) error {
-	data, err := json.MarshalIndent(changes, "", "  ")
+func hashFile(path string) (string, error) {
+	f, err := os.Open(path)
 	if err != nil {
-		return err
+		return "", err
 	}
-	return os.WriteFile(path, data, 0o644)
-}
-
-func newHTTPClient(proxy string) (*http.Client, error) {
-	transport := &http.Transport{}
-	proxy = strings.TrimSpace(proxy)
-	if proxy != "" {
-		proxyURL, err := url.Parse(proxy)
-		if err != nil {
-			return nil, fmt.Errorf("代理地址无效: %w", err)
-		}
-		transport.Proxy = http.ProxyURL(proxyURL)
+	defer f.Close()
+	h := xxh3.New128()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
 	}
-	return &http.Client{Timeout: defaultHTTPTimeout, Transport: transport}, nil
+	sum := h.Sum128()
+	return fmt.Sprintf("%016x%016x", sum.Hi, sum.Lo), nil
 }
 
 func outputJSON(v any) {
-	data, err := json.Marshal(v)
-	if err != nil {
-		fallback := map[string]string{"type": "error", "status": "failed", "message": err.Error()}
-		data, _ = json.Marshal(fallback)
-	}
+	data, _ := json.Marshal(v)
 	fmt.Println(string(data))
+}
+
+func fail(format string, v ...any) {
+	msg := fmt.Sprintf(format, v...)
+	log.Printf("错误：%s", msg)
+	outputJSON(UpdateResult{Status: "failed", Message: msg})
+	os.Exit(exitCodeError)
 }

@@ -5,7 +5,6 @@ go 1.25.6
 require (
 	github.com/mholt/archives v0.1.5
 	github.com/zeebo/xxh3 v1.1.0
-	golang.org/x/mod v0.32.0
 )
 
 require (
