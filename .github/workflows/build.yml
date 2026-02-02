@@ -116,6 +116,11 @@ jobs:
         with:
           python-version-file: ".python-version"
 
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.25.6"
+
       - name: Install Dependencies
         run: uv sync
 
@@ -143,6 +148,38 @@ jobs:
       - name: Build Executable
         if: ${{ matrix.platform == 'osx' }}
         run: uv run python -m nuitka --standalone --lto=no --macos-app-icon=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --remove-output --output-dir=build --include-package=PIL --include-package=maa -o MWU main.py
+
+      - name: Build Updater
+        if: ${{ matrix.platform != 'win' }}
+        shell: bash
+        run: |
+          pushd updater
+          if [ "${{ matrix.arch }}" = "x64" ]; then
+            ARCH=amd64
+          else
+            ARCH=arm64
+          fi
+          if [ "${{ matrix.platform }}" = "linux" ]; then
+            GOOS=linux GOARCH=$ARCH go build -ldflags '-w -s' -o ../build/main.dist/mwu-updater .
+          else
+            GOOS=darwin GOARCH=$ARCH go build -ldflags '-w -s' -o ../build/main.dist/mwu-updater .
+          fi
+          popd
+
+      - name: Build Updater
+        if: ${{ matrix.platform == 'win' }}
+        shell: pwsh
+        run: |
+          Push-Location updater
+          if ("${{ matrix.arch }}" -eq "x64") {
+            $env:GOOS = "windows"
+            $env:GOARCH = "amd64"
+          } else {
+            $env:GOOS = "windows"
+            $env:GOARCH = "arm64"
+          }
+          go build -ldflags '-w -s' -o ..\build\main.dist\mwu-updater.exe .
+          Pop-Location
 
       - name: Copy Resources to Build
         shell: bash
