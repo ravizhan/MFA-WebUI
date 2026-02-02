@@ -46,7 +46,16 @@
       "newVersion": "New version found",
       "updateLog": "Changelog",
       "goUpdate": "Update Now",
+      "updateNow": "Update Now",
       "later": "Later",
+      "downloading": "Downloading update package...",
+      "updating": "Updating...",
+      "updateSuccess": "Update successful",
+      "updateFailed": "Update failed",
+      "currentVersion": "Current Version",
+      "latestVersion": "Latest Version",
+      "waitingRestart": "Waiting for backend to restart...",
+      "restarting": "Backend is restarting, page will refresh soon...",
       "channelOptions": {
         "stable": "Stable",
         "beta": "Beta"

@@ -36,6 +36,9 @@
       </n-dialog-provider>
     </n-message-provider>
     <n-global-style />
+
+    <!-- Update Dialog -->
+    <UpdateDialog v-model:show="showUpdateDialog" :update-info="updateInfo" />
   </n-config-provider>
 </template>
 
@@ -49,6 +52,8 @@ import { useUserConfigStore } from "./stores/userConfig.ts"
 import { useSettingsStore } from "./stores/settings"
 import { darkTheme } from "naive-ui"
 import { lightThemeOverrides, darkThemeOverrides } from "./theme"
+import { checkUpdateApi, type UpdateInfo } from "./script/api"
+import UpdateDialog from "./components/UpdateDialog.vue"
 
 import githubMarkdownAutoUrl from "github-markdown-css/github-markdown.css?url"
 import githubMarkdownLightUrl from "github-markdown-css/github-markdown-light.css?url"
@@ -79,6 +84,9 @@ const markdownCssHref = computed(() => {
   return mode ? githubMarkdownDarkUrl : githubMarkdownLightUrl
 })
 
+const showUpdateDialog = ref(false)
+const updateInfo = ref<UpdateInfo | null>(null)
+
 function ensureMarkdownStylesheet(href: string) {
   const id = "github-markdown-theme"
   let el = document.getElementById(id) as HTMLLinkElement | null
@@ -92,16 +100,43 @@ function ensureMarkdownStylesheet(href: string) {
     el.href = href
   }
 }
+
 const handleResize = () => {
   screenWidth.value = window.innerWidth
 }
+
+const checkForUpdatesOnLoad = async () => {
+  // Wait for settings to be loaded
+  if (!settingsStore.settings.update) {
+    return
+  }
+
+  // Only check if auto-update is enabled
+  if (!settingsStore.settings.update.autoUpdate) {
+    return
+  }
+
+  try {
+    const result = await checkUpdateApi()
+    if (result.status === "success" && result.update_info?.is_update_available) {
+      updateInfo.value = result.update_info
+      showUpdateDialog.value = true
+    }
+  } catch (error) {
+    console.error("Failed to check for updates on load:", error)
+  }
+}
+
 onMounted(async () => {
   settingsStore.initSystemThemeListener()
   await interfaceStore.setInterface()
   await configStore.loadConfig()
   if (!settingsStore.initialized) {
-    settingsStore.fetchSettings()
+    await settingsStore.fetchSettings()
   }
+
+  // Check for updates after settings are loaded
+  checkForUpdatesOnLoad()
 
   window.addEventListener("resize", handleResize)
 })
