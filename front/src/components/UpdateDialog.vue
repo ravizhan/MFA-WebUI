@@ -90,7 +90,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { marked } from 'marked'
 import { performUpdateApi, getUpdateStatusApi, type UpdateInfo } from '../script/api'
@@ -264,7 +264,6 @@ watch(() => props.show, (newShow) => {
 })
 
 // Cleanup on unmount
-import { onUnmounted } from 'vue'
 onUnmounted(() => {
   stopPolling()
 })

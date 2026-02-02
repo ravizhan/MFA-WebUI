@@ -45,7 +45,6 @@
       "failed": "Failed to check for updates",
       "newVersion": "New version found",
       "updateLog": "Changelog",
-      "goUpdate": "Update Now",
       "updateNow": "Update Now",
       "later": "Later",
       "downloading": "Downloading update package...",
