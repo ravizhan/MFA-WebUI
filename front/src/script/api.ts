@@ -1,9 +1,7 @@
 import type { InterfaceModel } from "../types/interface"
 import type {
-  ScheduledTask,
   ScheduledTaskCreate,
   ScheduledTaskUpdate,
-  TaskExecution,
   SchedulerApiResponse,
 } from "../types/scheduler"
 
