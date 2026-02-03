@@ -265,7 +265,7 @@ const formRules = computed<FormRules>(() => ({
       { required: true, message: t("settings.scheduler.rules.cronRequired"), trigger: "blur" },
       {
         pattern:
-          /^(\*|[0-9\-\*,\/]+)\s+(\*|[0-9\-\*,\/]+)\s+(\*|[0-9\-\*,\/]+)\s+(\*|[0-9\-\*,\/]+)\s+(\*|[0-9\-\*,\/]+)$/,
+          /^(\*|[0-9\-*,/]+)\s+(\*|[0-9\-*,/]+)\s+(\*|[0-9\-*,/]+)\s+(\*|[0-9\-*,/]+)\s+(\*|[0-9\-*,/]+)$/,
         message: t("settings.scheduler.rules.cronInvalid"),
         trigger: "blur",
       },

@@ -27,6 +27,7 @@ import { useInterfaceStore } from "../stores/interface.ts"
 import { useIndexStore } from "../stores"
 import { NImage } from "naive-ui"
 import OptionItem from "./OptionItem.vue"
+import DOMPurify from "dompurify"
 
 const { t } = useI18n()
 const interfaceStore = useInterfaceStore()
@@ -78,9 +79,9 @@ watch(
     for (const i of interface_task!) {
       if (i.entry === newTaskId) {
         if (i.description) {
-          md.value = await marked(i.description)
+          md.value = DOMPurify.sanitize(marked.parse(i.description) as string)
         } else {
-          md.value = await marked(t("panel.empty"))
+          md.value = marked(t("panel.empty")) as string
         }
 
         rootOptions.value = i.option || []

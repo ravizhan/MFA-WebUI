@@ -489,6 +489,9 @@
       :task="editingTask"
       @saved="handleTaskSaved"
     />
+
+    <!-- 更新弹窗 -->
+    <UpdateDialog v-model:show="showUpdateDialog" :update-info="updateInfo" />
   </n-message-provider>
 </template>
 
@@ -496,12 +499,13 @@
 import { ref, onMounted, computed } from "vue"
 import { useSettingsStore } from "../stores/settings"
 import { useSchedulerStore } from "../stores/scheduler"
-import { checkUpdate, testNotificationApi } from "../script/api"
+import { checkUpdateApi, testNotificationApi, type UpdateInfo } from "../script/api"
 import { useMessage, useDialog } from "naive-ui"
 import { useI18n } from "vue-i18n"
 import type { SettingsModel } from "../types/settings"
 import type { ScheduledTask, TriggerConfig, ExecutionStatus } from "../types/scheduler"
 import SchedulerTaskDialog from "../components/SchedulerTaskDialog.vue"
+import UpdateDialog from "../components/UpdateDialog.vue"
 
 type EditableCategory = Exclude<keyof SettingsModel, "about">
 type MaybeNullForNumbers<T> = T extends number ? T | null : T
@@ -536,6 +540,8 @@ const settings = computed<SettingsModel>(() => settingsStore.settings)
 const checkingUpdate = ref(false)
 const showTaskDialog = ref(false)
 const editingTask = ref<ScheduledTask | null>(null)
+const showUpdateDialog = ref(false)
+const updateInfo = ref<UpdateInfo | null>(null)
 
 const updateChannelOptions = computed(() => [
   { label: t("settings.update.channelOptions.stable"), value: "stable" },
@@ -579,21 +585,10 @@ const handleSettingChange = async <K extends EditableCategory, P extends keyof S
 const checkForUpdate = async () => {
   checkingUpdate.value = true
   try {
-    const result = await checkUpdate()
-    if (result.hasUpdate) {
-      dialog.info({
-        title: t("settings.update.newVersion"),
-        content: `${t("settings.update.newVersion")} ${result.version} !\n\n${t("settings.update.updateLog")}：\n${result.changelog || t("common.none")}`,
-        positiveText: t("settings.update.goUpdate"),
-        negativeText: t("settings.update.later"),
-        onPositiveClick: () => {
-          if (result.downloadUrl) {
-            window.open(result.downloadUrl, "_blank")
-          } else {
-            window.open(settings.value.about.github, "_blank")
-          }
-        },
-      })
+    const result = await checkUpdateApi()
+    if (result.status === "success" && result.update_info?.is_update_available) {
+      updateInfo.value = result.update_info
+      showUpdateDialog.value = true
     } else {
       message.success(t("settings.update.latest"))
     }
