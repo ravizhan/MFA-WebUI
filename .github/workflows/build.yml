@@ -119,7 +119,8 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.25.6"
+          go-version-file: 'updater/go.mod'
+          cache-dependency-path: "updater/go.sum"
 
       - name: Install Dependencies
         run: uv sync

@@ -20,6 +20,7 @@ _✨ 基于 **[Vue](https://github.com/vuejs/vue)** 和 **[FastAPI](https://gith
   <img alt="platform" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-blueviolet">
   <img alt="commit" src="https://img.shields.io/github/commit-activity/m/ravizhan/MWU">
   <img alt="stars" src="https://img.shields.io/github/stars/ravizhan/MWU?style=social">
+  <a href="https://deepwiki.com/ravizhan/MWU" target="_blank"><img alt="deepwiki" src="https://deepwiki.com/badge.svg"></a>
 </div>
 
 ## ✨ 项目特点
