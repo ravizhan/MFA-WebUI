@@ -253,20 +253,19 @@ def check_update():
             case "Windows":
                 plat = "win"
             case "Darwin":
-                plat = "osx"
+                plat = "macos"
             case "Linux":
                 plat = "linux"
 
         machine = platform.machine().lower()
         match machine:
             case "x86_64" | "amd64":
-                arch = "x64"
+                arch = "x86_64"
             case "arm" | "aarch64" | "arm64":
-                arch = "arm64"
+                arch = "aarch64"
 
-        asset_suffix = f"-{plat}-{arch}.7z"
         for asset in response.get("assets", []):
-            if asset["name"].endswith(asset_suffix):
+            if f"{plat}-{arch}" in asset["name"]:
                 download_url = asset["browser_download_url"]
                 file_hash = asset["digest"].replace("sha256:", "").strip()
                 app_state.update_info = {
