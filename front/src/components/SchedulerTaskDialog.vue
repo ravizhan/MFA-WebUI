@@ -94,24 +94,88 @@
       <!-- Interval 触发器 -->
       <template v-if="formData.trigger_type === 'interval'">
         <n-form-item :label="t('settings.scheduler.dialog.intervalTime')" path="trigger_config">
-          <n-flex>
-            <n-input-number
-              :value="intervalConfig.hours"
-              @update:value="(v: number | null) => updateTriggerConfig({ hours: v || 0 })"
-              :min="0"
-              style="width: 45%"
-            >
-              <template #suffix>{{ t("settings.scheduler.formatter.hour") }}</template>
-            </n-input-number>
-            <n-input-number
-              :value="intervalConfig.minutes"
-              @update:value="(v: number | null) => updateTriggerConfig({ minutes: v || 0 })"
-              :min="0"
-              style="width: 45%"
-            >
-              <template #suffix>{{ t("settings.scheduler.formatter.minute") }}</template>
-            </n-input-number>
-          </n-flex>
+          <n-grid :cols="2" :x-gap="12" :y-gap="12" style="width: 100%">
+            <n-gi>
+              <n-input-number
+                :value="intervalConfig.weeks"
+                @update:value="(v: number | null) => updateTriggerConfig({ weeks: v ?? 0 })"
+                :min="0"
+                style="width: 100%"
+              >
+                <template #suffix>{{ t("settings.scheduler.formatter.week") }}</template>
+              </n-input-number>
+            </n-gi>
+            <n-gi>
+              <n-input-number
+                :value="intervalConfig.days"
+                @update:value="(v: number | null) => updateTriggerConfig({ days: v ?? 0 })"
+                :min="0"
+                style="width: 100%"
+              >
+                <template #suffix>{{ t("settings.scheduler.formatter.day") }}</template>
+              </n-input-number>
+            </n-gi>
+            <n-gi>
+              <n-input-number
+                :value="intervalConfig.hours"
+                @update:value="(v: number | null) => updateTriggerConfig({ hours: v ?? 0 })"
+                :min="0"
+                style="width: 100%"
+              >
+                <template #suffix>{{ t("settings.scheduler.formatter.hour") }}</template>
+              </n-input-number>
+            </n-gi>
+            <n-gi>
+              <n-input-number
+                :value="intervalConfig.minutes"
+                @update:value="(v: number | null) => updateTriggerConfig({ minutes: v ?? 0 })"
+                :min="0"
+                style="width: 100%"
+              >
+                <template #suffix>{{ t("settings.scheduler.formatter.minute") }}</template>
+              </n-input-number>
+            </n-gi>
+            <n-gi :span="2">
+              <n-input-number
+                :value="intervalConfig.seconds"
+                @update:value="(v: number | null) => updateTriggerConfig({ seconds: v ?? 0 })"
+                :min="0"
+                style="width: 100%"
+              >
+                <template #suffix>{{ t("settings.scheduler.formatter.second") }}</template>
+              </n-input-number>
+            </n-gi>
+          </n-grid>
+        </n-form-item>
+        <n-form-item :label="t('settings.scheduler.dialog.startTime')" path="trigger_config">
+          <n-date-picker
+            :value="intervalStartTimestamp"
+            @update:value="
+              (v: number | null) =>
+                updateTriggerConfig({
+                  start_date: v ? new Date(v).toISOString() : undefined,
+                })
+            "
+            type="datetime"
+            clearable
+            :placeholder="t('settings.scheduler.dialog.selectStartTime')"
+            style="width: 100%"
+          />
+        </n-form-item>
+        <n-form-item :label="t('settings.scheduler.dialog.endTime')" path="trigger_config">
+          <n-date-picker
+            :value="intervalEndTimestamp"
+            @update:value="
+              (v: number | null) =>
+                updateTriggerConfig({
+                  end_date: v ? new Date(v).toISOString() : undefined,
+                })
+            "
+            type="datetime"
+            clearable
+            :placeholder="t('settings.scheduler.dialog.selectEndTime')"
+            style="width: 100%"
+          />
         </n-form-item>
       </template>
 
@@ -212,6 +276,12 @@ const dateConfigTimestamp = computed(() =>
   dateConfig.value.run_date ? new Date(dateConfig.value.run_date).getTime() : null,
 )
 const intervalConfig = computed(() => formData.value.trigger_config as IntervalTriggerConfig)
+const intervalStartTimestamp = computed(() =>
+  intervalConfig.value.start_date ? new Date(intervalConfig.value.start_date).getTime() : null,
+)
+const intervalEndTimestamp = computed(() =>
+  intervalConfig.value.end_date ? new Date(intervalConfig.value.end_date).getTime() : null,
+)
 
 const formData = ref<ScheduledTaskCreate>(initFormData(props.task))
 const taskListData = ref<TaskListItem[]>([])
@@ -250,8 +320,19 @@ const formRules = computed<FormRules>(() => ({
     {
       validator: (rule, value: IntervalTriggerConfig) => {
         if (formData.value.trigger_type !== "interval") return true
-        if ((value.hours || 0) <= 0 && (value.minutes || 0) <= 0) {
+        const total =
+          (value.weeks || 0) +
+          (value.days || 0) +
+          (value.hours || 0) +
+          (value.minutes || 0) +
+          (value.seconds || 0)
+        if (total <= 0) {
           return new Error(t("settings.scheduler.rules.intervalRequired"))
+        }
+        if (value.start_date && value.end_date) {
+          const startAt = new Date(value.start_date).getTime()
+          const endAt = new Date(value.end_date).getTime()
+          if (endAt < startAt) return new Error(t("settings.scheduler.rules.endBeforeStart"))
         }
         return true
       },
@@ -343,7 +424,7 @@ function initFormData(task?: ScheduledTask | null): ScheduledTaskCreate {
       description: task.description || "",
       enabled: task.enabled,
       trigger_type: task.trigger_type,
-      trigger_config: { ...task.trigger_config },
+      trigger_config: getTriggerConfigByType(task.trigger_type, task.trigger_config),
       task_list,
       task_options: configStore.buildOptionsForTasks(task_list, task.task_options),
     }
@@ -373,10 +454,16 @@ function getTriggerConfigByType(
         run_date: (existing as DateTriggerConfig)?.run_date ?? new Date().toISOString(),
       }
     case "interval":
+      const interval = existing as IntervalTriggerConfig | undefined
       return {
         type: "interval",
-        hours: (existing as IntervalTriggerConfig)?.hours ?? 1,
-        minutes: (existing as IntervalTriggerConfig)?.minutes ?? 0,
+        weeks: interval?.weeks ?? 0,
+        days: interval?.days ?? 0,
+        hours: interval?.hours ?? 1,
+        minutes: interval?.minutes ?? 0,
+        seconds: interval?.seconds ?? 0,
+        start_date: interval?.start_date,
+        end_date: interval?.end_date,
       } as IntervalTriggerConfig
     default:
       return { type: "cron", cron: "0 0 * * *" }

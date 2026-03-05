@@ -507,7 +507,7 @@ import { checkUpdateApi, testNotificationApi, type UpdateInfo } from "../script/
 import { useMessage, useDialog } from "naive-ui"
 import { useI18n } from "vue-i18n"
 import type { SettingsModel } from "../types/settings"
-import type { ScheduledTask, TriggerConfig, ExecutionStatus } from "../types/scheduler"
+import type { ScheduledTask, TriggerType, TriggerConfig, ExecutionStatus } from "../types/scheduler"
 import SchedulerTaskDialog from "../components/SchedulerTaskDialog.vue"
 import UpdateDialog from "../components/UpdateDialog.vue"
 
@@ -675,18 +675,36 @@ function handleTaskSaved() {
   schedulerStore.fetchExecutions()
 }
 
-function formatTrigger(triggerType: string, triggerConfig: TriggerConfig): string {
+function formatTrigger(triggerType: TriggerType, triggerConfig: TriggerConfig): string {
   switch (triggerType) {
     case "cron":
-      return `${t("settings.scheduler.formatter.cron")} ${(triggerConfig as any).cron}`
+      if (triggerConfig.type !== "cron") return t("common.unknown")
+      return `${t("settings.scheduler.formatter.cron")} ${triggerConfig.cron}`
     case "date":
-      return `${t("settings.scheduler.formatter.date")} ${formatDateTime((triggerConfig as any).run_date)}`
-    case "interval":
-      const config = triggerConfig as any
+      if (triggerConfig.type !== "date") return t("common.unknown")
+      return `${t("settings.scheduler.formatter.date")} ${formatDateTime(triggerConfig.run_date)}`
+    case "interval": {
+      if (triggerConfig.type !== "interval") return t("common.unknown")
       const parts: string[] = []
-      if (config.hours) parts.push(`${config.hours}${t("settings.scheduler.formatter.hour")}`)
-      if (config.minutes) parts.push(`${config.minutes}${t("settings.scheduler.formatter.minute")}`)
-      return `${t("settings.scheduler.formatter.interval")} ${parts.join(" ")}`
+      if (triggerConfig.weeks) {
+        parts.push(`${triggerConfig.weeks}${t("settings.scheduler.formatter.week")}`)
+      }
+      if (triggerConfig.days) {
+        parts.push(`${triggerConfig.days}${t("settings.scheduler.formatter.day")}`)
+      }
+      if (triggerConfig.hours) {
+        parts.push(`${triggerConfig.hours}${t("settings.scheduler.formatter.hour")}`)
+      }
+      if (triggerConfig.minutes) {
+        parts.push(`${triggerConfig.minutes}${t("settings.scheduler.formatter.minute")}`)
+      }
+      if (triggerConfig.seconds) {
+        parts.push(`${triggerConfig.seconds}${t("settings.scheduler.formatter.second")}`)
+      }
+      const intervalText =
+        parts.length > 0 ? parts.join(" ") : t("settings.scheduler.formatter.unset")
+      return `${t("settings.scheduler.formatter.interval")} ${intervalText}`
+    }
     default:
       return t("common.unknown")
   }

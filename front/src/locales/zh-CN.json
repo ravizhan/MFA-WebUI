@@ -90,8 +90,11 @@
         "cron": "Cron",
         "date": "指定时间",
         "interval": "间隔",
+        "week": "周",
+        "day": "天",
         "hour": "小时",
         "minute": "分钟",
+        "second": "秒",
         "unset": "未设置"
       },
       "status": {
@@ -122,6 +125,10 @@
         "executionTime": "执行时间",
         "selectTime": "选择执行时间",
         "intervalTime": "间隔时间",
+        "startTime": "开始时间",
+        "selectStartTime": "选择开始时间",
+        "endTime": "结束时间",
+        "selectEndTime": "选择结束时间",
         "currentSetting": "当前设置: ",
         "selectTaskTip": "请先在任务列表中选择任务并点击设置按钮",
         "saveSuccess": "保存成功",
@@ -143,6 +150,7 @@
         "dateRequired": "请选择执行时间",
         "dateInPast": "执行时间不能早于当前时间",
         "intervalRequired": "间隔时间必须大于 0",
+        "endBeforeStart": "结束时间不能早于开始时间",
         "taskListRequired": "请至少选择一个任务"
       }
     },

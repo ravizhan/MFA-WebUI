@@ -2,8 +2,11 @@ import asyncio
 import logging
 import uuid
 from datetime import datetime
-from typing import Optional, List, Dict, Literal, Any
+from pathlib import Path
+from typing import Optional, List, Dict, Literal
 
+import aiosqlite
+from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
@@ -21,6 +24,28 @@ from models.scheduler import (
 )
 
 logger = logging.getLogger(__name__)
+EXECUTIONS_MAX_RECORDS = 1000
+_ACTIVE_MANAGER = None
+
+
+async def execute_scheduled_task(
+    task_id: str,
+    task_name: str,
+    task_description: str,
+    task_list: List[str],
+    task_options: Dict[str, str],
+):
+    """APScheduler 可持久化执行入口"""
+    if _ACTIVE_MANAGER is None:
+        logger.error(f"调度器管理器未就绪，跳过定时任务 {task_id}")
+        return
+    await _ACTIVE_MANAGER._execute_task(
+        task_id=task_id,
+        task_name=task_name,
+        _task_description=task_description,
+        task_list=task_list,
+        task_options=task_options,
+    )
 
 
 class SchedulerManager:
@@ -29,8 +54,8 @@ class SchedulerManager:
     def __init__(self):
         self.scheduler: Optional[AsyncIOScheduler] = None
         self._worker = None
-        self._executions: List[TaskExecution] = []
         self._executions_lock = asyncio.Lock()
+        self._db_path = Path("config") / "scheduler.sqlite"
 
     def set_worker(self, worker):
         """设置 MaaWorker 实例"""
@@ -38,8 +63,16 @@ class SchedulerManager:
 
     async def initialize(self):
         """初始化调度器"""
-        # 创建调度器
-        self.scheduler = AsyncIOScheduler()
+        global _ACTIVE_MANAGER
+        _ACTIVE_MANAGER = self
+
+        self._db_path.parent.mkdir(parents=True, exist_ok=True)
+        await self._initialize_executions_table()
+
+        db_url = f"sqlite:///{self._db_path.resolve().as_posix()}"
+        self.scheduler = AsyncIOScheduler(
+            jobstores={"default": SQLAlchemyJobStore(url=db_url)}
+        )
 
         # 启动调度器
         self.scheduler.start()
@@ -47,9 +80,42 @@ class SchedulerManager:
 
     async def shutdown(self):
         """关闭调度器"""
+        global _ACTIVE_MANAGER
         if self.scheduler:
             self.scheduler.shutdown()
             logger.info("调度器已关闭")
+        if _ACTIVE_MANAGER is self:
+            _ACTIVE_MANAGER = None
+
+    async def _initialize_executions_table(self):
+        """初始化执行历史数据表"""
+        async with aiosqlite.connect(self._db_path) as db:
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS scheduler_executions (
+                    id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL,
+                    task_name TEXT NOT NULL,
+                    started_at TEXT NOT NULL,
+                    finished_at TEXT,
+                    status TEXT NOT NULL,
+                    error_message TEXT
+                )
+                """
+            )
+            await db.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_scheduler_executions_started_at
+                ON scheduler_executions(started_at DESC)
+                """
+            )
+            await db.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_scheduler_executions_task_id
+                ON scheduler_executions(task_id)
+                """
+            )
+            await db.commit()
 
     def _create_trigger(self, trigger_config: TriggerConfig):
         """根据配置创建触发器"""
@@ -85,6 +151,7 @@ class SchedulerManager:
         self,
         task_id: str,
         task_name: str,
+        _task_description: str,
         task_list: List[str],
         task_options: Dict[str, str],
     ):
@@ -190,10 +257,37 @@ class SchedulerManager:
     async def _add_execution(self, execution: TaskExecution):
         """添加执行记录"""
         async with self._executions_lock:
-            self._executions.append(execution)
-            # 只保留最近 100 条记录
-            if len(self._executions) > 100:
-                self._executions = self._executions[-100:]
+            async with aiosqlite.connect(self._db_path) as db:
+                await db.execute(
+                    """
+                    INSERT INTO scheduler_executions
+                    (id, task_id, task_name, started_at, finished_at, status, error_message)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        execution.id,
+                        execution.task_id,
+                        execution.task_name,
+                        execution.started_at.isoformat(),
+                        execution.finished_at.isoformat()
+                        if execution.finished_at
+                        else None,
+                        execution.status,
+                        execution.error_message,
+                    ),
+                )
+                await db.execute(
+                    """
+                    DELETE FROM scheduler_executions
+                    WHERE id NOT IN (
+                        SELECT id FROM scheduler_executions
+                        ORDER BY started_at DESC, id DESC
+                        LIMIT ?
+                    )
+                    """,
+                    (EXECUTIONS_MAX_RECORDS,),
+                )
+                await db.commit()
 
     async def _update_execution_status(
         self,
@@ -203,13 +297,27 @@ class SchedulerManager:
     ):
         """更新执行记录状态"""
         async with self._executions_lock:
-            for execution in self._executions:
-                if execution.id == execution_id:
-                    execution.status = status
-                    execution.finished_at = datetime.now()
-                    if error_message:
-                        execution.error_message = error_message
-                    break
+            async with aiosqlite.connect(self._db_path) as db:
+                finished_at = datetime.now().isoformat()
+                if error_message is None:
+                    await db.execute(
+                        """
+                        UPDATE scheduler_executions
+                        SET status = ?, finished_at = ?
+                        WHERE id = ?
+                        """,
+                        (status, finished_at, execution_id),
+                    )
+                else:
+                    await db.execute(
+                        """
+                        UPDATE scheduler_executions
+                        SET status = ?, finished_at = ?, error_message = ?
+                        WHERE id = ?
+                        """,
+                        (status, finished_at, error_message, execution_id),
+                    )
+                await db.commit()
 
     async def create_task(self, task_create: ScheduledTaskCreate) -> ScheduledTask:
         """创建定时任务"""
@@ -221,12 +329,13 @@ class SchedulerManager:
 
         # 添加任务到调度器，存储完整的任务信息
         self.scheduler.add_job(
-            self._execute_task,
+            execute_scheduled_task,
             trigger,
             id=task_id,
             kwargs={
                 "task_id": task_id,
                 "task_name": task_create.name,
+                "task_description": task_create.description or "",
                 "task_list": task_create.task_list,
                 "task_options": task_create.task_options,
             },
@@ -266,6 +375,7 @@ class SchedulerManager:
 
         # 从 kwargs 中获取任务信息
         task_name = job.kwargs.get("task_name", "")
+        task_description = job.kwargs.get("task_description", "")
         task_list = job.kwargs.get("task_list", [])
         task_options = job.kwargs.get("task_options", {})
         trigger_type: Literal["cron", "date", "interval"]
@@ -280,7 +390,7 @@ class SchedulerManager:
         return ScheduledTask(
             id=task_id,
             name=task_name,
-            description="",
+            description=task_description,
             enabled=job.next_run_time is not None,
             trigger_type=trigger_type,
             trigger_config=trigger_config,
@@ -298,6 +408,7 @@ class SchedulerManager:
 
         for job in jobs:
             task_name = job.kwargs.get("task_name", "")
+            task_description = job.kwargs.get("task_description", "")
             task_list = job.kwargs.get("task_list", [])
             task_options = job.kwargs.get("task_options", {})
             trigger_type: Literal["cron", "date", "interval"]
@@ -314,7 +425,7 @@ class SchedulerManager:
             task = ScheduledTask(
                 id=job.id,
                 name=task_name,
-                description="",
+                description=task_description,
                 enabled=job.next_run_time is not None,
                 trigger_type=trigger_type,
                 trigger_config=trigger_config,
@@ -343,12 +454,9 @@ class SchedulerManager:
             current_kwargs = job.kwargs
 
             try:
-                current_trigger_type, current_trigger_config = (
-                    self._build_trigger_config(job.trigger)
-                )
+                _, current_trigger_config = self._build_trigger_config(job.trigger)
             except Exception as e:
                 logger.warning(f"重建当前触发器配置失败，使用默认 cron 配置: {e}")
-                current_trigger_type = "cron"
                 current_trigger_config = CronTriggerConfig(cron="* * * * *")
 
             # 合并更新数据
@@ -356,6 +464,11 @@ class SchedulerManager:
                 task_update.name
                 if task_update.name is not None
                 else current_kwargs.get("task_name", "")
+            )
+            new_description = (
+                task_update.description
+                if task_update.description is not None
+                else current_kwargs.get("task_description", "")
             )
             new_task_list = (
                 task_update.task_list
@@ -384,6 +497,7 @@ class SchedulerManager:
                 kwargs={
                     "task_id": task_id,
                     "task_name": new_name,
+                    "task_description": new_description,
                     "task_list": new_task_list,
                     "task_options": new_options,
                 },
@@ -441,4 +555,31 @@ class SchedulerManager:
     async def get_executions(self, limit: int = 50) -> List[TaskExecution]:
         """获取执行历史"""
         async with self._executions_lock:
-            return self._executions[-limit:]
+            async with aiosqlite.connect(self._db_path) as db:
+                cursor = await db.execute(
+                    """
+                    SELECT id, task_id, task_name, started_at, finished_at, status, error_message
+                    FROM scheduler_executions
+                    ORDER BY started_at DESC, id DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                )
+                rows = await cursor.fetchall()
+
+        executions: List[TaskExecution] = []
+        for row in rows:
+            started_at = datetime.fromisoformat(row[3])
+            finished_at = datetime.fromisoformat(row[4]) if row[4] else None
+            executions.append(
+                TaskExecution(
+                    id=row[0],
+                    task_id=row[1],
+                    task_name=row[2],
+                    started_at=started_at,
+                    finished_at=finished_at,
+                    status=row[5],
+                    error_message=row[6],
+                )
+            )
+        return executions

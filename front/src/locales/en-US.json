@@ -90,8 +90,11 @@
         "cron": "Cron",
         "date": "Specific Time",
         "interval": "Interval",
+        "week": "wk",
+        "day": "day",
         "hour": "hr",
         "minute": "min",
+        "second": "sec",
         "unset": "Not Set"
       },
       "status": {
@@ -122,6 +125,10 @@
         "executionTime": "Time",
         "selectTime": "Select Time",
         "intervalTime": "Interval",
+        "startTime": "Start Time",
+        "selectStartTime": "Select Start Time",
+        "endTime": "End Time",
+        "selectEndTime": "Select End Time",
         "currentSetting": "Current Setting: ",
         "selectTaskTip": "Please select a task from the list and click settings button first",
         "saveSuccess": "Saved successfully",
@@ -143,6 +150,7 @@
         "dateRequired": "Please select execution time",
         "dateInPast": "Execution time cannot be in the past",
         "intervalRequired": "Interval must be greater than 0",
+        "endBeforeStart": "End time cannot be earlier than start time",
         "taskListRequired": "Please select at least one task"
       }
     },
