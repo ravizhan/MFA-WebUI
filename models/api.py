@@ -3,6 +3,16 @@ from typing import Literal
 from pydantic import BaseModel
 
 
+RealtimeEventName = Literal[
+    "log",
+    "task.started",
+    "task.completed",
+    "task.failed",
+    "notification.test",
+]
+RealtimeEventLevel = Literal["info", "success", "error"]
+
+
 class DeviceModel(BaseModel):
     type: Literal["Adb", "Win32", "Gamepad", "PlayCover"]
     name: str = ""
@@ -13,3 +23,12 @@ class DeviceModel(BaseModel):
     hWnd: int = 0
     gamepad_type: int = 0
     uuid: str = ""
+
+
+class RealtimeEvent(BaseModel):
+    event: RealtimeEventName
+    level: RealtimeEventLevel = "info"
+    message: str
+    time: str
+    notify: bool = False
+    title: str | None = None

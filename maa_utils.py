@@ -24,7 +24,7 @@ import httpx
 import io
 from PIL import Image
 
-from models.api import DeviceModel
+from models.api import DeviceModel, RealtimeEvent, RealtimeEventLevel, RealtimeEventName
 from models.interface import InterfaceModel
 from models.settings import SettingsModel
 
@@ -44,64 +44,181 @@ class MaaWorker:
         self.running = False
         self._task_lock = threading.Lock()
         self._task_thread: threading.Thread | None = None
+        self.last_task_status = "idle"
+        self.last_task_error: str | None = None
+        self._current_task_name: str | None = None
         self.send_log("MAA初始化成功")
         self.agent_process: subprocess.Popen | None = None
         self.load_agent()
         self.send_log("Agent加载完成")
         self.http_client = httpx.Client(timeout=30)
 
-    def send_log(self, msg):
-        self.message_conn.put(
-            f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} {msg}"
-        )
-        time.sleep(0.05)
+    def _current_time(self) -> str:
+        return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
 
-    def send_notification(self, title, message):
+    def _load_settings(self) -> SettingsModel:
         with open("config/settings.json", "r", encoding="utf-8") as f:
             config_data = json.load(f)
-        settings = SettingsModel(**config_data)
+        return SettingsModel(**config_data)
+
+    def _publish_event(self, event: RealtimeEvent):
+        self.message_conn.put(event)
+        time.sleep(0.05)
+
+    def _show_system_notification(self, title: str, message: str):
+        notifier = plyer.notification
+        if notifier is None:
+            raise RuntimeError("当前平台不支持系统通知")
+
+        notify_func = getattr(notifier, "notify", None)
+        if notify_func is None:
+            raise RuntimeError("当前平台不支持系统通知")
+
+        notify_func(
+            title=title,
+            message=message,
+            app_name=self.interface.label,
+            timeout=30,
+        )
+
+    def emit_event(
+        self,
+        event: RealtimeEventName,
+        message: str,
+        *,
+        level: RealtimeEventLevel = "info",
+        notify: bool = False,
+        title: str | None = None,
+    ):
+        realtime_event = RealtimeEvent(
+            event=event,
+            level=level,
+            message=message,
+            time=self._current_time(),
+            notify=notify,
+            title=title,
+        )
+
+        self._publish_event(realtime_event)
+
+        if not notify:
+            return
+
+        settings = self._load_settings()
+
         if settings.notification.systemNotification:
-            plyer.notification.notify(
-                title=title, message=message, app_name=self.interface.label, timeout=30
-            )
+            try:
+                self._show_system_notification(
+                    title or self.interface.label or "MWU", message
+                )
+            except Exception as e:
+                self.send_log(f"系统通知发送失败: {e}")
+
         if settings.notification.externalNotification:
             try:
-                body = json.loads(
-                    settings.notification.body.replace("{{title}}", title).replace(
-                        "{{message}}", message
+                template_body = settings.notification.body.strip()
+                if template_body:
+                    body = json.loads(
+                        template_body.replace("{{title}}", title or "").replace(
+                            "{{message}}", message
+                        )
                     )
-                )
+                else:
+                    body = {"title": title or self.interface.label, "message": message}
+
+                headers = {}
+                if settings.notification.headers:
+                    headers = json.loads(settings.notification.headers)
+
+                auth = None
+                if settings.notification.username and settings.notification.password:
+                    auth = (
+                        settings.notification.username,
+                        settings.notification.password,
+                    )
+
                 if settings.notification.method == "POST":
-                    headers = {}
-                    if settings.notification.headers:
-                        headers = json.loads(settings.notification.headers)
-                    auth = None
-                    if (
-                        settings.notification.username
-                        and settings.notification.password
-                    ):
-                        auth = (
-                            settings.notification.username,
-                            settings.notification.password,
-                        )
                     if settings.notification.contentType == "application/json":
-                        self.http_client.post(
-                            settings.notification.webhook,
-                            headers=headers,
-                            json=body,
-                            auth=auth,
-                        )
+                        if auth is not None:
+                            self.http_client.post(
+                                settings.notification.webhook,
+                                headers=headers,
+                                json=body,
+                                auth=auth,
+                            )
+                        else:
+                            self.http_client.post(
+                                settings.notification.webhook,
+                                headers=headers,
+                                json=body,
+                            )
                     else:
-                        self.http_client.post(
-                            settings.notification.webhook,
-                            headers=headers,
-                            data=body,
-                            auth=auth,
-                        )
+                        if auth is not None:
+                            self.http_client.post(
+                                settings.notification.webhook,
+                                headers=headers,
+                                data=body,
+                                auth=auth,
+                            )
+                        else:
+                            self.http_client.post(
+                                settings.notification.webhook,
+                                headers=headers,
+                                data=body,
+                            )
                 else:
                     self.http_client.get(settings.notification.webhook, params=body)
             except Exception as e:
                 self.send_log(f"外部通知发送失败: {e}")
+
+    def send_log(self, msg):
+        self.emit_event("log", msg)
+
+    def send_notification(
+        self,
+        title,
+        message,
+        *,
+        event: RealtimeEventName = "notification.test",
+        level: RealtimeEventLevel = "info",
+    ):
+        self.emit_event(event, message, level=level, notify=True, title=title)
+
+    def _build_task_subject(self, task_list: list[str]) -> str:
+        if self._current_task_name:
+            return self._current_task_name
+        if len(task_list) == 1:
+            return task_list[0]
+        return f"{len(task_list)} 个任务"
+
+    def _emit_task_started(self, task_list: list[str]):
+        self.send_notification(
+            "任务开始",
+            f"开始执行: {self._build_task_subject(task_list)}",
+            event="task.started",
+            level="info",
+        )
+
+    def _emit_task_completed(self, task_list: list[str]):
+        settings = self._load_settings()
+        self.emit_event(
+            "task.completed",
+            f"{self._build_task_subject(task_list)} 执行完成",
+            level="success",
+            notify=settings.notification.notifyOnComplete,
+            title="任务完成",
+        )
+
+    def _emit_task_failed(self, task_list: list[str], error_message: str):
+        settings = self._load_settings()
+        self.emit_event(
+            "task.failed",
+            f"{self._build_task_subject(task_list)} 执行失败，请检查日志",
+            level="error",
+            notify=settings.notification.notifyOnError,
+            title="任务失败",
+        )
+        self.send_log(f"任务异常详情: {error_message}")
 
     def _is_controller_supported(self, controller) -> tuple[bool, str]:
         match controller.type:
@@ -324,11 +441,9 @@ class MaaWorker:
                 status = controller.post_connection().wait().succeeded
         conn_fail_msg = "设备连接失败，请检查终端日志"
         if not status:
-            plyer.notification.notify(
-                title=self.interface.title,
-                message=conn_fail_msg,
-                app_name=self.interface.label,
-                timeout=30,
+            self._show_system_notification(
+                self.interface.title or self.interface.label or "MWU",
+                conn_fail_msg,
             )
             self.send_log(conn_fail_msg)
             return self.connected
@@ -337,11 +452,9 @@ class MaaWorker:
             self.controller = controller
             self.send_log("设备连接成功")
         else:
-            plyer.notification.notify(
-                title=self.interface.title,
-                message=conn_fail_msg,
-                app_name=self.interface.label,
-                timeout=30,
+            self._show_system_notification(
+                self.interface.title or self.interface.label or "MWU",
+                conn_fail_msg,
             )
             self.send_log(conn_fail_msg)
         return self.connected
@@ -581,7 +694,9 @@ class MaaWorker:
                 self.send_log(f"Agent进程启动失败: {e}")
                 traceback.print_exc()
 
-    def start_task(self, task_list, options: dict[str, str]) -> bool:
+    def start_task(
+        self, task_list, options: dict[str, str], task_name: str | None = None
+    ) -> bool:
         if not self.connected:
             return False
         if not self._task_lock.acquire(blocking=False):
@@ -594,6 +709,9 @@ class MaaWorker:
                 self.set_option(name, case)
             self.stop_flag = False
             self.running = True
+            self.last_task_status = "running"
+            self.last_task_error = None
+            self._current_task_name = task_name
             self._task_thread = threading.Thread(
                 target=self._run_process, args=(task_list,), daemon=True
             )
@@ -611,11 +729,13 @@ class MaaWorker:
         return True
 
     def _run_process(self, task_list):
-        self.send_log("任务开始")
         try:
+            self._emit_task_started(task_list)
             for task in task_list:
                 if self.stop_flag:
                     self.tasker.post_stop().wait()
+                    self.last_task_status = "stopped"
+                    self.last_task_error = "任务已终止"
                     self.send_log("任务已终止")
                     return
                 t = self.tasker.post_task(task)
@@ -624,22 +744,24 @@ class MaaWorker:
                     time.sleep(0.5)
                     if self.stop_flag:
                         self.tasker.post_stop().wait()
+                        self.last_task_status = "stopped"
+                        self.last_task_error = "任务已终止"
                         self.send_log("任务已终止")
                         return
-        except Exception:
+            self.last_task_status = "success"
+            self.last_task_error = None
+            self._emit_task_completed(task_list)
+        except Exception as exc:
             traceback.print_exc()
-            plyer.notification.notify(
-                title=self.interface.title,
-                message="任务出现异常，请检查终端日志",
-                app_name=self.interface.label,
-                timeout=30,
-            )
+            self.last_task_status = "failed"
+            self.last_task_error = str(exc) or "任务执行失败"
+            self._emit_task_failed(task_list, self.last_task_error)
             self.send_log("任务出现异常，请检查终端日志")
             self.send_log(f"请将日志反馈至 {self.interface.github}/issues")
         finally:
             self.running = False
             self._task_thread = None
-            self.send_log("所有任务完成")
+            self._current_task_name = None
             time.sleep(0.5)
 
     def get_screencap_bytes(self):

@@ -4,7 +4,14 @@ import App from "./App.vue"
 import router from "./router"
 import { createPinia } from "pinia"
 import { useIndexStore } from "./stores"
+import { useSettingsStore } from "./stores/settings"
 import { sse } from "./script/sse"
+import {
+  formatRealtimeLog,
+  showBrowserRealtimeNotification,
+  showRealtimeMessage,
+} from "./script/realtime"
+import type { RealtimeEvent } from "./types/realtime"
 import "virtual:uno.css"
 import i18n from "./libs/i18n"
 
@@ -15,9 +22,23 @@ app.use(router)
 app.use(i18n)
 
 const indexStore = useIndexStore(pinia)
+const settingsStore = useSettingsStore(pinia)
 
-sse.addEventListener("log", (data: { message: string }) => {
-  indexStore.UpdateLog(data.message)
-})
+function handleRealtimeEvent(data: RealtimeEvent): void {
+  indexStore.UpdateLog(formatRealtimeLog(data))
+
+  if (!data.notify) {
+    return
+  }
+
+  showRealtimeMessage(data)
+  showBrowserRealtimeNotification(data, settingsStore.settings.notification)
+}
+
+;(["log", "task.started", "task.completed", "task.failed", "notification.test"] as const).forEach(
+  (eventName) => {
+    sse.addEventListener(eventName, handleRealtimeEvent)
+  },
+)
 
 app.mount("#app")

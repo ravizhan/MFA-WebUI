@@ -166,7 +166,7 @@
     },
     "notification": {
       "title": "Notification",
-      "test": "Test External Notification",
+      "test": "Test Notification",
       "enable": "Enable Notification",
       "system": "System",
       "browser": "Browser",
@@ -176,7 +176,9 @@
       "testSending": "Sending test notification...",
       "testSuccess": "Test notification sent",
       "testResult": "Send failed: {message}",
-      "testError": "Error sending test notification"
+      "testError": "Error sending test notification",
+      "browserUnsupported": "Browser notifications are not supported in this environment",
+      "browserPermissionDenied": "Browser notification permission was not granted"
     },
     "about": {
       "title": "About",

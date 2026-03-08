@@ -166,7 +166,7 @@
     },
     "notification": {
       "title": "通知设置",
-      "test": "测试外部通知",
+      "test": "测试通知",
       "enable": "启用通知",
       "system": "系统通知",
       "browser": "浏览器通知",
@@ -176,7 +176,9 @@
       "testSending": "正在发送测试通知...",
       "testSuccess": "测试通知已发送",
       "testResult": "发送失败: {message}",
-      "testError": "发送测试通知时发生错误"
+      "testError": "发送测试通知时发生错误",
+      "browserUnsupported": "当前环境不支持浏览器通知",
+      "browserPermissionDenied": "浏览器通知权限未授予，无法启用浏览器通知"
     },
     "about": {
       "title": "关于我们",

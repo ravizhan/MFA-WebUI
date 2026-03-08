@@ -1,7 +1,13 @@
+import type { RealtimeEvent, RealtimeEventLevel, RealtimeEventName } from "../types/realtime"
+
+type SSEPayload =
+  | RealtimeEvent
+  | { type?: string; message?: string; time?: string; notify?: boolean }
+
 export class SSEClient {
   private eventSource: EventSource | null = null
   private url: string
-  private listeners: Map<string, Set<(data: any) => void>> = new Map()
+  private listeners: Map<string, Set<(data: RealtimeEvent) => void>> = new Map()
   private baseReconnectInterval: number = 1000
   private maxReconnectInterval: number = 30000
   private reconnectAttempts: number = 0
@@ -22,8 +28,11 @@ export class SSEClient {
 
     this.eventSource.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data)
-        this.dispatchEvent(data.type, data)
+        const data = this.normalizeEvent(JSON.parse(event.data) as SSEPayload)
+        if (!data) {
+          return
+        }
+        this.dispatchEvent(data.event, data)
       } catch (error) {
         console.error("SSE消息解析错误:", error)
       }
@@ -73,11 +82,29 @@ export class SSEClient {
     this.listeners.get(type)?.add(callback)
   }
 
-  public removeEventListener(type: string, callback: (data: any) => void): void {
+  public removeEventListener(type: string, callback: (data: RealtimeEvent) => void): void {
     this.listeners.get(type)?.delete(callback)
   }
 
-  private dispatchEvent(type: string, data: any): void {
+  private normalizeEvent(data: SSEPayload): RealtimeEvent | null {
+    if (!data || typeof data.message !== "string") {
+      return null
+    }
+
+    const eventType = ("event" in data ? data.event : data.type) ?? "log"
+    const level = ("level" in data ? data.level : undefined) ?? "info"
+
+    return {
+      event: (eventType as RealtimeEventName) || "log",
+      level: (level as RealtimeEventLevel) || "info",
+      message: data.message,
+      time: ("time" in data && typeof data.time === "string" ? data.time : "") || "",
+      notify: ("notify" in data && typeof data.notify === "boolean" ? data.notify : false) || false,
+      title: "title" in data && typeof data.title === "string" ? data.title : null,
+    }
+  }
+
+  private dispatchEvent(type: string, data: RealtimeEvent): void {
     this.listeners.get(type)?.forEach((callback) => callback(data))
   }
 

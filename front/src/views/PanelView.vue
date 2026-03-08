@@ -17,10 +17,4 @@
 import LeftPanel from "../components/LeftPanel.vue"
 import MediumPanel from "../components/MediumPanel.vue"
 import RightPanel from "../components/RightPanel.vue"
-import { onMounted } from "vue"
-onMounted(() => {
-  if (Notification.permission !== "granted") {
-    Notification.requestPermission()
-  }
-})
 </script>

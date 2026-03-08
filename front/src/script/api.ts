@@ -5,6 +5,7 @@ import type {
   SchedulerApiResponse,
   TaskExecutionPayload,
 } from "../types/scheduler"
+import { showGlobalMessage } from "./message"
 
 interface ApiResponse {
   status: string
@@ -85,12 +86,8 @@ export function startTask(payload: TaskExecutionPayload): void {
   })
     .then((res) => res.json())
     .then((data: ApiResponse) => {
-      if (data.status === "success") {
-        // @ts-ignore
-        window.$message.success("任务开始")
-      } else {
-        // @ts-ignore
-        window.$message.error(data.message)
+      if (data.status !== "success") {
+        showGlobalMessage("error", data.message)
       }
     })
 }
@@ -105,11 +102,9 @@ export function stopTask(): void {
     .then((res) => res.json())
     .then((data: ApiResponse) => {
       if (data.status === "success") {
-        // @ts-ignore
-        window.$message.success("正在中止任务，请稍后")
+        showGlobalMessage("success", "正在中止任务，请稍后")
       } else {
-        // @ts-ignore
-        window.$message.error(data.message)
+        showGlobalMessage("error", data.message)
       }
     })
 }
@@ -132,12 +127,10 @@ export function postDevices(device: ConnectableDevice): Promise<boolean> {
     .then((res) => res.json())
     .then((data: ApiResponse) => {
       if (data.status === "success") {
-        // @ts-ignore
-        window.$message.success("设备连接成功")
+        showGlobalMessage("success", "设备连接成功")
         return true
       } else {
-        // @ts-ignore
-        window.$message.error("设备连接失败，请检查终端日志")
+        showGlobalMessage("error", "设备连接失败，请检查终端日志")
         return false
       }
     })
@@ -163,19 +156,16 @@ export function postResource(name: string): Promise<boolean> {
     .then((res) => res.json())
     .then((data: ApiResponse) => {
       if (data.status === "success") {
-        // @ts-ignore
-        window.$message.success("资源添加成功")
+        showGlobalMessage("success", "资源添加成功")
         return true
       } else {
-        // @ts-ignore
-        window.$message.error(data.message)
+        showGlobalMessage("error", data.message)
         return false
       }
     })
     .catch((error) => {
       console.error("Failed to set resource:", error)
-      // @ts-ignore
-      window.$message.error("网络错误，请稍后重试")
+      showGlobalMessage("error", "网络错误，请稍后重试")
       return false
     })
 }
@@ -204,19 +194,16 @@ export function updateSettings(settings: SettingsModel): Promise<boolean> {
     .then((res) => res.json())
     .then((data: ApiResponse) => {
       if (data.status === "success") {
-        // @ts-ignore
-        window.$message.success("设置已保存")
+        showGlobalMessage("success", "设置已保存")
         return true
       } else {
-        // @ts-ignore
-        window.$message.error(data.message || "保存失败")
+        showGlobalMessage("error", data.message || "保存失败")
         return false
       }
     })
     .catch((error) => {
       console.error("Failed to update settings:", error)
-      // @ts-ignore
-      window.$message.error("网络错误，请稍后重试")
+      showGlobalMessage("error", "网络错误，请稍后重试")
       return false
     })
 }

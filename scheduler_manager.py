@@ -189,7 +189,9 @@ class SchedulerManager:
                 return
 
             # 启动任务
-            if not self._worker.start_task(task_list, task_options):
+            if not self._worker.start_task(
+                task_list, task_options, task_name=task_name
+            ):
                 logger.warning(f"任务已在运行，跳过定时任务 {task_id}")
                 await self._update_execution_status(
                     execution_id, "stopped", "任务已在运行"
@@ -200,8 +202,22 @@ class SchedulerManager:
             while self._worker and self._worker.running:
                 await asyncio.sleep(1)
 
-            await self._update_execution_status(execution_id, "success")
-            logger.info(f"定时任务 {task_id} 执行成功")
+            task_status = getattr(self._worker, "last_task_status", "failed")
+            task_error = getattr(self._worker, "last_task_error", None)
+
+            if task_status == "success":
+                await self._update_execution_status(execution_id, "success")
+                logger.info(f"定时任务 {task_id} 执行成功")
+            elif task_status == "stopped":
+                await self._update_execution_status(
+                    execution_id, "stopped", task_error or "任务已终止"
+                )
+                logger.warning(f"定时任务 {task_id} 已停止")
+            else:
+                await self._update_execution_status(
+                    execution_id, "failed", task_error or "任务执行失败"
+                )
+                logger.error(f"定时任务 {task_id} 执行失败: {task_error}")
 
         except Exception as e:
             logger.error(f"定时任务 {task_id} 执行失败: {e}")

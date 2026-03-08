@@ -292,9 +292,7 @@
               size="small"
               type="info"
               @click="testNotification"
-              :disabled="
-                !settings.notification.externalNotification || !settings.notification.webhook
-              "
+              :disabled="isTestNotificationDisabled"
             >
               {{ t("settings.notification.test") }}
             </n-button>
@@ -311,11 +309,8 @@
                   {{ t("settings.notification.system") }}
                 </n-checkbox>
                 <n-checkbox
-                  v-model:checked="settings.notification.browserNotification"
-                  @update:checked="
-                    (val: boolean) =>
-                      handleSettingChange('notification', 'browserNotification', val)
-                  "
+                  :checked="settings.notification.browserNotification"
+                  @update:checked="handleBrowserNotificationChange"
                 >
                   {{ t("settings.notification.browser") }}
                 </n-checkbox>
@@ -569,6 +564,29 @@ const darkModeOptions = computed(() => [
   { label: t("settings.ui.darkModeOptions.on"), value: true },
 ])
 
+const isTestNotificationDisabled = computed(() => {
+  const notification = settings.value.notification
+  const hasEnabledChannel =
+    notification.systemNotification ||
+    notification.browserNotification ||
+    notification.externalNotification
+
+  if (!hasEnabledChannel) {
+    return true
+  }
+
+  if (
+    notification.externalNotification &&
+    !notification.webhook &&
+    !notification.systemNotification &&
+    !notification.browserNotification
+  ) {
+    return true
+  }
+
+  return false
+})
+
 onMounted(() => {
   if (!settingsStore.initialized) {
     settingsStore.fetchSettings()
@@ -585,6 +603,30 @@ const handleSettingChange = async <K extends EditableCategory, P extends keyof S
 ) => {
   if (value === null) return
   await settingsStore.updateSetting(category, key, value as SettingsModel[K][P])
+}
+
+const handleBrowserNotificationChange = async (enabled: boolean) => {
+  if (!enabled) {
+    await handleSettingChange("notification", "browserNotification", false)
+    return
+  }
+
+  if (typeof Notification === "undefined") {
+    message.error(t("settings.notification.browserUnsupported"))
+    return
+  }
+
+  let permission = Notification.permission
+  if (permission !== "granted") {
+    permission = await Notification.requestPermission()
+  }
+
+  if (permission !== "granted") {
+    message.warning(t("settings.notification.browserPermissionDenied"))
+    return
+  }
+
+  await handleSettingChange("notification", "browserNotification", true)
 }
 
 const checkForUpdate = async () => {
@@ -608,9 +650,7 @@ const testNotification = async () => {
   message.info(t("settings.notification.testSending"))
   try {
     const result = await testNotificationApi()
-    if (result.status === "success") {
-      message.success(t("settings.notification.testSuccess"))
-    } else {
+    if (result.status !== "success") {
       message.error(t("settings.notification.testResult", { message: result.message }))
     }
   } catch (error) {

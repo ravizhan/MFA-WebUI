@@ -9,11 +9,12 @@ import os
 import signal
 import sys
 import platform
+from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from models.interface import InterfaceModel
-from models.api import DeviceModel
+from models.api import DeviceModel, RealtimeEvent, RealtimeEventLevel
 from models.task_config import TaskConfigModel
 from models.settings import SettingsModel
 from models.scheduler import (
@@ -45,10 +46,10 @@ class LogBroadcaster:
     def __init__(self):
         self._queues: list[asyncio.Queue] = []
 
-    def add_client(self, history: list[str]) -> asyncio.Queue:
+    def add_client(self, history: list[RealtimeEvent]) -> asyncio.Queue:
         q = asyncio.Queue()
-        for msg in history:
-            q.put_nowait(msg)
+        for message in history:
+            q.put_nowait(message.model_copy(update={"notify": False}))
         self._queues.append(q)
         return q
 
@@ -56,16 +57,40 @@ class LogBroadcaster:
         if q in self._queues:
             self._queues.remove(q)
 
-    async def broadcast(self, message: str):
+    async def broadcast(self, message: RealtimeEvent):
         for q in self._queues:
             await q.put(message)
+
+
+def build_log_event(msg: str, level: RealtimeEventLevel = "info") -> RealtimeEvent:
+    return RealtimeEvent(
+        event="log",
+        level=level,
+        message=msg,
+        time=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
+        notify=False,
+    )
+
+
+def normalize_event(payload: RealtimeEvent | dict[str, Any] | str) -> RealtimeEvent:
+    if isinstance(payload, RealtimeEvent):
+        return payload
+    if isinstance(payload, dict):
+        return RealtimeEvent(**payload)
+    return RealtimeEvent(
+        event="log",
+        level="info",
+        message=payload,
+        time="",
+        notify=False,
+    )
 
 
 class AppState:
     def __init__(self):
         self.message_conn = SimpleQueue()
         self.worker: MaaWorker | None = None
-        self.history_message = []
+        self.history_message: list[RealtimeEvent] = []
         self.current_status = None
         self.broadcaster: LogBroadcaster | None = None
         self.scheduler_manager: SchedulerManager | None = None
@@ -74,10 +99,11 @@ class AppState:
         self.update_status: dict | None = None
         self.update_info: dict | None = None
 
+    def send_event(self, event: RealtimeEvent):
+        self.message_conn.put(event)
+
     def send_log(self, msg: str):
-        self.message_conn.put(
-            f"{time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())} {msg}"
-        )
+        self.send_event(build_log_event(msg))
 
 
 app_state = AppState()
@@ -86,10 +112,10 @@ app_state = AppState()
 async def log_monitor():
     while True:
         while not app_state.message_conn.empty():
-            msg = app_state.message_conn.get_nowait()
-            app_state.history_message.append(msg)
+            message = normalize_event(app_state.message_conn.get_nowait())
+            app_state.history_message.append(message)
             if app_state.broadcaster:
-                await app_state.broadcaster.broadcast(msg)
+                await app_state.broadcaster.broadcast(message)
         await asyncio.sleep(0.1)
 
 
@@ -170,12 +196,18 @@ async def stream_live(fps: int = 15):
 
 @app.get("/api/device")
 def get_device(controller: str | None = None):
+    if app_state.worker is None:
+        return {"status": "failed", "message": "Worker未初始化"}
     data = app_state.worker.get_device(controller)
     return {"status": "success", "data": data}
 
 
 @app.post("/api/device")
 async def connect_device(device: DeviceModel):
+    if app_state.worker is None:
+        msg = "Worker未初始化"
+        app_state.send_log(msg)
+        return {"status": "failed", "message": msg}
     if await asyncio.to_thread(app_state.worker.connect_device, device):
         return {"status": "success"}
     app_state.send_log("设备连接失败")
@@ -190,6 +222,10 @@ def get_resource():
 @app.post("/api/resource")
 async def set_resource(name: str):
     # 设置资源
+    if app_state.worker is None:
+        msg = "Worker未初始化"
+        app_state.send_log(msg)
+        return {"status": "failed", "message": msg}
     try:
         await asyncio.to_thread(app_state.worker.set_resource, name)
     except Exception as e:
@@ -210,6 +246,7 @@ def get_settings():
 def set_settings(settings: SettingsModel):
     with open("config/settings.json", "w", encoding="utf-8") as f:
         json.dump(settings.model_dump(), f, indent=4, ensure_ascii=False)
+    app_state.settings = settings
     return {"status": "success"}
 
 
@@ -280,18 +317,19 @@ MIRRORCHYAN_API_BASES = [
 
 def _check_mirrorchyan_update(rid: str, current_version: str, cdk: str):
     """通过 Mirror酱 API 检查更新"""
+    settings = app_state.settings or SettingsModel()
     plat, arch = _get_platform_info()
     params = {
         "current_version": current_version,
         "user_agent": "MWU",
         "os": plat,
         "arch": arch,
-        "channel": app_state.settings.update.updateChannel,
+        "channel": settings.update.updateChannel,
     }
     if cdk:
         params["cdk"] = cdk
 
-    proxy = app_state.settings.update.proxy or None
+    proxy = settings.update.proxy or None
 
     for api_base in MIRRORCHYAN_API_BASES:
         try:
@@ -312,8 +350,13 @@ def _check_mirrorchyan_update(rid: str, current_version: str, cdk: str):
 
 def _check_github_update():
     """通过 GitHub Releases API 检查更新"""
-    repo_name = interface.github.split("/")[3] + "/" + interface.github.split("/")[4]
-    proxy = app_state.settings.update.proxy or None
+    settings = app_state.settings or SettingsModel()
+    github_url = interface.github or ""
+    repo_parts = github_url.split("/")
+    if len(repo_parts) < 5:
+        return None
+    repo_name = repo_parts[3] + "/" + repo_parts[4]
+    proxy = settings.update.proxy or None
     response = httpx.get(
         f"https://api.github.com/repos/{repo_name}/releases/latest",
         proxy=proxy,
@@ -418,7 +461,8 @@ def check_update():
 
 
 async def download_file(url: str, dest: str, use_proxy: bool = True):
-    proxy = app_state.settings.update.proxy if use_proxy else None
+    settings = app_state.settings or SettingsModel()
+    proxy = settings.update.proxy if use_proxy else None
     async with httpx.AsyncClient(follow_redirects=True, proxy=proxy) as client:
         async with client.stream("GET", url) as resp:
             resp.raise_for_status()
@@ -430,6 +474,11 @@ async def download_file(url: str, dest: str, use_proxy: bool = True):
 @app.get("/api/update")
 async def perform_update():
     try:
+        if app_state.update_info is None:
+            msg = "暂无可用更新信息"
+            app_state.send_log(msg)
+            return {"status": "failed", "message": msg}
+
         update_package_path = app_state.update_info["file_name"]
         download_url = app_state.update_info["download_url"]
         download_source = app_state.update_info.get("download_source", "github")
@@ -551,7 +600,11 @@ def test_notification():
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
     try:
-        app_state.worker.send_notification("测试通知", "这是一条测试通知。")
+        app_state.worker.send_notification(
+            "测试通知",
+            "这是一条测试通知。",
+            event="notification.test",
+        )
         return {"status": "success"}
     except Exception as e:
         msg = str(e)
@@ -561,7 +614,11 @@ def test_notification():
 
 @app.post("/api/start")
 def start(task_execution: TaskExecutionPayload):
-    if app_state.worker and app_state.worker.running:
+    if app_state.worker is None:
+        msg = "Worker未初始化"
+        app_state.send_log(msg)
+        return {"status": "failed", "message": msg}
+    if app_state.worker.running:
         msg = "任务已开始"
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
@@ -585,6 +642,15 @@ def stop():
 
 @app.get("/api/logs")
 async def stream_logs(request: Request):
+    if app_state.broadcaster is None:
+
+        async def empty_generator():
+            while not await request.is_disconnected():
+                yield ": keep-alive\n\n"
+                await asyncio.sleep(15)
+
+        return StreamingResponse(empty_generator(), media_type="text/event-stream")
+
     q = app_state.broadcaster.add_client(app_state.history_message)
 
     async def event_generator():
@@ -594,13 +660,14 @@ async def stream_logs(request: Request):
                     break
                 try:
                     data = await asyncio.wait_for(q.get(), timeout=1.0)
-                    yield f"data: {json.dumps({'type': 'log', 'message': data}, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps(data.model_dump(), ensure_ascii=False)}\n\n"
                 except asyncio.TimeoutError:
                     continue
         except asyncio.CancelledError:
             pass
         finally:
-            app_state.broadcaster.remove_client(q)
+            if app_state.broadcaster is not None:
+                app_state.broadcaster.remove_client(q)
 
     return StreamingResponse(
         event_generator(),
@@ -609,6 +676,7 @@ async def stream_logs(request: Request):
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "Access-Control-Allow-Origin": "*",
+            "X-Accel-Buffering": "no",
         },
     )
 
