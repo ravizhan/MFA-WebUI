@@ -135,8 +135,12 @@ async def lifespan(app: FastAPI):
     webbrowser.open_new("http://127.0.0.1:55666")
     yield
     monitor_task.cancel()
-    if app_state.worker and app_state.worker.agent_process:
-        app_state.worker.agent_process.terminate()
+    if app_state.worker:
+        if app_state.worker.agent_processes:
+            for process in app_state.worker.agent_processes:
+                process.terminate()
+        elif app_state.worker.agent_process:
+            app_state.worker.agent_process.terminate()
     # 关闭调度器
     if app_state.scheduler_manager:
         await app_state.scheduler_manager.shutdown()

@@ -49,6 +49,7 @@ class MaaWorker:
         self._current_task_name: str | None = None
         self.send_log("MAA初始化成功")
         self.agent_process: subprocess.Popen | None = None
+        self.agent_processes: list[subprocess.Popen] = []
         self.load_agent()
         self.send_log("Agent加载完成")
         self.http_client = httpx.Client(timeout=30)
@@ -64,6 +65,13 @@ class MaaWorker:
     def _publish_event(self, event: RealtimeEvent):
         self.message_conn.put(event)
         time.sleep(0.05)
+
+    def _get_agent_configs(self):
+        if self.interface.agent is None:
+            return []
+        if isinstance(self.interface.agent, list):
+            return self.interface.agent
+        return [self.interface.agent]
 
     def _show_system_notification(self, title: str, message: str):
         notifier = plyer.notification
@@ -472,15 +480,18 @@ class MaaWorker:
         return None
 
     def set_option(self, option_name: str, case: str):
-        if option_name.split("_")[0] in self.interface.option:
-            option = self.interface.option[option_name.split("_")[0]]
+        option_map = self.interface.option or {}
+        option_key = option_name.split("_")[0]
+        if option_key in option_map:
+            option = option_map[option_key]
             if option.type in ["select", "switch"] and option.cases:
                 for i in option.cases:
                     if i.name == case:
-                        resource.override_pipeline(i.pipeline_override)
+                        if i.pipeline_override:
+                            resource.override_pipeline(i.pipeline_override)
                         # self.send_log(f"选项 {option_name} 设置为: {case_name}")
                         return
-            elif option.type == "input" and option.pipeline_override:
+            elif option.type == "input" and option.pipeline_override and option.inputs:
                 temp = json.dumps(option.pipeline_override, ensure_ascii=False)
                 input_name = option_name.split("_")[1]
                 for field in option.inputs:
@@ -500,7 +511,7 @@ class MaaWorker:
                 resource.override_pipeline(json.loads(temp))
                 return
 
-    def black_magic(self):
+    def black_magic(self, agent_config):
         """
         将Agent转换为custom的黑魔法
         动态加载并注册自定义 Action 和 Recognition
@@ -508,7 +519,7 @@ class MaaWorker:
         agent_index_path = next(
             (
                 Path(arg.replace("{PROJECT_DIR}", "./")).resolve().parent
-                for arg in self.interface.agent.child_args
+                for arg in (agent_config.child_args or [])
                 if arg.endswith(".py")
             ),
             None,
@@ -668,31 +679,30 @@ class MaaWorker:
                 sys.meta_path.remove(loader)
 
     def load_agent(self):
-        if self.interface.agent is None:
+        agent_configs = self._get_agent_configs()
+        if not agent_configs:
             return
-        if "python" in self.interface.agent.child_exec:
-            assert getattr(self.interface.agent, "child_args", None), (
-                "Agent解析错误，缺少child_args"
-            )
-            try:
-                self.black_magic()
-            except Exception as e:
-                self.send_log("黑魔法爆炸了！")
-                self.send_log(f"自定义Agent加载失败: {e}")
-                traceback.print_exc()
-        else:
-            if self.interface.agent.child_args:
-                command = [
-                    self.interface.agent.child_exec
-                ] + self.interface.agent.child_args
+        for agent_config in agent_configs:
+            if "python" in agent_config.child_exec:
+                assert agent_config.child_args, "Agent解析错误，缺少child_args"
+                try:
+                    self.black_magic(agent_config)
+                except Exception as e:
+                    self.send_log("黑魔法爆炸了！")
+                    self.send_log(f"自定义Agent加载失败: {e}")
+                    traceback.print_exc()
             else:
-                command = [self.interface.agent.child_exec]
-            try:
-                self.agent_process = subprocess.Popen(command)
-            except Exception as e:
-                self.agent_process = None
-                self.send_log(f"Agent进程启动失败: {e}")
-                traceback.print_exc()
+                if agent_config.child_args:
+                    command = [agent_config.child_exec] + agent_config.child_args
+                else:
+                    command = [agent_config.child_exec]
+                try:
+                    self.agent_process = subprocess.Popen(command)
+                    self.agent_processes.append(self.agent_process)
+                except Exception as e:
+                    self.agent_process = None
+                    self.send_log(f"Agent进程启动失败: {e}")
+                    traceback.print_exc()
 
     def start_task(
         self, task_list, options: dict[str, str], task_name: str | None = None

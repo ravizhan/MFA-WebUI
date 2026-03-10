@@ -1,13 +1,20 @@
 import re
 
+from typing import Any, Dict, List, Literal, Optional, Union
+
 from pydantic import (
     BaseModel,
-    model_validator,
     ConfigDict,
-    field_validator,
+    Field,
     ValidationInfo,
+    field_validator,
+    model_validator,
 )
-from typing import List, Optional, Dict, Literal, Union, Any
+
+
+DocumentContent = Union[str, List[str]]
+PipelineOverride = Dict[str, Any]
+PresetOptionValue = Union[str, List[str], Dict[str, str]]
 
 
 def validate_regex(v: Any, info: ValidationInfo) -> Any:
@@ -34,7 +41,6 @@ class Win32Controller(BaseModel):
             "SendMessage",
             "PostMessage",
             "LegacyEvent",
-            "PostThreadMessage",
             "SendMessageWithCursorPos",
             "PostMessageWithCursorPos",
             "SendMessageWithWindowPos",
@@ -47,7 +53,6 @@ class Win32Controller(BaseModel):
             "SendMessage",
             "PostMessage",
             "LegacyEvent",
-            "PostThreadMessage",
             "SendMessageWithCursorPos",
             "PostMessageWithCursorPos",
             "SendMessageWithWindowPos",
@@ -62,6 +67,8 @@ class Win32Controller(BaseModel):
             "DXGI_DesktopDup_Window",
             "PrintWindow",
             "ScreenDC",
+            "Foreground",
+            "Background",
         ]
     ] = None
 
@@ -80,13 +87,14 @@ class Win32Controller(BaseModel):
                 "DXGI_DesktopDup_Window": 8,
                 "PrintWindow": 16,
                 "ScreenDC": 32,
+                "Foreground": 64,
+                "Background": 128,
             },
             "keyboard": {
                 "Seize": 1,
                 "SendMessage": 2,
                 "PostMessage": 4,
                 "LegacyEvent": 8,
-                "PostThreadMessage": 16,
                 "SendMessageWithCursorPos": 32,
                 "PostMessageWithCursorPos": 64,
                 "SendMessageWithWindowPos": 128,
@@ -97,7 +105,6 @@ class Win32Controller(BaseModel):
                 "SendMessage": 2,
                 "PostMessage": 4,
                 "LegacyEvent": 8,
-                "PostThreadMessage": 16,
                 "SendMessageWithCursorPos": 32,
                 "PostMessageWithCursorPos": 64,
                 "SendMessageWithWindowPos": 128,
@@ -177,6 +184,8 @@ class Controller(BaseModel):
     display_long_side: Optional[int] = None
     display_raw: Optional[bool] = False
     permission_required: Optional[bool] = False
+    attach_resource_path: Optional[List[str]] = None
+    option: Optional[List[str]] = None
     adb: Optional[AdbController] = None
     win32: Optional[Win32Controller] = None
     playcover: Optional[PlayCoverController] = None
@@ -221,11 +230,12 @@ class Task(BaseModel):
     entry: str
     default_check: Optional[bool] = False
     description: Optional[str] = None
-    doc: Optional[Union[str, List[str]]] = None
+    doc: Optional[DocumentContent] = None
+    desc: Optional[DocumentContent] = None
     icon: Optional[str] = None
     resource: Optional[List[str]] = None
     controller: Optional[List[str]] = None
-    pipeline_override: Optional[Dict[str, dict]] = None
+    pipeline_override: Optional[PipelineOverride] = None
     option: Optional[List[str]] = None
 
 
@@ -235,7 +245,7 @@ class OptionCase(BaseModel):
     description: Optional[str] = None
     icon: Optional[str] = None
     option: Optional[List[str]] = None
-    pipeline_override: Optional[Dict[str, dict]] = None
+    pipeline_override: Optional[PipelineOverride] = None
 
 
 class InputCase(BaseModel):
@@ -249,14 +259,16 @@ class InputCase(BaseModel):
 
 
 class Option(BaseModel):
-    type: Literal["select", "input", "switch"] = "select"
+    type: Literal["select", "input", "checkbox", "switch"] = "select"
     label: Optional[str] = None
     description: Optional[str] = None
     icon: Optional[str] = None
+    controller: Optional[List[str]] = None
+    resource: Optional[List[str]] = None
     cases: Optional[List[OptionCase]] = None
     inputs: Optional[List[InputCase]] = None
-    pipeline_override: Optional[Dict[str, dict]] = None
-    default_case: Optional[str] = None
+    pipeline_override: Optional[PipelineOverride] = None
+    default_case: Optional[Union[str, List[str]]] = None
 
     @model_validator(mode="after")
     def check_type_fields(self):
@@ -268,13 +280,43 @@ class Option(BaseModel):
                 raise ValueError("当 type 为 switch 时，cases 不能为空")
             if len(self.cases) != 2:
                 raise ValueError("当 type 为 switch 时，cases 必须有且仅有 2 个元素")
+        if self.type == "checkbox":
+            if not self.cases:
+                raise ValueError("当 type 为 checkbox 时，cases 不能为空")
+            if self.default_case is not None and not isinstance(
+                self.default_case, list
+            ):
+                raise ValueError(
+                    "当 type 为 checkbox 时，default_case 必须为字符串数组"
+                )
         if self.type == "input":
             if not self.inputs:
                 raise ValueError("当 type 为 input 时，inputs 不能为空")
+        if self.type in {"select", "switch"}:
+            if self.default_case is not None and not isinstance(self.default_case, str):
+                raise ValueError(
+                    "当 type 为 select 或 switch 时，default_case 必须为字符串"
+                )
         return self
 
 
+class PresetTask(BaseModel):
+    name: str
+    enabled: Optional[bool] = True
+    option: Optional[Dict[str, PresetOptionValue]] = None
+
+
+class Preset(BaseModel):
+    name: str
+    label: Optional[str] = None
+    description: Optional[str] = None
+    icon: Optional[str] = None
+    task: Optional[List[PresetTask]] = None
+
+
 class InterfaceModel(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
     interface_version: Literal[2]
     languages: Optional[Dict[str, str]] = None
     name: str
@@ -291,9 +333,12 @@ class InterfaceModel(BaseModel):
     description: Optional[str] = None
     controller: List[Controller]
     resource: List[Resource]
-    agent: Optional[Agent] = None
-    task: List[Task]
+    agent: Optional[Union[Agent, List[Agent]]] = None
+    task: Optional[List[Task]] = None
     option: Optional[Dict[str, Option]] = None
+    global_option: Optional[List[str]] = None
+    import_: Optional[List[str]] = Field(None, alias="import")
+    preset: Optional[List[Preset]] = None
 
     @model_validator(mode="after")
     def set_variable_if_none(self):

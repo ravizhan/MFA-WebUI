@@ -1,13 +1,28 @@
+export type DocumentationContent = string | string[]
+
+export type PipelineOverride = Record<string, unknown>
+
 export type Win32MouseKeyboard =
   | "Seize"
   | "SendMessage"
   | "PostMessage"
   | "LegacyEvent"
-  | "PostThreadMessage"
   | "SendMessageWithCursorPos"
   | "PostMessageWithCursorPos"
+  | "SendMessageWithWindowPos"
+  | "PostMessageWithWindowPos"
 
 export type Win32Screencap =
+  | "GDI"
+  | "FramePool"
+  | "DXGI_DesktopDup"
+  | "DXGI_DesktopDup_Window"
+  | "PrintWindow"
+  | "ScreenDC"
+  | "Foreground"
+  | "Background"
+
+export type GamepadScreencap =
   | "GDI"
   | "FramePool"
   | "DXGI_DesktopDup"
@@ -33,7 +48,7 @@ export interface GamepadController {
   class_regex?: string
   window_regex?: string
   gamepad_type?: GamepadType
-  screencap?: Win32Screencap
+  screencap?: GamepadScreencap
 }
 
 export type ControllerType = "Adb" | "Win32" | "PlayCover" | "Gamepad"
@@ -44,7 +59,7 @@ export interface Controller {
   description?: string
   icon?: string
   type: ControllerType
-  adb?: Record<string, any>
+  adb?: Record<string, unknown>
   win32?: Win32Controller
   playcover?: PlayCoverController
   gamepad?: GamepadController
@@ -52,6 +67,8 @@ export interface Controller {
   display_long_side?: number
   display_raw?: boolean
   permission_required?: boolean
+  attach_resource_path?: string[]
+  option?: string[]
 }
 
 export interface Resource {
@@ -76,11 +93,12 @@ export interface Task {
   entry: string
   default_check?: boolean
   description?: string
-  doc?: string | string[]
+  doc?: DocumentationContent
+  desc?: DocumentationContent
   icon?: string
   resource?: string[]
   controller?: string[]
-  pipeline_override?: Record<string, object>
+  pipeline_override?: PipelineOverride
   option?: string[]
 }
 
@@ -90,7 +108,7 @@ export interface OptionCase {
   description?: string
   icon?: string
   option?: string[]
-  pipeline_override?: Record<string, object>
+  pipeline_override?: PipelineOverride
 }
 
 export type InputPipelineType = "string" | "int" | "bool"
@@ -109,7 +127,9 @@ interface OptionBase {
   label?: string
   description?: string
   icon?: string
-  pipeline_override?: Record<string, object>
+  controller?: string[]
+  resource?: string[]
+  pipeline_override?: PipelineOverride
 }
 
 export interface SelectOption extends OptionBase {
@@ -123,13 +143,35 @@ export interface InputOption extends OptionBase {
   inputs: InputCase[]
 }
 
+export interface CheckboxOption extends OptionBase {
+  type: "checkbox"
+  cases: OptionCase[]
+  default_case?: string[]
+}
+
 export interface SwitchOption extends OptionBase {
   type: "switch"
   cases: [OptionCase, OptionCase]
   default_case?: string
 }
 
-export type Option = SelectOption | InputOption | SwitchOption
+export type Option = SelectOption | InputOption | CheckboxOption | SwitchOption
+
+export type PresetTaskOptionValue = string | string[] | Record<string, string>
+
+export interface PresetTask {
+  name: string
+  enabled?: boolean
+  option?: Record<string, PresetTaskOptionValue>
+}
+
+export interface Preset {
+  name: string
+  label?: string
+  description?: string
+  icon?: string
+  task?: PresetTask[]
+}
 
 export interface InterfaceModel {
   interface_version: 2
@@ -148,7 +190,10 @@ export interface InterfaceModel {
   description?: string
   controller: Controller[]
   resource: Resource[]
-  agent?: Agent
-  task: Task[]
+  agent?: Agent | Agent[]
+  task?: Task[]
   option?: Record<string, Option>
+  global_option?: string[]
+  import?: string[]
+  preset?: Preset[]
 }
