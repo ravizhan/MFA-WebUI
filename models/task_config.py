@@ -1,6 +1,8 @@
 from pydantic import BaseModel, Field
 from typing import List, Dict, Optional
 
+from models.scheduler import TaskOptionValue
+
 
 class TaskConfigModel(BaseModel):
     taskOrder: List[str] = Field(
@@ -9,6 +11,6 @@ class TaskConfigModel(BaseModel):
     taskChecked: Optional[Dict[str, bool]] = Field(
         default=None, description="任务选中状态映射，key为任务ID，value为是否选中"
     )
-    taskOptions: Dict[str, str] = Field(
+    taskOptions: Dict[str, TaskOptionValue] = Field(
         default_factory=dict, description="任务选项配置，key为选项名，value为选项值"
     )

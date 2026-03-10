@@ -28,13 +28,14 @@
 <script setup lang="ts">
 import { computed } from "vue"
 import { useInterfaceStore } from "../stores/interface"
+import type { TaskOptionValue } from "../types/scheduler"
 import OptionItem from "./OptionItem.vue"
 
 interface Props {
   /** 当前配置的任务ID */
   currentTaskId: string | null
   /** 选项数据 */
-  options: Record<string, string>
+  options: Record<string, TaskOptionValue>
   /** 是否显示头部 */
   showHeader?: boolean
   /** 头部标签前缀 */

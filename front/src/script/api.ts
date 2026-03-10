@@ -3,6 +3,7 @@ import type {
   ScheduledTaskCreate,
   ScheduledTaskUpdate,
   SchedulerApiResponse,
+  TaskOptionValue,
   TaskExecutionPayload,
 } from "../types/scheduler"
 import { showGlobalMessage } from "./message"
@@ -271,7 +272,7 @@ export function checkUpdate(): Promise<{
 export interface TaskConfig {
   taskOrder?: string[]
   taskChecked?: Record<string, boolean>
-  taskOptions?: Record<string, string>
+  taskOptions?: Record<string, TaskOptionValue>
 }
 
 interface TaskConfigResponse {

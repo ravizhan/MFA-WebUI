@@ -17,6 +17,7 @@ from models.scheduler import (
     ScheduledTaskCreate,
     ScheduledTaskUpdate,
     TaskExecution,
+    TaskOptionValue,
     TriggerConfig,
     CronTriggerConfig,
     DateTriggerConfig,
@@ -33,7 +34,7 @@ async def execute_scheduled_task(
     task_name: str,
     task_description: str,
     task_list: List[str],
-    task_options: Dict[str, str],
+    task_options: Dict[str, TaskOptionValue],
 ):
     """APScheduler 可持久化执行入口"""
     if _ACTIVE_MANAGER is None:
@@ -153,7 +154,7 @@ class SchedulerManager:
         task_name: str,
         _task_description: str,
         task_list: List[str],
-        task_options: Dict[str, str],
+        task_options: Dict[str, TaskOptionValue],
     ):
         """执行定时任务"""
         logger.info(f"开始执行定时任务: {task_id}")

@@ -40,6 +40,16 @@
               </div>
             </div>
           </template>
+          <!-- checkbox -->
+          <template v-else-if="option.type === 'checkbox'">
+            <n-checkbox-group v-model:value="checkboxValue">
+              <n-space item-style="display: flex;" align="center">
+                <div v-for="checkbox in option.cases" :key="checkbox.name">
+                  <n-checkbox :value="checkbox.name" :label="checkbox.label || checkbox.name" />
+                </div>
+              </n-space>
+            </n-checkbox-group>
+          </template>
         </div>
       </div>
     </n-list-item>
@@ -63,11 +73,12 @@ import { useInterfaceStore } from "../stores/interface"
 import { useTaskConfigStore } from "../stores/taskConfig"
 import { storeToRefs } from "pinia"
 import { useMessage } from "naive-ui"
+import type { TaskOptionValue } from "../types/scheduler"
 
 const props = defineProps<{
   name: string
   level?: number
-  options?: Record<string, any>
+  options?: Record<string, TaskOptionValue>
 }>()
 
 const message = useMessage()
@@ -77,6 +88,51 @@ const options = props.options ? computed(() => props.options!) : storeToRefs(con
 
 const option = computed(() => interfaceStore.interface?.option?.[props.name])
 const label = computed(() => option.value?.label)
+
+function normalizeCheckboxValue(value: TaskOptionValue | undefined, caseOrder: string[]): string[] {
+  let selectedValues: string[] = []
+
+  if (Array.isArray(value)) {
+    selectedValues = value.filter((item): item is string => typeof item === "string")
+  } else if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value)
+      if (Array.isArray(parsed)) {
+        selectedValues = parsed.filter((item): item is string => typeof item === "string")
+      }
+    } catch {
+      selectedValues = []
+    }
+  }
+
+  const selectedSet = new Set(selectedValues)
+  return caseOrder.filter((name) => selectedSet.has(name))
+}
+
+const checkboxValue = computed<string[]>({
+  get() {
+    const opt = option.value
+    if (!opt || opt.type !== "checkbox") {
+      return []
+    }
+
+    return normalizeCheckboxValue(
+      options.value[props.name],
+      opt.cases.map((item) => item.name),
+    )
+  },
+  set(value) {
+    const opt = option.value
+    if (!opt || opt.type !== "checkbox") {
+      return
+    }
+
+    options.value[props.name] = normalizeCheckboxValue(
+      value,
+      opt.cases.map((item) => item.name),
+    )
+  },
+})
 
 const selectOptions = computed(() => {
   const opt = option.value
@@ -102,6 +158,33 @@ const nestedOptions = computed(() => {
   if (opt.type === "select") {
     const activeCase = opt.cases.find((c) => c.name === currentVal)
     return activeCase?.option || []
+  }
+
+  if (opt.type === "checkbox") {
+    const activeNames = new Set(
+      normalizeCheckboxValue(
+        options.value[props.name],
+        opt.cases.map((item) => item.name),
+      ),
+    )
+    const childNames: string[] = []
+    const seen = new Set<string>()
+
+    for (const caseItem of opt.cases) {
+      if (!activeNames.has(caseItem.name)) {
+        continue
+      }
+
+      for (const childName of caseItem.option || []) {
+        if (seen.has(childName)) {
+          continue
+        }
+        seen.add(childName)
+        childNames.push(childName)
+      }
+    }
+
+    return childNames
   }
 
   return []

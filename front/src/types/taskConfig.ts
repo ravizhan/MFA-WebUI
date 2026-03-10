@@ -4,7 +4,9 @@
  * 用于统一主面板用户配置和计划任务的任务选择与配置逻辑。
  */
 
+import type { ComputedRef } from "vue"
 import type { TaskListItem } from "../stores/interface"
+import type { TaskOptionValue } from "./scheduler"
 
 /**
  * 任务配置基础模型
@@ -19,7 +21,7 @@ export interface TaskConfig {
   /** 任务选中状态映射，key为任务ID，value为是否选中 */
   taskChecked?: Record<string, boolean>
   /** 任务选项配置，key为选项名，value为选项值 */
-  taskOptions: Record<string, string>
+  taskOptions: Record<string, TaskOptionValue>
 }
 
 /**
@@ -35,7 +37,7 @@ export interface TaskConfigState {
   /** 当前正在配置的任务ID */
   currentConfigTaskId: string | null
   /** 任务选项配置 */
-  taskOptions: Record<string, string>
+  taskOptions: Record<string, TaskOptionValue>
 }
 
 /**
@@ -47,9 +49,9 @@ export interface TaskConfigActions {
   /** 设置当前配置任务 */
   setCurrentConfigTask: (taskId: string | null) => void
   /** 更新任务选项 */
-  updateTaskOption: (key: string, value: string) => void
+  updateTaskOption: (key: string, value: TaskOptionValue) => void
   /** 批量更新任务选项 */
-  updateTaskOptions: (options: Record<string, string>) => void
+  updateTaskOptions: (options: Record<string, TaskOptionValue>) => void
   /** 获取选中的任务列表 */
   getSelectedTasks: () => string[]
   /** 获取任务配置 */
@@ -69,7 +71,7 @@ export interface UseTaskConfigReturn {
   /** 操作方法 */
   actions: TaskConfigActions
   /** 当前配置任务的选项列表 */
-  currentTaskOptions: string[]
+  currentTaskOptions: ComputedRef<string[]>
   /** 当前配置任务的名称 */
-  currentTaskName: string
+  currentTaskName: ComputedRef<string>
 }

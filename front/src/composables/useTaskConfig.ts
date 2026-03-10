@@ -1,6 +1,7 @@
 import { computed, reactive } from "vue"
 import { useInterfaceStore } from "../stores/interface"
 import type { Option } from "../types/interface"
+import type { TaskOptionValue } from "../types/scheduler"
 import type {
   TaskConfig,
   TaskConfigState,
@@ -8,11 +9,18 @@ import type {
   UseTaskConfigReturn,
 } from "../types/taskConfig"
 
+function buildOrderedCheckboxValue(option: Extract<Option, { type: "checkbox" }>): string[] {
+  const selectedSet = new Set(option.default_case || [])
+  return option.cases.filter((item) => selectedSet.has(item.name)).map((item) => item.name)
+}
+
 /**
  * 根据选项定义生成默认值
  */
-function buildDefaultsFromOptionMap(optionMap: Record<string, Option>): Record<string, string> {
-  const options: Record<string, string> = {}
+function buildDefaultsFromOptionMap(
+  optionMap: Record<string, Option>,
+): Record<string, TaskOptionValue> {
+  const options: Record<string, TaskOptionValue> = {}
   for (const key in optionMap) {
     const option = optionMap[key]!
     if (option.type === "select") {
@@ -23,6 +31,8 @@ function buildDefaultsFromOptionMap(optionMap: Record<string, Option>): Record<s
       }
     } else if (option.type === "switch") {
       options[key] = option.default_case || option.cases[0]?.name || ""
+    } else if (option.type === "checkbox") {
+      options[key] = buildOrderedCheckboxValue(option)
     }
   }
   return options
@@ -87,8 +97,8 @@ export function useTaskConfig(
    */
   function buildOptionsForTasks(
     taskIds: string[],
-    overrides: Record<string, string> = {},
-  ): Record<string, string> {
+    overrides: Record<string, TaskOptionValue> = {},
+  ): Record<string, TaskOptionValue> {
     const mergedOptionMap: Record<string, Option> = {}
 
     // 收集所有选中任务的选项
@@ -127,11 +137,11 @@ export function useTaskConfig(
       state.currentConfigTaskId = taskId
     },
 
-    updateTaskOption(key: string, value: string) {
+    updateTaskOption(key: string, value: TaskOptionValue) {
       state.taskOptions[key] = value
     },
 
-    updateTaskOptions(options: Record<string, string>) {
+    updateTaskOptions(options: Record<string, TaskOptionValue>) {
       Object.assign(state.taskOptions, options)
     },
 

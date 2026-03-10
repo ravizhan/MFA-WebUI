@@ -2,11 +2,18 @@ import { defineStore } from "pinia"
 import { getTaskConfig, saveTaskConfig, resetTaskConfig, type TaskConfig } from "../script/api"
 import { type TaskListItem, useInterfaceStore } from "./interface"
 import type { Option } from "../types/interface"
-import type { TaskExecutionPayload } from "../types/scheduler"
+import type { TaskExecutionPayload, TaskOptionValue } from "../types/scheduler"
+
+function buildOrderedCheckboxValue(option: Extract<Option, { type: "checkbox" }>): string[] {
+  const selectedSet = new Set(option.default_case || [])
+  return option.cases.filter((item) => selectedSet.has(item.name)).map((item) => item.name)
+}
 
 // 根据选项定义生成默认值
-function buildDefaultsFromOptionMap(optionMap: Record<string, Option>): Record<string, string> {
-  const options: Record<string, string> = {}
+function buildDefaultsFromOptionMap(
+  optionMap: Record<string, Option>,
+): Record<string, TaskOptionValue> {
+  const options: Record<string, TaskOptionValue> = {}
   for (const key in optionMap) {
     const option = optionMap[key]!
     if (option.type === "select") {
@@ -17,6 +24,8 @@ function buildDefaultsFromOptionMap(optionMap: Record<string, Option>): Record<s
       }
     } else if (option.type === "switch") {
       options[key] = option.default_case || option.cases[0]?.name || ""
+    } else if (option.type === "checkbox") {
+      options[key] = buildOrderedCheckboxValue(option)
     }
   }
   return options
@@ -25,7 +34,7 @@ function buildDefaultsFromOptionMap(optionMap: Record<string, Option>): Record<s
 export const useTaskConfigStore = defineStore("taskConfig", {
   state: () => {
     return {
-      options: {} as Record<string, string>,
+      options: {} as Record<string, TaskOptionValue>,
       taskList: [] as TaskListItem[],
       configLoaded: false,
       saveTimer: null as ReturnType<typeof setTimeout> | null,
@@ -48,8 +57,8 @@ export const useTaskConfigStore = defineStore("taskConfig", {
     // 根据任务ID列表获取所需的选项（带默认值和用户覆盖）
     buildOptionsForTasks(
       taskIds: string[],
-      overrides: Record<string, string> = {},
-    ): Record<string, string> {
+      overrides: Record<string, TaskOptionValue> = {},
+    ): Record<string, TaskOptionValue> {
       const interfaceStore = useInterfaceStore()
       const normalizedTaskIds = this.normalizeTaskIds(taskIds)
       const mergedOptionMap: Record<string, Option> = {}
@@ -64,7 +73,7 @@ export const useTaskConfigStore = defineStore("taskConfig", {
       const defaults = buildDefaultsFromOptionMap(mergedOptionMap)
 
       // 只过滤出相关的用户配置
-      const relevantOptions: Record<string, string> = {}
+      const relevantOptions: Record<string, TaskOptionValue> = {}
       for (const key of Object.keys(defaults)) {
         if (this.options[key] !== undefined) {
           relevantOptions[key] = this.options[key]
@@ -82,7 +91,7 @@ export const useTaskConfigStore = defineStore("taskConfig", {
 
     buildExecutionPayload(
       taskIds: string[],
-      overrides: Record<string, string> = {},
+      overrides: Record<string, TaskOptionValue> = {},
     ): TaskExecutionPayload {
       const task_list = this.normalizeTaskIds(taskIds)
       return {

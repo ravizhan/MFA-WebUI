@@ -3,6 +3,9 @@ from typing import List, Dict, Optional, Literal
 from datetime import datetime
 
 
+TaskOptionValue = str | List[str]
+
+
 class CronTriggerConfig(BaseModel):
     """Cron 触发器配置"""
 
@@ -37,7 +40,9 @@ class TaskExecutionPayload(BaseModel):
     """任务执行载荷"""
 
     task_list: List[str] = Field(default_factory=list, description="要执行的任务列表")
-    task_options: Dict[str, str] = Field(default_factory=dict, description="任务选项")
+    task_options: Dict[str, TaskOptionValue] = Field(
+        default_factory=dict, description="任务选项"
+    )
 
 
 class ScheduledTask(TaskExecutionPayload):
@@ -75,7 +80,7 @@ class ScheduledTaskUpdate(BaseModel):
     trigger_type: Optional[Literal["cron", "date", "interval"]] = None
     trigger_config: Optional[TriggerConfig] = None
     task_list: Optional[List[str]] = None
-    task_options: Optional[Dict[str, str]] = None
+    task_options: Optional[Dict[str, TaskOptionValue]] = None
 
 
 class TaskExecution(BaseModel):

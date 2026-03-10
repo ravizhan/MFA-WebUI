@@ -25,9 +25,11 @@ export interface IntervalTriggerConfig {
 
 export type TriggerConfig = CronTriggerConfig | DateTriggerConfig | IntervalTriggerConfig
 
+export type TaskOptionValue = string | string[]
+
 export interface TaskExecutionPayload {
   task_list: string[]
-  task_options: Record<string, string>
+  task_options: Record<string, TaskOptionValue>
 }
 
 export interface ScheduledTask extends TaskExecutionPayload {
@@ -57,7 +59,7 @@ export interface ScheduledTaskUpdate {
   trigger_type?: TriggerType
   trigger_config?: TriggerConfig
   task_list?: string[]
-  task_options?: Record<string, string>
+  task_options?: Record<string, TaskOptionValue>
 }
 
 export interface TaskExecution {
