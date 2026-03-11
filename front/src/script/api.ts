@@ -52,9 +52,16 @@ export interface PlayCoverDevice {
 
 export type ConnectableDevice = AdbDevice | Win32Device | GamepadDevice | PlayCoverDevice
 
+export interface ConnectDevicePayload {
+  controller_name: string
+  device: ConnectableDevice
+}
+
 export interface DeviceControllerCapability {
+  name: string
   type: DeviceControllerType
   label: string
+  display_label: string
   enabled: boolean
   reason: string
   search_mode: "select" | "input"
@@ -63,7 +70,7 @@ export interface DeviceControllerCapability {
 
 export interface DeviceSearchData {
   controllers: DeviceControllerCapability[]
-  selected_type: DeviceControllerType | null
+  selected_controller: string | null
   devices: ConnectableDevice[]
 }
 
@@ -110,17 +117,20 @@ export function stopTask(): void {
     })
 }
 
-export function getDevices(controller?: DeviceControllerType): Promise<DeviceSearchData> {
-  const query = controller ? `?controller=${encodeURIComponent(controller)}` : ""
+export function getDevices(controllerName?: string): Promise<DeviceSearchData> {
+  const query = controllerName ? `?controller=${encodeURIComponent(controllerName)}` : ""
   return fetch(`/api/device${query}`, { method: "GET" })
     .then((res) => res.json())
     .then((data: DeviceResponse) => data.data)
 }
 
-export function postDevices(device: ConnectableDevice): Promise<boolean> {
+export function postDevices(payload: ConnectDevicePayload): Promise<boolean> {
   return fetch("/api/device", {
     method: "POST",
-    body: JSON.stringify(device),
+    body: JSON.stringify({
+      ...payload.device,
+      controller_name: payload.controller_name,
+    }),
     headers: {
       "Content-Type": "application/json",
     },
@@ -144,7 +154,13 @@ export function getInterface(): Promise<InterfaceModel> {
 export function getResource(): Promise<string[]> {
   return fetch("/api/resource", { method: "GET" })
     .then((res) => res.json())
-    .then((data: ResourceResponse) => data.resource)
+    .then((data: ResourceResponse & ApiResponse) => {
+      if (data.status !== "success") {
+        showGlobalMessage("error", data.message)
+        return []
+      }
+      return data.resource
+    })
 }
 
 export function postResource(name: string): Promise<boolean> {

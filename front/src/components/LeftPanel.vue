@@ -12,7 +12,7 @@
             class="max-w-35%"
           />
           <n-input
-            v-if="selectedController === 'PlayCover'"
+            v-if="selectedControllerCapability?.type === 'PlayCover'"
             v-model:value="playCoverAddress"
             :placeholder="t('panel.playcoverAddress')"
             class="max-w-45%"
@@ -40,12 +40,18 @@
             :options="resources_list"
             :loading="loading"
             remote
+            :disabled="!isCurrentSelectionConnected"
             @click="getResourceList"
             class="max-w-80%"
           />
-          <n-button strong secondary type="info" @click="post_resource">{{
-            t("panel.confirm")
-          }}</n-button>
+          <n-button
+            strong
+            secondary
+            type="info"
+            :disabled="!isCurrentSelectionConnected"
+            @click="post_resource"
+            >{{ t("panel.confirm") }}</n-button
+          >
         </n-flex>
       </n-tab-pane>
     </n-tabs>
@@ -113,7 +119,7 @@ if (typeof window !== "undefined") {
 }
 
 const scroll_show = ref(window.innerWidth > 768)
-const selectedController = ref<DeviceControllerType | null>(null)
+const selectedController = ref<string | null>(null)
 const selectedDeviceKey = ref<string | null>(null)
 const availableDevices = ref<ConnectableDevice[]>([])
 const controllerCapabilities = ref<DeviceControllerCapability[]>([])
@@ -128,8 +134,8 @@ const selectedTaskIds = computed(() => {
 
 const controllerOptions = computed(() => {
   return controllerCapabilities.value.map((item) => ({
-    label: item.label,
-    value: item.type,
+    label: item.display_label,
+    value: item.display_label,
     disabled: !item.enabled,
   }))
 })
@@ -138,7 +144,10 @@ const selectedControllerCapability = computed(() => {
   if (!selectedController.value) {
     return null
   }
-  return controllerCapabilities.value.find((item) => item.type === selectedController.value) || null
+  return (
+    controllerCapabilities.value.find((item) => item.display_label === selectedController.value) ||
+    null
+  )
 })
 
 const selectedControllerDisabled = computed(() => {
@@ -170,6 +179,36 @@ const selectedDevice = computed(() => {
       (item) => buildDeviceFingerprint(item) === selectedDeviceKey.value,
     ) || null
   )
+})
+
+const currentSelectionFingerprint = computed(() => {
+  if (selectedControllerCapability.value?.type === "PlayCover") {
+    const address = playCoverAddress.value.trim()
+    if (!address) {
+      return ""
+    }
+    return `playcover|${address}|`
+  }
+  return selectedDevice.value ? buildDeviceFingerprint(selectedDevice.value) : ""
+})
+
+const isCurrentSelectionConnected = computed(() => {
+  const savedDevice = settingsStore.settings.panel.lastConnectedDevice
+  const selectedCapability = selectedControllerCapability.value
+
+  if (!indexStore.Connected || !savedDevice || !selectedCapability) {
+    return false
+  }
+
+  if (savedDevice.controller_name) {
+    if (savedDevice.controller_name !== selectedCapability.name) {
+      return false
+    }
+  } else if (savedDevice.type !== selectedCapability.type) {
+    return false
+  }
+
+  return getStoredDeviceFingerprint(savedDevice) === currentSelectionFingerprint.value
 })
 
 function handleTasksUpdate(tasks: TaskListItem[]) {
@@ -244,7 +283,7 @@ function buildDeviceFingerprint(deviceInfo: ConnectableDevice): string {
   if (isGamepadDevice(deviceInfo)) {
     return `gamepad|${deviceInfo.hWnd}|${deviceInfo.gamepad_type}`
   }
-  return `playcover|${deviceInfo.address}|${deviceInfo.uuid}`
+  return `playcover|${deviceInfo.address}|${deviceInfo.uuid || ""}`
 }
 
 function getPlayCoverDefaultAddress(capabilities: DeviceControllerCapability[]): string {
@@ -269,12 +308,13 @@ function getStoredDeviceFingerprint(stored: PanelLastConnectedDevice): string {
   return `playcover|${stored.address}|${stored.uuid}`
 }
 
-async function persistLastConnectedDevice(deviceInfo: ConnectableDevice) {
+async function persistLastConnectedDevice(deviceInfo: ConnectableDevice, controllerName: string) {
   let storedDevice: PanelLastConnectedDevice
 
   if (isAdbDevice(deviceInfo)) {
     storedDevice = {
       type: "Adb",
+      controller_name: controllerName,
       fingerprint: buildDeviceFingerprint(deviceInfo),
       adb_path: deviceInfo.adb_path,
       address: deviceInfo.address,
@@ -287,6 +327,7 @@ async function persistLastConnectedDevice(deviceInfo: ConnectableDevice) {
   } else if (isWin32Device(deviceInfo)) {
     storedDevice = {
       type: "Win32",
+      controller_name: controllerName,
       fingerprint: buildDeviceFingerprint(deviceInfo),
       adb_path: "",
       address: "",
@@ -299,6 +340,7 @@ async function persistLastConnectedDevice(deviceInfo: ConnectableDevice) {
   } else if (isGamepadDevice(deviceInfo)) {
     storedDevice = {
       type: "Gamepad",
+      controller_name: controllerName,
       fingerprint: buildDeviceFingerprint(deviceInfo),
       adb_path: "",
       address: "",
@@ -311,6 +353,7 @@ async function persistLastConnectedDevice(deviceInfo: ConnectableDevice) {
   } else {
     storedDevice = {
       type: "PlayCover",
+      controller_name: controllerName,
       fingerprint: buildDeviceFingerprint(deviceInfo),
       adb_path: "",
       address: deviceInfo.address,
@@ -331,14 +374,19 @@ async function persistLastResource(name: string) {
 
 function restoreLastConnectedDevice() {
   const savedDevice = settingsStore.settings.panel.lastConnectedDevice
-  if (!savedDevice || !selectedController.value) {
+  const selectedCapability = selectedControllerCapability.value
+  if (!savedDevice || !selectedCapability) {
     return
   }
-  if (savedDevice.type !== selectedController.value) {
+  if (savedDevice.controller_name) {
+    if (savedDevice.controller_name !== selectedCapability.name) {
+      return
+    }
+  } else if (savedDevice.type !== selectedCapability.type) {
     return
   }
 
-  if (savedDevice.type === "PlayCover") {
+  if (selectedCapability.type === "PlayCover") {
     playCoverAddress.value =
       savedDevice.address || getPlayCoverDefaultAddress(controllerCapabilities.value)
     return
@@ -357,20 +405,23 @@ function restoreLastConnectedDevice() {
   selectedDeviceKey.value = matchedDevice ? buildDeviceFingerprint(matchedDevice) : null
 }
 
-async function fetchDevices(controller?: DeviceControllerType, restoreStored = false) {
+async function fetchDevices(controllerName?: string, restoreStored = false) {
   loading.value = true
   try {
-    const data = await getDevices(controller)
+    const data = await getDevices(controllerName)
     controllerCapabilities.value = data.controllers
-    selectedController.value = data.selected_type
+    const selectedCapability = data.controllers.find(
+      (item) => item.name === data.selected_controller,
+    )
+    selectedController.value = selectedCapability?.display_label || null
 
-    if (!data.selected_type) {
+    if (!selectedCapability) {
       availableDevices.value = []
       selectedDeviceKey.value = null
       return
     }
 
-    if (data.selected_type === "PlayCover") {
+    if (selectedCapability.type === "PlayCover") {
       availableDevices.value = []
       selectedDeviceKey.value = null
       if (restoreStored) {
@@ -391,23 +442,28 @@ async function fetchDevices(controller?: DeviceControllerType, restoreStored = f
   }
 }
 
-function handleControllerChange(value: DeviceControllerType) {
+function handleControllerChange(value: string) {
   selectedDeviceKey.value = null
-  if (value === "PlayCover" && !playCoverAddress.value) {
+  const capability = controllerCapabilities.value.find((item) => item.display_label === value)
+  if (capability?.type === "PlayCover" && !playCoverAddress.value) {
     playCoverAddress.value = getPlayCoverDefaultAddress(controllerCapabilities.value)
   }
-  void fetchDevices(value)
+  void fetchDevices(capability?.name)
 }
 
 function refreshDevices() {
-  if (!selectedController.value || selectedController.value === "PlayCover") {
+  if (
+    !selectedControllerCapability.value ||
+    selectedControllerCapability.value.type === "PlayCover"
+  ) {
     return
   }
-  void fetchDevices(selectedController.value)
+  void fetchDevices(selectedControllerCapability.value.name)
 }
 
 async function connectDevices() {
-  if (!selectedController.value) {
+  const selectedCapability = selectedControllerCapability.value
+  if (!selectedCapability) {
     message.error(t("panel.selectDeviceType"))
     return
   }
@@ -418,7 +474,7 @@ async function connectDevices() {
   }
 
   let currentDevice: ConnectableDevice | null = null
-  if (selectedController.value === "PlayCover") {
+  if (selectedCapability.type === "PlayCover") {
     const address = playCoverAddress.value.trim()
     if (!address) {
       message.error(t("panel.playcoverAddress"))
@@ -427,6 +483,7 @@ async function connectDevices() {
     const regex = /^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}:\d{1,5}$/
     if (!regex.test(address)) {
       message.error(t("panel.invalidPlaycoverAddress"))
+      return
     }
     currentDevice = {
       type: "PlayCover",
@@ -441,14 +498,22 @@ async function connectDevices() {
     return
   }
 
-  const success = await postDevices(currentDevice)
+  const success = await postDevices({
+    controller_name: selectedCapability.name,
+    device: currentDevice,
+  })
   indexStore.setConnected(success)
   if (success) {
-    await persistLastConnectedDevice(currentDevice)
+    await persistLastConnectedDevice(currentDevice, selectedCapability.name)
+    await getResourceList()
   }
 }
 
 async function getResourceList() {
+  if (!isCurrentSelectionConnected.value) {
+    return
+  }
+
   resources_list.value = []
   loading.value = true
 
@@ -471,6 +536,11 @@ async function getResourceList() {
 }
 
 async function post_resource() {
+  if (!isCurrentSelectionConnected.value) {
+    message.error(t("panel.connectFirstHint"))
+    return
+  }
+
   if (!resource.value) {
     message.error(t("panel.selectResource"))
     return
@@ -487,10 +557,20 @@ onMounted(async () => {
     await settingsStore.fetchSettings()
   }
 
-  await Promise.all([
-    fetchDevices(settingsStore.settings.panel.lastConnectedDevice?.type, true),
-    getResourceList(),
-  ])
+  const savedDevice = settingsStore.settings.panel.lastConnectedDevice
+  await fetchDevices(savedDevice?.controller_name, true)
+
+  if (savedDevice && !savedDevice.controller_name) {
+    const fallbackCapability = controllerCapabilities.value.find(
+      (item) => item.type === savedDevice.type,
+    )
+    if (
+      fallbackCapability &&
+      selectedControllerCapability.value?.name !== fallbackCapability.name
+    ) {
+      await fetchDevices(fallbackCapability.name, true)
+    }
+  }
 })
 
 function StartTask() {

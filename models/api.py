@@ -15,6 +15,7 @@ RealtimeEventLevel = Literal["info", "success", "error"]
 
 class DeviceModel(BaseModel):
     type: Literal["Adb", "Win32", "Gamepad", "PlayCover"]
+    controller_name: str = ""
     name: str = ""
     adb_path: str = ""
     address: str = ""

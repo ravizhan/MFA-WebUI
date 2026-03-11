@@ -14,6 +14,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from models.interface import InterfaceModel
+from models.interface_loader import load_interface_model
 from models.api import DeviceModel, RealtimeEvent, RealtimeEventLevel
 from models.task_config import TaskConfigModel
 from models.settings import SettingsModel
@@ -29,10 +30,7 @@ import subprocess
 import time
 import hashlib
 
-with open("interface.json", "r", encoding="utf-8") as f:
-    json_data = json.load(f)
-
-interface = InterfaceModel(**json_data)
+interface = load_interface_model("interface.json")
 
 if not os.path.exists("config"):
     os.makedirs("config")
@@ -220,6 +218,10 @@ async def connect_device(device: DeviceModel):
 
 @app.get("/api/resource")
 def get_resource():
+    if app_state.worker is None:
+        return {"status": "failed", "message": "Worker未初始化"}
+    if not app_state.worker.connected:
+        return {"status": "failed", "message": "请先连接设备后再选择资源"}
     return {"status": "success", "resource": [i.name for i in interface.resource]}
 
 
@@ -228,6 +230,10 @@ async def set_resource(name: str):
     # 设置资源
     if app_state.worker is None:
         msg = "Worker未初始化"
+        app_state.send_log(msg)
+        return {"status": "failed", "message": msg}
+    if not app_state.worker.connected:
+        msg = "请先连接设备后再选择资源"
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
     try:

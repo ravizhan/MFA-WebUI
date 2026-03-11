@@ -43,6 +43,7 @@ class MaaWorker:
         self.tasker = Tasker()
         self.controller = None
         self.controller_type: str | None = None
+        self.controller_name: str | None = None
         self.current_resource_name: str | None = None
         self.connected = False
         self.stop_flag = False
@@ -256,170 +257,209 @@ class MaaWorker:
             case _:
                 return False, "controller_not_supported"
 
-    def _build_device_capabilities(self) -> list[dict]:
-        capabilities: dict[str, dict] = {}
+    def _build_controller_display_labels(self) -> dict[str, str]:
+        label_counts: dict[str, int] = {}
+        base_labels: dict[str, str] = {}
+
         for controller in self.interface.controller:
-            controller_type = controller.type
-            capability = capabilities.setdefault(
-                controller_type,
+            base_label = controller.label or controller.name or controller.type
+            base_labels[controller.name] = base_label
+            label_counts[base_label] = label_counts.get(base_label, 0) + 1
+
+        display_labels: dict[str, str] = {}
+        for controller in self.interface.controller:
+            base_label = base_labels[controller.name]
+            if label_counts[base_label] > 1:
+                display_labels[controller.name] = f"{base_label}({controller.name})"
+            else:
+                display_labels[controller.name] = base_label
+        return display_labels
+
+    def _get_controller_definition(self, controller_name: str | None):
+        if not controller_name:
+            return None
+        return next(
+            (
+                controller
+                for controller in self.interface.controller
+                if controller.name == controller_name
+            ),
+            None,
+        )
+
+    def _load_resource_bundle(self, path: str):
+        resolved_path = os.path.realpath(path.replace("{PROJECT_DIR}", os.getcwd()))
+        resource.post_bundle(resolved_path).wait()
+        return resolved_path
+
+    def _append_controller_resource_paths(self, controller) -> list[str]:
+        loaded_paths: list[str] = []
+        if controller is None or not controller.attach_resource_path:
+            return loaded_paths
+
+        for path in controller.attach_resource_path:
+            loaded_paths.append(self._load_resource_bundle(path))
+        return loaded_paths
+
+    def _build_device_capabilities(self) -> list[dict]:
+        capabilities: list[dict] = []
+        display_labels = self._build_controller_display_labels()
+        for controller in self.interface.controller:
+            supported, reason = self._is_controller_supported(controller)
+            capabilities.append(
                 {
-                    "type": controller_type,
-                    "label": controller.label or controller.name or controller_type,
-                    "enabled": False,
-                    "reason": "",
+                    "name": controller.name,
+                    "type": controller.type,
+                    "label": controller.label or controller.name or controller.type,
+                    "display_label": display_labels[controller.name],
+                    "enabled": supported,
+                    "reason": "" if supported else reason,
                     "search_mode": (
-                        "input" if controller_type == "PlayCover" else "select"
+                        "input" if controller.type == "PlayCover" else "select"
                     ),
                     "default_address": (
-                        "127.0.0.1:1717" if controller_type == "PlayCover" else ""
+                        "127.0.0.1:1717" if controller.type == "PlayCover" else ""
                     ),
-                },
+                }
             )
 
-            supported, reason = self._is_controller_supported(controller)
-            if supported:
-                capability["enabled"] = True
-                capability["reason"] = ""
-            elif not capability["enabled"] and not capability["reason"]:
-                capability["reason"] = reason
-
         controller_order = ["Adb", "Win32", "Gamepad", "PlayCover"]
-        ordered = [
-            capabilities[controller_type]
-            for controller_type in controller_order
-            if controller_type in capabilities
-        ]
-        ordered.extend(
-            capability
-            for controller_type, capability in capabilities.items()
-            if controller_type not in controller_order
+        return sorted(
+            capabilities,
+            key=lambda item: (
+                controller_order.index(item["type"])
+                if item["type"] in controller_order
+                else len(controller_order),
+                item["display_label"],
+            ),
         )
-        return ordered
 
-    def _find_devices_by_type(self, controller_type: str) -> list[dict]:
+    def _find_devices_for_controller(self, controller) -> list[dict]:
         devices: list[dict] = []
         win32_seen: set[int] = set()
         gamepad_seen: set[int] = set()
 
-        for controller in self.interface.controller:
-            if controller.type != controller_type:
-                continue
+        supported, _ = self._is_controller_supported(controller)
+        if not supported:
+            return devices
 
-            supported, _ = self._is_controller_supported(controller)
-            if not supported:
-                continue
+        match controller.type:
+            case "Adb":
+                for device in Toolkit.find_adb_devices():
+                    data = {
+                        "name": device.name,
+                        "type": "Adb",
+                        "adb_path": device.adb_path,
+                        "address": device.address,
+                        "screencap_methods": str(device.screencap_methods),
+                        "input_methods": str(device.input_methods),
+                    }
+                    if data not in devices:
+                        devices.append(data)
+            case "Win32":
+                assert controller.win32 is not None
+                for device in Toolkit.find_desktop_windows():
+                    class_name = device.class_name
+                    window_name = device.window_name
+                    class_match = not controller.win32.class_regex or re.search(
+                        controller.win32.class_regex, class_name
+                    )
+                    window_match = not controller.win32.window_regex or re.search(
+                        controller.win32.window_regex, window_name
+                    )
+                    if not (class_match and window_match):
+                        continue
 
-            match controller_type:
-                case "Adb":
-                    for device in Toolkit.find_adb_devices():
-                        data = {
-                            "name": device.name,
-                            "type": "Adb",
-                            "adb_path": device.adb_path,
-                            "address": device.address,
-                            "screencap_methods": str(device.screencap_methods),
-                            "input_methods": str(device.input_methods),
+                    hwnd = int(device.hwnd)
+                    if hwnd in win32_seen:
+                        continue
+                    win32_seen.add(hwnd)
+
+                    devices.append(
+                        {
+                            "type": "Win32",
+                            "hWnd": hwnd,
+                            "class_name": class_name,
+                            "window_name": window_name,
+                            "screencap_methods": controller.win32.screencap or 1,
+                            "input_methods": controller.win32.mouse
+                            or controller.win32.keyboard
+                            or 1,
                         }
-                        if data not in devices:
-                            devices.append(data)
-                case "Win32":
-                    assert controller.win32 is not None
-                    for device in Toolkit.find_desktop_windows():
-                        class_name = device.class_name
-                        window_name = device.window_name
-                        class_match = not controller.win32.class_regex or re.search(
-                            controller.win32.class_regex, class_name
-                        )
-                        window_match = not controller.win32.window_regex or re.search(
-                            controller.win32.window_regex, window_name
-                        )
-                        if not (class_match and window_match):
-                            continue
+                    )
+            case "PlayCover":
+                return devices
+            case "Gamepad":
+                assert controller.gamepad is not None
+                for device in Toolkit.find_desktop_windows():
+                    class_name = device.class_name
+                    window_name = device.window_name
+                    class_match = not controller.gamepad.class_regex or re.search(
+                        controller.gamepad.class_regex, class_name
+                    )
+                    window_match = not controller.gamepad.window_regex or re.search(
+                        controller.gamepad.window_regex, window_name
+                    )
+                    if not (class_match and window_match):
+                        continue
 
-                        hwnd = int(device.hwnd)
-                        if hwnd in win32_seen:
-                            continue
-                        win32_seen.add(hwnd)
+                    hwnd = int(device.hwnd)
+                    if hwnd in gamepad_seen:
+                        continue
+                    gamepad_seen.add(hwnd)
 
-                        devices.append(
-                            {
-                                "type": "Win32",
-                                "hWnd": hwnd,
-                                "class_name": class_name,
-                                "window_name": window_name,
-                                "screencap_methods": controller.win32.screencap or 1,
-                                "input_methods": (
-                                    controller.win32.mouse
-                                    or controller.win32.keyboard
-                                    or 1
-                                ),
-                            }
-                        )
-                case "PlayCover":
-                    continue
-                case "Gamepad":
-                    assert controller.gamepad is not None
-                    for device in Toolkit.find_desktop_windows():
-                        class_name = device.class_name
-                        window_name = device.window_name
-                        class_match = not controller.gamepad.class_regex or re.search(
-                            controller.gamepad.class_regex, class_name
-                        )
-                        window_match = not controller.gamepad.window_regex or re.search(
-                            controller.gamepad.window_regex, window_name
-                        )
-                        if not (class_match and window_match):
-                            continue
-
-                        hwnd = int(device.hwnd)
-                        if hwnd in gamepad_seen:
-                            continue
-                        gamepad_seen.add(hwnd)
-
-                        devices.append(
-                            {
-                                "type": "Gamepad",
-                                "hWnd": hwnd,
-                                "class_name": class_name,
-                                "window_name": window_name,
-                                "screencap_methods": controller.gamepad.screencap or 1,
-                                "gamepad_type": controller.gamepad.gamepad_type or 0,
-                            }
-                        )
+                    devices.append(
+                        {
+                            "type": "Gamepad",
+                            "hWnd": hwnd,
+                            "class_name": class_name,
+                            "window_name": window_name,
+                            "screencap_methods": controller.gamepad.screencap or 1,
+                            "gamepad_type": controller.gamepad.gamepad_type or 0,
+                        }
+                    )
         return devices
 
-    def get_device(self, controller_type: str | None = None) -> dict:
+    def get_device(self, controller_name: str | None = None) -> dict:
         capabilities = self._build_device_capabilities()
-        all_types = [item["type"] for item in capabilities]
-        enabled_types = [item["type"] for item in capabilities if item["enabled"]]
+        all_names = [item["name"] for item in capabilities]
+        enabled_names = [item["name"] for item in capabilities if item["enabled"]]
 
-        selected_type = controller_type if controller_type in all_types else None
-        if not selected_type:
-            if enabled_types:
-                selected_type = enabled_types[0]
-            elif all_types:
-                selected_type = all_types[0]
+        selected_name = controller_name if controller_name in all_names else None
+        if not selected_name:
+            if enabled_names:
+                selected_name = enabled_names[0]
+            elif all_names:
+                selected_name = all_names[0]
 
         selected_capability = next(
-            (item for item in capabilities if item["type"] == selected_type), None
+            (item for item in capabilities if item["name"] == selected_name), None
         )
         devices: list[dict] = []
         if (
-            selected_type
+            selected_name
             and selected_capability
             and selected_capability["enabled"]
             and selected_capability["search_mode"] == "select"
         ):
-            devices = self._find_devices_by_type(selected_type)
+            controller = self._get_controller_definition(selected_name)
+            if controller is not None:
+                devices = self._find_devices_for_controller(controller)
 
         return {
             "controllers": capabilities,
-            "selected_type": selected_type,
+            "selected_controller": selected_name,
             "devices": devices,
         }
 
     def connect_device(self, device_config: DeviceModel) -> bool:
         device_type = device_config.type
+        selected_controller = self._get_controller_definition(
+            device_config.controller_name
+        )
+        if selected_controller is None or selected_controller.type != device_type:
+            self.send_log("未找到匹配的控制器配置")
+            return self.connected
         status = False
         controller = None
         match device_type:
@@ -464,6 +504,7 @@ class MaaWorker:
             self.connected = True
             self.controller = controller
             self.controller_type = device_type
+            self.controller_name = selected_controller.name
             self.send_log("设备连接成功")
         else:
             self._show_system_notification(
@@ -474,16 +515,23 @@ class MaaWorker:
         return self.connected
 
     def set_resource(self, resource_name):
-        def replace(path: str):
-            return os.path.realpath(path.replace("{PROJECT_DIR}", os.getcwd()))
-
         for i in self.interface.resource:
             if i.name == resource_name:
-                resource.post_bundle(replace(i.path[0])).wait()
-                if len(i.path) > 1:
-                    resource.post_bundle(replace(i.path[1])).wait()
+                loaded_paths = [self._load_resource_bundle(path) for path in i.path]
                 self.current_resource_name = i.name
+                controller = self._get_controller_definition(self.controller_name)
+                attached_paths = self._append_controller_resource_paths(controller)
+                if loaded_paths:
+                    self.send_log(f"资源主路径已加载: {', '.join(loaded_paths)}")
+                if attached_paths:
+                    controller_label = (
+                        (controller.label or controller.name) if controller else ""
+                    )
+                    self.send_log(
+                        f"已为控制器 {controller_label} 加载附加资源: {', '.join(attached_paths)}"
+                    )
                 self.send_log(f"资源已设置为: {i.name}")
+                return None
         return None
 
     def _deep_merge_pipeline_override(
@@ -522,13 +570,8 @@ class MaaWorker:
         )
 
     def _get_active_controller_definitions(self):
-        if self.controller_type is None:
-            return []
-        return [
-            controller
-            for controller in self.interface.controller
-            if controller.type == self.controller_type
-        ]
+        controller = self._get_controller_definition(self.controller_name)
+        return [controller] if controller is not None else []
 
     def _get_active_controller_names(self) -> set[str]:
         return {

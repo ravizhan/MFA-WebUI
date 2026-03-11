@@ -49,6 +49,7 @@ class About(BaseModel):
 
 class PanelLastConnectedDevice(BaseModel):
     type: Literal["Adb", "Win32", "Gamepad", "PlayCover"]
+    controller_name: str = ""
     fingerprint: str = ""
     adb_path: str = ""
     address: str = ""
