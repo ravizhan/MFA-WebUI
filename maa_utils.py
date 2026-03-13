@@ -4,7 +4,6 @@ import subprocess
 import time
 import traceback
 from queue import SimpleQueue
-import json
 import plyer
 import threading
 from maa.controller import (
@@ -26,6 +25,7 @@ import httpx
 import io
 from PIL import Image
 
+import libs.json_utils as json
 from models.api import DeviceModel, RealtimeEvent, RealtimeEventLevel, RealtimeEventName
 from models.interface import InterfaceModel, PipelineOverride
 from models.scheduler import TaskOptionValue

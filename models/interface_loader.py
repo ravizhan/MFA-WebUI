@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import copy
-import json
 from pathlib import Path
 from typing import Any
 
+import libs.json_utils as json
 from models.interface import InterfaceModel
 
 
@@ -30,9 +30,8 @@ def _read_json_dict(path: Path) -> dict[str, Any]:
     except FileNotFoundError as exc:
         raise InterfaceLoadError(f"找不到配置文件: {path}") from exc
     except json.JSONDecodeError as exc:
-        raise InterfaceLoadError(
-            f"解析配置文件失败: {path} (行 {exc.lineno}, 列 {exc.colno}): {exc.msg}"
-        ) from exc
+        message = getattr(exc, "message", str(exc))
+        raise InterfaceLoadError(f"解析配置文件失败: {path}: {message}") from exc
 
     if not isinstance(data, dict):
         raise InterfaceLoadError(f"配置文件必须是 JSON 对象: {path}")
