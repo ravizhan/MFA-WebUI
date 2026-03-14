@@ -29,7 +29,6 @@ export function showBrowserRealtimeNotification(
     new Notification(event.title || "MWU", {
       body: event.message,
       tag: `${event.event}:${event.time}`,
-      renotify: false,
     })
   } catch (error) {
     console.error("浏览器通知发送失败:", error)
