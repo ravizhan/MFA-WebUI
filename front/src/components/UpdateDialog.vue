@@ -80,7 +80,7 @@
 import { ref, computed, watch, onUnmounted } from "vue"
 import { useI18n } from "vue-i18n"
 import { marked } from "marked"
-import { performUpdateApi, getUpdateStatusApi, type UpdateInfo } from "../script/api"
+import { performUpdateApi, getUpdateStatusApi, type UpdateInfo } from "../services/api"
 import DOMPurify from "dompurify"
 
 const { t } = useI18n()

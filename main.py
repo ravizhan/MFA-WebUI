@@ -2,19 +2,15 @@ import asyncio
 import threading
 import webbrowser
 from contextlib import asynccontextmanager
-from queue import SimpleQueue
 import uvicorn
 import os
 import signal
 import sys
-import platform
-from typing import Any
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from models.interface import InterfaceModel
 from models.interface_loader import load_interface_model
-from models.api import DeviceModel, RealtimeEvent, RealtimeEventLevel
+from models.api import DeviceModel
 from models.task_config import TaskConfigModel
 from models.settings import SettingsModel
 from models.scheduler import (
@@ -24,12 +20,18 @@ from models.scheduler import (
 )
 from maa_utils import MaaWorker
 from scheduler_manager import SchedulerManager
-import httpx
+from app_state import AppState, LogBroadcaster, normalize_event
+from services.update_service import (
+    check_github_update,
+    check_mirrorchyan_update,
+    download_file,
+    get_platform_info,
+)
 import subprocess
 import time
 import hashlib
 
-import libs.json_utils as json
+import json_utils as json
 
 interface = load_interface_model("interface.json")
 
@@ -39,70 +41,6 @@ if not os.path.exists("config"):
         json.dump(SettingsModel().model_dump(), f, indent=4, ensure_ascii=False)
     with open("config/task_config.json", "w", encoding="utf-8") as f:
         json.dump(TaskConfigModel().model_dump(), f, indent=4, ensure_ascii=False)
-
-
-class LogBroadcaster:
-    def __init__(self):
-        self._queues: list[asyncio.Queue] = []
-
-    def add_client(self, history: list[RealtimeEvent]) -> asyncio.Queue:
-        q = asyncio.Queue()
-        for message in history:
-            q.put_nowait(message.model_copy(update={"notify": False}))
-        self._queues.append(q)
-        return q
-
-    def remove_client(self, q: asyncio.Queue):
-        if q in self._queues:
-            self._queues.remove(q)
-
-    async def broadcast(self, message: RealtimeEvent):
-        for q in self._queues:
-            await q.put(message)
-
-
-def build_log_event(msg: str, level: RealtimeEventLevel = "info") -> RealtimeEvent:
-    return RealtimeEvent(
-        event="log",
-        level=level,
-        message=msg,
-        time=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
-        notify=False,
-    )
-
-
-def normalize_event(payload: RealtimeEvent | dict[str, Any] | str) -> RealtimeEvent:
-    if isinstance(payload, RealtimeEvent):
-        return payload
-    if isinstance(payload, dict):
-        return RealtimeEvent(**payload)
-    return RealtimeEvent(
-        event="log",
-        level="info",
-        message=payload,
-        time="",
-        notify=False,
-    )
-
-
-class AppState:
-    def __init__(self):
-        self.message_conn = SimpleQueue()
-        self.worker: MaaWorker | None = None
-        self.history_message: list[RealtimeEvent] = []
-        self.current_status = None
-        self.broadcaster: LogBroadcaster | None = None
-        self.scheduler_manager: SchedulerManager | None = None
-        self.settings: SettingsModel | None = None
-        self.subprocess_pipe: subprocess.Popen | None = None
-        self.update_status: dict | None = None
-        self.update_info: dict | None = None
-
-    def send_event(self, event: RealtimeEvent):
-        self.message_conn.put(event)
-
-    def send_log(self, msg: str):
-        self.send_event(build_log_event(msg))
 
 
 app_state = AppState()
@@ -298,112 +236,18 @@ def reset_task_config():
         return {"status": "failed", "message": str(e)}
 
 
-def _get_platform_info():
-    """获取当前平台和架构信息"""
-    plat = "linux"
-    match platform.system():
-        case "Windows":
-            plat = "win"
-        case "Darwin":
-            plat = "macos"
-        case "Linux":
-            plat = "linux"
-
-    arch = "x86_64"
-    machine = platform.machine().lower()
-    match machine:
-        case "x86_64" | "amd64":
-            arch = "x86_64"
-        case "arm" | "aarch64" | "arm64":
-            arch = "aarch64"
-
-    return plat, arch
-
-
-MIRRORCHYAN_API_BASES = [
-    "https://mirrorchyan.com/api/resources",
-    "https://mirrorchyan.net/api/resources",
-]
-
-
-def _check_mirrorchyan_update(rid: str, current_version: str, cdk: str):
-    """通过 Mirror酱 API 检查更新"""
-    settings = app_state.settings or SettingsModel()
-    plat, arch = _get_platform_info()
-    params = {
-        "current_version": current_version,
-        "user_agent": "MWU",
-        "os": plat,
-        "arch": arch,
-        "channel": settings.update.updateChannel,
-    }
-    if cdk:
-        params["cdk"] = cdk
-
-    proxy = settings.update.proxy or None
-
-    for api_base in MIRRORCHYAN_API_BASES:
-        try:
-            resp = httpx.get(
-                f"{api_base}/{rid}/latest",
-                params=params,
-                proxy=proxy,
-                timeout=15,
-            )
-            data = resp.json()
-            if data.get("code") == 0:
-                return data
-        except Exception:
-            continue
-
-    return None
-
-
-def _check_github_update():
-    """通过 GitHub Releases API 检查更新"""
-    settings = app_state.settings or SettingsModel()
-    github_url = interface.github or ""
-    repo_parts = github_url.split("/")
-    if len(repo_parts) < 5:
-        return None
-    repo_name = repo_parts[3] + "/" + repo_parts[4]
-    proxy = settings.update.proxy or None
-    response = httpx.get(
-        f"https://api.github.com/repos/{repo_name}/releases/latest",
-        proxy=proxy,
-        timeout=15,
-    ).json()
-    latest_version = response["tag_name"]
-    current_version = interface.version
-
-    plat, arch = _get_platform_info()
-
-    for asset in response.get("assets", []):
-        if f"{plat}-{arch}" in asset["name"]:
-            download_url = asset["browser_download_url"]
-            file_hash = asset.get("digest", "").replace("sha256:", "").strip()
-            return {
-                "latest_version": latest_version,
-                "current_version": current_version,
-                "is_update_available": latest_version != current_version,
-                "release_notes": response.get("body", ""),
-                "download_url": download_url,
-                "file_hash": file_hash,
-                "file_name": asset["name"],
-                "download_source": "github",
-            }
-    return None
-
-
 @app.get("/api/update/check")
 def check_update():
     try:
+        settings = app_state.settings or SettingsModel()
         current_version = interface.version or ""
         mirrorchyan_rid = getattr(interface, "mirrorchyan_rid", None)
-        cdk = app_state.settings.update.mirrorchyanCdk if app_state.settings else ""
+        cdk = settings.update.mirrorchyanCdk
 
         if mirrorchyan_rid:
-            mc_data = _check_mirrorchyan_update(mirrorchyan_rid, current_version, cdk)
+            mc_data = check_mirrorchyan_update(
+                mirrorchyan_rid, current_version, cdk, settings
+            )
             if mc_data and mc_data.get("code") == 0:
                 mc_info = mc_data.get("data", {})
                 latest_version = mc_info.get("version_name", "")
@@ -431,7 +275,7 @@ def check_update():
                 # 无 CDK 或无下载链接，尝试 GitHub 获取下载链接
                 if has_update and interface.github:
                     try:
-                        gh_info = _check_github_update()
+                        gh_info = check_github_update(interface, settings)
                         if gh_info:
                             # 保留 mirrorchyan 的版本信息，用 GitHub 的下载链接
                             app_state.update_info["download_url"] = gh_info[
@@ -449,12 +293,12 @@ def check_update():
                 }
 
         if interface.github:
-            gh_info = _check_github_update()
+            gh_info = check_github_update(interface, settings)
             if gh_info:
                 app_state.update_info = gh_info
                 return {"status": "success", "update_info": app_state.update_info}
 
-            plat, arch = _get_platform_info()
+            plat, arch = get_platform_info()
             msg = f"未找到适合当前平台的更新包:{plat}-{arch}"
             app_state.send_log(msg)
             return {
@@ -469,17 +313,6 @@ def check_update():
         msg = str(e)
         app_state.send_log(f"检查更新失败: {msg}")
         return {"status": "failed", "message": msg}
-
-
-async def download_file(url: str, dest: str, use_proxy: bool = True):
-    settings = app_state.settings or SettingsModel()
-    proxy = settings.update.proxy if use_proxy else None
-    async with httpx.AsyncClient(follow_redirects=True, proxy=proxy) as client:
-        async with client.stream("GET", url) as resp:
-            resp.raise_for_status()
-            with open(dest, "wb") as f:
-                async for chunk in resp.aiter_bytes():
-                    f.write(chunk)
 
 
 @app.get("/api/update")
@@ -501,8 +334,12 @@ async def perform_update():
         }
 
         try:
-            use_proxy = download_source != "mirrorchyan"
-            await download_file(download_url, update_package_path, use_proxy)
+            proxy = (
+                (app_state.settings or SettingsModel()).update.proxy
+                if download_source != "mirrorchyan"
+                else None
+            )
+            await download_file(download_url, update_package_path, proxy)
             file_hash = app_state.update_info.get("file_hash", "")
             if file_hash:
                 with open(update_package_path, "rb") as f:

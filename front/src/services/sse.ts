@@ -75,7 +75,7 @@ export class SSEClient {
     this.reconnectTimer = null
   }
 
-  public addEventListener(type: string, callback: (data: any) => void): void {
+  public addEventListener(type: string, callback: (data: RealtimeEvent) => void): void {
     if (!this.listeners.has(type)) {
       this.listeners.set(type, new Set())
     }

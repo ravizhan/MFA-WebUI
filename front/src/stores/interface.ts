@@ -1,5 +1,5 @@
 import { defineStore } from "pinia"
-import { getInterface } from "../script/api"
+import { getInterface } from "../services/api"
 import type { InterfaceModel, Option } from "../types/interface"
 
 export interface TaskListItem {

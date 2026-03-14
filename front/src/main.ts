@@ -5,15 +5,15 @@ import router from "./router"
 import { createPinia } from "pinia"
 import { useIndexStore } from "./stores"
 import { useSettingsStore } from "./stores/settings"
-import { sse } from "./script/sse"
+import { sse } from "./services/sse"
 import {
   formatRealtimeLog,
   showBrowserRealtimeNotification,
   showRealtimeMessage,
-} from "./script/realtime"
+} from "./services/realtime"
 import type { RealtimeEvent } from "./types/realtime"
 import "virtual:uno.css"
-import i18n from "./libs/i18n"
+import i18n from "./locales/i18n"
 
 const app = createApp(App)
 const pinia = createPinia()

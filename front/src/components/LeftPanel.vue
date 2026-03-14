@@ -98,7 +98,7 @@ import {
   type Win32Device,
   getResource,
   postResource,
-} from "../script/api"
+} from "../services/api"
 import { useTaskConfigStore } from "../stores/taskConfig"
 import { useIndexStore } from "../stores"
 import { useSettingsStore } from "../stores/settings"

@@ -1,5 +1,5 @@
 import { defineStore } from "pinia"
-import { getTaskConfig, saveTaskConfig, resetTaskConfig, type TaskConfig } from "../script/api"
+import { getTaskConfig, saveTaskConfig, resetTaskConfig, type TaskConfig } from "../services/api"
 import { type TaskListItem, useInterfaceStore } from "./interface"
 import type { Option } from "../types/interface"
 import type { TaskExecutionPayload, TaskOptionValue } from "../types/scheduler"

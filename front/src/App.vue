@@ -18,7 +18,10 @@
             </n-layout-header>
             <n-layout>
               <router-view v-slot="{ Component, route }">
-                <transition :name="route.meta.transition || 'fade'" mode="out-in">
+                <transition
+                  :name="typeof route.meta.transition === 'string' ? route.meta.transition : 'fade'"
+                  mode="out-in"
+                >
                   <component :is="Component" />
                 </transition>
               </router-view>
@@ -56,7 +59,7 @@ import { useTaskConfigStore } from "./stores/taskConfig.ts"
 import { useSettingsStore } from "./stores/settings"
 import { darkTheme } from "naive-ui"
 import { lightThemeOverrides, darkThemeOverrides } from "./theme"
-import { checkUpdateApi, type UpdateInfo } from "./script/api"
+import { checkUpdateApi, type UpdateInfo } from "./services/api"
 import UpdateDialog from "./components/UpdateDialog.vue"
 
 import githubMarkdownAutoUrl from "github-markdown-css/github-markdown.css?url"

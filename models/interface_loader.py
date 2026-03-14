@@ -4,7 +4,7 @@ import copy
 from pathlib import Path
 from typing import Any
 
-import libs.json_utils as json
+import json_utils as json
 from models.interface import InterfaceModel
 
 

@@ -1,31 +1,36 @@
 import copy
-import os
 import subprocess
 import time
-import traceback
 from queue import SimpleQueue
 import plyer
 import threading
-from maa.controller import (
-    AdbController,
-    Win32Controller,
-    PlayCoverController,
-    GamepadController,
-)
 from maa.resource import Resource
 from maa.tasker import Tasker
 from maa.toolkit import Toolkit
-import importlib.util
-import importlib.abc
-import re
-import sys
-from pathlib import Path
 from typing import cast
 import httpx
 import io
 from PIL import Image
 
-import libs.json_utils as json
+import json_utils as json
+from maa_worker.agent_loader import load_agents, run_black_magic
+from maa_worker.device_manager import (
+    append_controller_resource_paths as device_append_controller_resource_paths,
+    build_controller_display_labels as device_build_controller_display_labels,
+    build_device_capabilities as device_build_device_capabilities,
+    connect_device as device_connect_device,
+    find_devices_for_controller as device_find_devices_for_controller,
+    get_controller_definition as device_get_controller_definition,
+    get_device as device_get_device,
+    is_controller_supported as device_is_controller_supported,
+    load_resource_bundle as device_load_resource_bundle,
+    set_resource as device_set_resource,
+)
+from maa_worker.task_runner import (
+    run_process as run_task_process,
+    start_task as start_worker_task,
+    stop_task as stop_worker_task,
+)
 from models.api import DeviceModel, RealtimeEvent, RealtimeEventLevel, RealtimeEventName
 from models.interface import InterfaceModel, PipelineOverride
 from models.scheduler import TaskOptionValue
@@ -235,304 +240,34 @@ class MaaWorker:
         self.send_log(f"任务异常详情: {error_message}")
 
     def _is_controller_supported(self, controller) -> tuple[bool, str]:
-        match controller.type:
-            case "Adb":
-                return True, ""
-            case "Win32":
-                if sys.platform != "win32":
-                    return False, "platform_not_supported"
-                if not controller.win32:
-                    return False, "controller_config_missing"
-                return True, ""
-            case "PlayCover":
-                if sys.platform != "darwin":
-                    return False, "platform_not_supported"
-                return True, ""
-            case "Gamepad":
-                if sys.platform != "win32":
-                    return False, "platform_not_supported"
-                if not controller.gamepad:
-                    return False, "controller_config_missing"
-                return True, ""
-            case _:
-                return False, "controller_not_supported"
+        return device_is_controller_supported(controller)
 
     def _build_controller_display_labels(self) -> dict[str, str]:
-        label_counts: dict[str, int] = {}
-        base_labels: dict[str, str] = {}
-
-        for controller in self.interface.controller:
-            base_label = controller.label or controller.name or controller.type
-            base_labels[controller.name] = base_label
-            label_counts[base_label] = label_counts.get(base_label, 0) + 1
-
-        display_labels: dict[str, str] = {}
-        for controller in self.interface.controller:
-            base_label = base_labels[controller.name]
-            if label_counts[base_label] > 1:
-                display_labels[controller.name] = f"{base_label}({controller.name})"
-            else:
-                display_labels[controller.name] = base_label
-        return display_labels
+        return device_build_controller_display_labels(self)
 
     def _get_controller_definition(self, controller_name: str | None):
-        if not controller_name:
-            return None
-        return next(
-            (
-                controller
-                for controller in self.interface.controller
-                if controller.name == controller_name
-            ),
-            None,
-        )
+        return device_get_controller_definition(self, controller_name)
 
     def _load_resource_bundle(self, path: str):
-        resolved_path = os.path.realpath(path.replace("{PROJECT_DIR}", os.getcwd()))
-        resource.post_bundle(resolved_path).wait()
-        return resolved_path
+        return device_load_resource_bundle(path, resource)
 
     def _append_controller_resource_paths(self, controller) -> list[str]:
-        loaded_paths: list[str] = []
-        if controller is None or not controller.attach_resource_path:
-            return loaded_paths
-
-        for path in controller.attach_resource_path:
-            loaded_paths.append(self._load_resource_bundle(path))
-        return loaded_paths
+        return device_append_controller_resource_paths(self, controller, resource)
 
     def _build_device_capabilities(self) -> list[dict]:
-        capabilities: list[dict] = []
-        display_labels = self._build_controller_display_labels()
-        for controller in self.interface.controller:
-            supported, reason = self._is_controller_supported(controller)
-            capabilities.append(
-                {
-                    "name": controller.name,
-                    "type": controller.type,
-                    "label": controller.label or controller.name or controller.type,
-                    "display_label": display_labels[controller.name],
-                    "enabled": supported,
-                    "reason": "" if supported else reason,
-                    "search_mode": (
-                        "input" if controller.type == "PlayCover" else "select"
-                    ),
-                    "default_address": (
-                        "127.0.0.1:1717" if controller.type == "PlayCover" else ""
-                    ),
-                }
-            )
-
-        controller_order = ["Adb", "Win32", "Gamepad", "PlayCover"]
-        return sorted(
-            capabilities,
-            key=lambda item: (
-                controller_order.index(item["type"])
-                if item["type"] in controller_order
-                else len(controller_order),
-                item["display_label"],
-            ),
-        )
+        return device_build_device_capabilities(self)
 
     def _find_devices_for_controller(self, controller) -> list[dict]:
-        devices: list[dict] = []
-        win32_seen: set[int] = set()
-        gamepad_seen: set[int] = set()
-
-        supported, _ = self._is_controller_supported(controller)
-        if not supported:
-            return devices
-
-        match controller.type:
-            case "Adb":
-                for device in Toolkit.find_adb_devices():
-                    data = {
-                        "name": device.name,
-                        "type": "Adb",
-                        "adb_path": device.adb_path,
-                        "address": device.address,
-                        "screencap_methods": str(device.screencap_methods),
-                        "input_methods": str(device.input_methods),
-                    }
-                    if data not in devices:
-                        devices.append(data)
-            case "Win32":
-                assert controller.win32 is not None
-                for device in Toolkit.find_desktop_windows():
-                    class_name = device.class_name
-                    window_name = device.window_name
-                    class_match = not controller.win32.class_regex or re.search(
-                        controller.win32.class_regex, class_name
-                    )
-                    window_match = not controller.win32.window_regex or re.search(
-                        controller.win32.window_regex, window_name
-                    )
-                    if not (class_match and window_match):
-                        continue
-
-                    hwnd = int(device.hwnd)
-                    if hwnd in win32_seen:
-                        continue
-                    win32_seen.add(hwnd)
-
-                    devices.append(
-                        {
-                            "type": "Win32",
-                            "hWnd": hwnd,
-                            "class_name": class_name,
-                            "window_name": window_name,
-                            "screencap_methods": controller.win32.screencap or 1,
-                            "input_methods": controller.win32.mouse
-                            or controller.win32.keyboard
-                            or 1,
-                        }
-                    )
-            case "PlayCover":
-                return devices
-            case "Gamepad":
-                assert controller.gamepad is not None
-                for device in Toolkit.find_desktop_windows():
-                    class_name = device.class_name
-                    window_name = device.window_name
-                    class_match = not controller.gamepad.class_regex or re.search(
-                        controller.gamepad.class_regex, class_name
-                    )
-                    window_match = not controller.gamepad.window_regex or re.search(
-                        controller.gamepad.window_regex, window_name
-                    )
-                    if not (class_match and window_match):
-                        continue
-
-                    hwnd = int(device.hwnd)
-                    if hwnd in gamepad_seen:
-                        continue
-                    gamepad_seen.add(hwnd)
-
-                    devices.append(
-                        {
-                            "type": "Gamepad",
-                            "hWnd": hwnd,
-                            "class_name": class_name,
-                            "window_name": window_name,
-                            "screencap_methods": controller.gamepad.screencap or 1,
-                            "gamepad_type": controller.gamepad.gamepad_type or 0,
-                        }
-                    )
-        return devices
+        return device_find_devices_for_controller(self, controller)
 
     def get_device(self, controller_name: str | None = None) -> dict:
-        capabilities = self._build_device_capabilities()
-        all_names = [item["name"] for item in capabilities]
-        enabled_names = [item["name"] for item in capabilities if item["enabled"]]
-
-        selected_name = controller_name if controller_name in all_names else None
-        if not selected_name:
-            if enabled_names:
-                selected_name = enabled_names[0]
-            elif all_names:
-                selected_name = all_names[0]
-
-        selected_capability = next(
-            (item for item in capabilities if item["name"] == selected_name), None
-        )
-        devices: list[dict] = []
-        if (
-            selected_name
-            and selected_capability
-            and selected_capability["enabled"]
-            and selected_capability["search_mode"] == "select"
-        ):
-            controller = self._get_controller_definition(selected_name)
-            if controller is not None:
-                devices = self._find_devices_for_controller(controller)
-
-        return {
-            "controllers": capabilities,
-            "selected_controller": selected_name,
-            "devices": devices,
-        }
+        return device_get_device(self, controller_name)
 
     def connect_device(self, device_config: DeviceModel) -> bool:
-        device_type = device_config.type
-        selected_controller = self._get_controller_definition(
-            device_config.controller_name
-        )
-        if selected_controller is None or selected_controller.type != device_type:
-            self.send_log("未找到匹配的控制器配置")
-            return self.connected
-        status = False
-        controller = None
-        match device_type:
-            case "Adb":
-                controller = AdbController(
-                    adb_path=device_config.adb_path,
-                    address=device_config.address,
-                    screencap_methods=int(device_config.screencap_methods or 0),
-                    input_methods=int(device_config.input_methods or 0),
-                )
-                status = controller.post_connection().wait().succeeded
-            case "Win32":
-                controller = Win32Controller(
-                    hWnd=device_config.hWnd,
-                    screencap_method=int(device_config.screencap_methods or 0),
-                    mouse_method=int(device_config.input_methods or 0),
-                    keyboard_method=int(device_config.input_methods or 0),
-                )
-                status = controller.post_connection().wait().succeeded
-            case "Gamepad":
-                controller = GamepadController(
-                    hWnd=device_config.hWnd,
-                    gamepad_type=int(device_config.gamepad_type or 0),
-                    screencap_method=int(device_config.screencap_methods or 0),
-                )
-                status = controller.post_connection().wait().succeeded
-            case "PlayCover":
-                controller = PlayCoverController(
-                    address=device_config.address or "127.0.0.1:1717",
-                    uuid=device_config.uuid,
-                )
-                status = controller.post_connection().wait().succeeded
-        conn_fail_msg = "设备连接失败，请检查终端日志"
-        if not status:
-            self._show_system_notification(
-                self.interface.title or self.interface.label or "MWU",
-                conn_fail_msg,
-            )
-            self.send_log(conn_fail_msg)
-            return self.connected
-        if self.tasker.bind(resource, controller):
-            self.connected = True
-            self.controller = controller
-            self.controller_type = device_type
-            self.controller_name = selected_controller.name
-            self.send_log("设备连接成功")
-        else:
-            self._show_system_notification(
-                self.interface.title or self.interface.label or "MWU",
-                conn_fail_msg,
-            )
-            self.send_log(conn_fail_msg)
-        return self.connected
+        return device_connect_device(self, device_config, resource)
 
     def set_resource(self, resource_name):
-        for i in self.interface.resource:
-            if i.name == resource_name:
-                loaded_paths = [self._load_resource_bundle(path) for path in i.path]
-                self.current_resource_name = i.name
-                controller = self._get_controller_definition(self.controller_name)
-                attached_paths = self._append_controller_resource_paths(controller)
-                if loaded_paths:
-                    self.send_log(f"资源主路径已加载: {', '.join(loaded_paths)}")
-                if attached_paths:
-                    controller_label = (
-                        (controller.label or controller.name) if controller else ""
-                    )
-                    self.send_log(
-                        f"已为控制器 {controller_label} 加载附加资源: {', '.join(attached_paths)}"
-                    )
-                self.send_log(f"资源已设置为: {i.name}")
-                return None
-        return None
+        return device_set_resource(self, resource_name, resource)
 
     def _deep_merge_pipeline_override(
         self,
@@ -860,197 +595,14 @@ class MaaWorker:
         return merged
 
     def black_magic(self, agent_config):
-        """
-        将Agent转换为custom的黑魔法
-        动态加载并注册自定义 Action 和 Recognition
-        """
-        agent_index_path = next(
-            (
-                Path(arg.replace("{PROJECT_DIR}", "./")).resolve().parent
-                for arg in (agent_config.child_args or [])
-                if arg.endswith(".py")
-            ),
-            None,
-        )
-        assert agent_index_path is not None, "Agent解析错误，无法找到Agent文件夹"
-
-        # 将agent目录添加到sys.path的开头，确保优先级最高
-        if str(agent_index_path) not in sys.path:
-            sys.path.insert(0, str(agent_index_path))
-            sys.path.insert(1, str(Path("./deps").resolve()))
-
-        # 扫描所有 .py 文件建立映射
-        module_map = {}  # module_name -> {path, is_pkg}
-        for file_path in agent_index_path.glob("**/*.py"):
-            try:
-                relative_path = file_path.relative_to(agent_index_path)
-                if file_path.name == "__init__.py":
-                    module_name = (
-                        str(relative_path.parent).replace(os.sep, ".").replace("/", ".")
-                    )
-                    if module_name in {"", "."}:
-                        continue
-                    is_pkg = True
-                else:
-                    module_name = (
-                        str(relative_path.with_suffix(""))
-                        .replace(os.sep, ".")
-                        .replace("/", ".")
-                    )
-                    is_pkg = False
-                if module_name:
-                    module_map[module_name] = {"path": str(file_path), "is_pkg": is_pkg}
-            except ValueError:
-                continue
-
-        # 自定义 Loader，利用 importlib 规范支持循环 / 相互导入
-        class AgentLoader(importlib.abc.MetaPathFinder, importlib.abc.Loader):
-            def __init__(self, mapping):
-                self.mapping = mapping
-
-            def find_spec(self, fullname, path, target=None):
-                if fullname not in self.mapping:
-                    return None
-                record = self.mapping[fullname]
-                if record["is_pkg"]:
-                    return importlib.util.spec_from_file_location(
-                        fullname,
-                        record["path"],
-                        loader=self,
-                        submodule_search_locations=[os.path.dirname(record["path"])],
-                    )
-                return importlib.util.spec_from_file_location(
-                    fullname, record["path"], loader=self
-                )
-
-            def create_module(self, spec):
-                return None
-
-            def exec_module(self, module):
-                record = self.mapping[module.__name__]
-                file_path = record["path"]
-                with open(file_path, "r", encoding="utf-8") as f:
-                    source = f.read()
-
-                # 移除 @AgentServer 装饰器，避免注册时重复绑定
-                if "@AgentServer" in source:
-                    filtered_lines = [
-                        line for line in source.split("\n") if "AgentServer" not in line
-                    ]
-                    source = "\n".join(filtered_lines)
-
-                module.__file__ = file_path
-                module.__loader__ = self
-                if record["is_pkg"]:
-                    module.__package__ = module.__name__
-                    module.__path__ = [os.path.dirname(file_path)]
-                else:
-                    module.__package__ = module.__name__.rpartition(".")[0]
-
-                exec(compile(source, file_path, "exec"), module.__dict__)
-
-        loader = AgentLoader(module_map)
-        sys.meta_path.insert(0, loader)
-
-        # 收集需要注册的 Action 和 Recognition
-        custom_action_pattern = re.compile(r"@AgentServer.custom_action\(\".*\"\)")
-        custom_recognition_pattern = re.compile(
-            r"@AgentServer.custom_recognition\(\".*\"\)"
-        )
-        to_register = {"action": [], "recognition": []}
-
-        for module_name, info in module_map.items():
-            file_path = info.get("path")
-            try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    lines = f.readlines()
-
-                for i, line in enumerate(lines):
-                    match_action = re.match(custom_action_pattern, line.strip())
-                    match_recognition = re.match(
-                        custom_recognition_pattern, line.strip()
-                    )
-
-                    if match_action or match_recognition:
-                        name = line.split('("')[1].split('")')[0]
-                        if i + 1 < len(lines):
-                            class_line = lines[i + 1].strip()
-                            if class_line.startswith("class "):
-                                class_name = (
-                                    class_line.split("class ")[1]
-                                    .split("(")[0]
-                                    .strip()
-                                    .split(":")[0]
-                                )
-                                key = "action" if match_action else "recognition"
-                                to_register[key].append(
-                                    {
-                                        "name": name,
-                                        "class_name": class_name,
-                                        "module_name": module_name,
-                                    }
-                                )
-            except Exception as e:
-                print(f"Error scanning {file_path}: {e}")
-
-        try:
-            # 加载所有模块（支持循环/相互导入）
-            for module_name in module_map:
-                try:
-                    importlib.import_module(module_name)
-                except Exception as e:
-                    print(f"Warning: Failed to import module {module_name}: {e}")
-                    traceback.print_exc()
-
-            # 注册实例
-            for key in ["recognition", "action"]:
-                for item in to_register[key]:
-                    try:
-                        module = sys.modules.get(item["module_name"])
-                        if module:
-                            cls = getattr(module, item["class_name"])
-                            instance = cls()
-                            if key == "action":
-                                resource.register_custom_action(item["name"], instance)
-                            else:
-                                resource.register_custom_recognition(
-                                    item["name"], instance
-                                )
-                    except Exception as e:
-                        print(
-                            f"Warning: Failed to register {key} '{item['name']}': {e}"
-                        )
-                        traceback.print_exc()
-        finally:
-            # 确保清理 loader，避免污染全局导入链
-            if loader in sys.meta_path:
-                sys.meta_path.remove(loader)
+        run_black_magic(agent_config, resource)
 
     def load_agent(self):
-        agent_configs = self._get_agent_configs()
-        if not agent_configs:
-            return
-        for agent_config in agent_configs:
-            if "python" in agent_config.child_exec:
-                assert agent_config.child_args, "Agent解析错误，缺少child_args"
-                try:
-                    self.black_magic(agent_config)
-                except Exception as e:
-                    self.send_log("黑魔法爆炸了！")
-                    self.send_log(f"自定义Agent加载失败: {e}")
-                    traceback.print_exc()
-            else:
-                if agent_config.child_args:
-                    command = [agent_config.child_exec] + agent_config.child_args
-                else:
-                    command = [agent_config.child_exec]
-                try:
-                    self.agent_process = subprocess.Popen(command)
-                    self.agent_processes.append(self.agent_process)
-                except Exception as e:
-                    self.agent_process = None
-                    self.send_log(f"Agent进程启动失败: {e}")
-                    traceback.print_exc()
+        self.agent_process, self.agent_processes = load_agents(
+            self._get_agent_configs(),
+            resource,
+            self.send_log,
+        )
 
     def start_task(
         self,
@@ -1058,75 +610,13 @@ class MaaWorker:
         options: dict[str, TaskOptionValue],
         task_name: str | None = None,
     ) -> bool:
-        if not self.connected:
-            return False
-        if not self._task_lock.acquire(blocking=False):
-            return False
-        try:
-            if self.running:
-                return False
-            self.stop_flag = False
-            self.running = True
-            self.last_task_status = "running"
-            self.last_task_error = None
-            self._current_task_name = task_name
-            self._task_thread = threading.Thread(
-                target=self._run_process,
-                args=(task_list, copy.deepcopy(options)),
-                daemon=True,
-            )
-            self._task_thread.start()
-            return True
-        finally:
-            self._task_lock.release()
+        return start_worker_task(self, task_list, options, task_name)
 
     def stop_task(self) -> bool:
-        if not self.running:
-            return False
-        self.stop_flag = True
-        while self.tasker.running:
-            time.sleep(0.5)
-        return True
+        return stop_worker_task(self)
 
     def _run_process(self, task_list, options: dict[str, TaskOptionValue]):
-        try:
-            self._emit_task_started(task_list)
-            for task in task_list:
-                if self.stop_flag:
-                    self.tasker.post_stop().wait()
-                    self.last_task_status = "stopped"
-                    self.last_task_error = "任务已终止"
-                    self.send_log("任务已终止")
-                    return
-                pipeline_override = self._build_task_pipeline_override(task, options)
-                if pipeline_override:
-                    t = self.tasker.post_task(task, pipeline_override)
-                else:
-                    t = self.tasker.post_task(task)
-                self.send_log("正在运行任务: " + task)
-                while not t.done:
-                    time.sleep(0.5)
-                    if self.stop_flag:
-                        self.tasker.post_stop().wait()
-                        self.last_task_status = "stopped"
-                        self.last_task_error = "任务已终止"
-                        self.send_log("任务已终止")
-                        return
-            self.last_task_status = "success"
-            self.last_task_error = None
-            self._emit_task_completed(task_list)
-        except Exception as exc:
-            traceback.print_exc()
-            self.last_task_status = "failed"
-            self.last_task_error = str(exc) or "任务执行失败"
-            self._emit_task_failed(task_list, self.last_task_error)
-            self.send_log("任务出现异常，请检查终端日志")
-            self.send_log(f"请将日志反馈至 {self.interface.github}/issues")
-        finally:
-            self.running = False
-            self._task_thread = None
-            self._current_task_name = None
-            time.sleep(0.5)
+        run_task_process(self, task_list, options)
 
     def get_screencap_bytes(self):
         if not self.connected or not self.controller:

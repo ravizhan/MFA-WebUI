@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json as _stdlib_json
-from typing import Any, TextIO
+from typing import Any
 
 import pyjson5
 
@@ -9,7 +9,7 @@ import pyjson5
 JSONDecodeError = pyjson5.Json5DecoderException
 
 
-def load(fp: TextIO, **kwargs: Any) -> Any:
+def load(fp: Any, **kwargs: Any) -> Any:
     return pyjson5.load(fp, **kwargs)
 
 
@@ -19,7 +19,7 @@ def loads(s: str, **kwargs: Any) -> Any:
 
 def dump(
     obj: Any,
-    fp: TextIO,
+    fp: Any,
     *,
     indent: int | str | None = None,
     ensure_ascii: bool = True,

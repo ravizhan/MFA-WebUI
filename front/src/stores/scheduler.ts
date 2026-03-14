@@ -14,7 +14,7 @@ import {
   pauseSchedulerTask,
   resumeSchedulerTask,
   getSchedulerExecutions,
-} from "../script/api"
+} from "../services/api"
 
 export const useSchedulerStore = defineStore("scheduler", () => {
   // State

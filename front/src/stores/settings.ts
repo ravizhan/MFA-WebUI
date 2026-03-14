@@ -1,5 +1,5 @@
 import { defineStore } from "pinia"
-import { getSettings, updateSettings } from "../script/api"
+import { getSettings, updateSettings } from "../services/api"
 import type { SettingsModel } from "../types/settings"
 
 const defaultSettings: SettingsModel = {
