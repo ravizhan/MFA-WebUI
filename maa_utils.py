@@ -1,29 +1,24 @@
 import copy
+import io
 import subprocess
+import threading
 import time
 from queue import SimpleQueue
+from typing import cast
+
+import httpx
 import plyer
-import threading
+from PIL import Image
 from maa.resource import Resource
 from maa.tasker import Tasker
 from maa.toolkit import Toolkit
-from typing import cast
-import httpx
-import io
-from PIL import Image
 
 import json_utils as json
 from maa_worker.agent_loader import load_agents, run_black_magic
 from maa_worker.device_manager import (
-    append_controller_resource_paths as device_append_controller_resource_paths,
-    build_controller_display_labels as device_build_controller_display_labels,
-    build_device_capabilities as device_build_device_capabilities,
     connect_device as device_connect_device,
-    find_devices_for_controller as device_find_devices_for_controller,
     get_controller_definition as device_get_controller_definition,
     get_device as device_get_device,
-    is_controller_supported as device_is_controller_supported,
-    load_resource_bundle as device_load_resource_bundle,
     set_resource as device_set_resource,
 )
 from maa_worker.task_runner import (
@@ -239,26 +234,8 @@ class MaaWorker:
         )
         self.send_log(f"任务异常详情: {error_message}")
 
-    def _is_controller_supported(self, controller) -> tuple[bool, str]:
-        return device_is_controller_supported(controller)
-
-    def _build_controller_display_labels(self) -> dict[str, str]:
-        return device_build_controller_display_labels(self)
-
     def _get_controller_definition(self, controller_name: str | None):
         return device_get_controller_definition(self, controller_name)
-
-    def _load_resource_bundle(self, path: str):
-        return device_load_resource_bundle(path, resource)
-
-    def _append_controller_resource_paths(self, controller) -> list[str]:
-        return device_append_controller_resource_paths(self, controller, resource)
-
-    def _build_device_capabilities(self) -> list[dict]:
-        return device_build_device_capabilities(self)
-
-    def _find_devices_for_controller(self, controller) -> list[dict]:
-        return device_find_devices_for_controller(self, controller)
 
     def get_device(self, controller_name: str | None = None) -> dict:
         return device_get_device(self, controller_name)
