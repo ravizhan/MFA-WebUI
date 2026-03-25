@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import time
 from typing import TYPE_CHECKING, Any
 
 from maa.controller import (
@@ -149,6 +150,7 @@ def find_devices_for_controller(
                     "address": device.address,
                     "screencap_methods": str(device.screencap_methods),
                     "input_methods": str(device.input_methods),
+                    "config": device.config,
                 }
                 if data not in devices:
                     devices.append(data)
@@ -274,6 +276,7 @@ def connect_device(
                 address=device_config.address,
                 screencap_methods=int(device_config.screencap_methods or 0),
                 input_methods=int(device_config.input_methods or 0),
+                config=device_config.config or {},
             )
             status = controller.post_connection().wait().succeeded
         case "Win32":
@@ -306,7 +309,7 @@ def connect_device(
         )
         worker.send_log(conn_fail_msg)
         return worker.connected
-
+    time.sleep(1)
     if worker.tasker.bind(resource, controller):
         worker.connected = True
         setattr(worker, "controller", controller)

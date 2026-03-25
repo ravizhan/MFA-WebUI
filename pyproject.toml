@@ -1,6 +1,6 @@
 [project]
 name = "MWU"
-version = "0.10.0"
+version = "0.11.0"
 description = "基于 Vue 的 通用 GUI。由 MaaFramework 强力驱动！"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -9,14 +9,14 @@ dependencies = [
     "aiosqlite>=0.22.1",
     "fastapi>=0.135.1",
     "httpx>=0.28.1",
-    "maafw>=5.8.1",
-    "nuitka[all]>=4.0.5",
+    "maafw>=5.9.2",
+    "nuitka[all]>=4.0.7",
     "numpy>=2.3.5",
     "pillow>=12.1.1",
     "plyer>=2.1.0",
     "sqlalchemy>=2.0.48",
-    "uvicorn>=0.41.0",
+    "uvicorn>=0.42.0",
     "websockets>=16.0",
-    "ruff>=0.15.5",
+    "ruff>=0.15.7",
     "pyjson5>=2.0.0",
 ]

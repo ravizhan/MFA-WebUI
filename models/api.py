@@ -24,6 +24,7 @@ class DeviceModel(BaseModel):
     hWnd: int = 0
     gamepad_type: int = 0
     uuid: str = ""
+    config: dict = {}
 
 
 class RealtimeEvent(BaseModel):
