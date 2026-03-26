@@ -23,7 +23,7 @@ function buildDefaultsFromOptionMap(
   const options: Record<string, TaskOptionValue> = {}
   for (const key in optionMap) {
     const option = optionMap[key]!
-    if (option.type === "select") {
+    if (option.type === "select" || option.type === "scan_select") {
       options[key] = option.default_case || option.cases[0]?.name || ""
     } else if (option.type === "input") {
       for (const input of option.inputs) {

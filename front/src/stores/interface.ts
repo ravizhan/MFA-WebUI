@@ -45,7 +45,11 @@ export const useInterfaceStore = defineStore("interface", {
           const optionValue = this.interface.option?.[optionName]
           if (optionValue !== undefined) {
             result[optionName] = optionValue
-            if (optionValue.type === "switch" || optionValue.type === "select") {
+            if (
+              optionValue.type === "switch" ||
+              optionValue.type === "select" ||
+              optionValue.type === "scan_select"
+            ) {
               for (const caseItem of optionValue.cases) {
                 if (caseItem.option) {
                   collectOptions(caseItem.option)

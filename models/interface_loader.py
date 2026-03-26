@@ -173,6 +173,72 @@ def _resolve_import_path(import_path: str, base_dir: Path) -> Path:
     return path.resolve()
 
 
+def _resolve_scan_dir_path(scan_dir: str) -> Path:
+    path = Path(scan_dir)
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    return path.resolve()
+
+
+def _expand_scan_select_options(data: dict[str, Any]) -> None:
+    options = data.get("option")
+    if options is None or not isinstance(options, dict):
+        return
+
+    for option_name, option_data in options.items():
+        if not isinstance(option_data, dict):
+            continue
+        if option_data.get("type") != "scan_select":
+            continue
+
+        raw_cases = option_data.get("cases")
+        if raw_cases is not None:
+            if not isinstance(raw_cases, list):
+                raise InterfaceLoadError(
+                    f"scan_select 选项 {option_name} 的 cases 必须为空数组或省略"
+                )
+            if len(raw_cases) > 0:
+                raise InterfaceLoadError(
+                    f"scan_select 选项 {option_name} 不允许预置 cases，请改为留空后由扫描结果生成"
+                )
+
+        scan_dir = option_data.get("scan_dir")
+        if not isinstance(scan_dir, str) or not scan_dir.strip():
+            raise InterfaceLoadError(
+                f"scan_select 选项 {option_name} 的 scan_dir 必须为非空字符串"
+            )
+
+        scan_filter = option_data.get("scan_filter")
+        if not isinstance(scan_filter, str) or not scan_filter.strip():
+            raise InterfaceLoadError(
+                f"scan_select 选项 {option_name} 的 scan_filter 必须为非空字符串"
+            )
+
+        resolved_scan_dir = _resolve_scan_dir_path(scan_dir.strip())
+        if not resolved_scan_dir.exists() or not resolved_scan_dir.is_dir():
+            raise InterfaceLoadError(
+                f"scan_select 选项 {option_name} 的 scan_dir 不存在或不是目录: {scan_dir}"
+            )
+
+        try:
+            matched_paths = sorted(
+                {
+                    file_path.relative_to(resolved_scan_dir).as_posix()
+                    for file_path in resolved_scan_dir.glob(scan_filter)
+                    if file_path.is_file()
+                }
+            )
+        except Exception as exc:
+            raise InterfaceLoadError(
+                f"scan_select 选项 {option_name} 扫描失败，scan_filter={scan_filter}"
+            ) from exc
+
+        option_data["cases"] = [
+            {"name": relative_path, "label": relative_path}
+            for relative_path in matched_paths
+        ]
+
+
 def _merge_imports_into_target(
     target: dict[str, Any],
     import_paths: list[str],
@@ -215,6 +281,7 @@ def load_interface_model(interface_path: str | Path) -> InterfaceModel:
         merge_state,
         [root_path],
     )
+    _expand_scan_select_options(merged_data)
 
     try:
         return InterfaceModel.model_validate(merged_data)

@@ -259,7 +259,7 @@ class InputCase(BaseModel):
 
 
 class Option(BaseModel):
-    type: Literal["select", "input", "checkbox", "switch"] = "select"
+    type: Literal["select", "input", "checkbox", "switch", "scan_select"] = "select"
     label: Optional[str] = None
     description: Optional[str] = None
     icon: Optional[str] = None
@@ -267,6 +267,8 @@ class Option(BaseModel):
     resource: Optional[List[str]] = None
     cases: Optional[List[OptionCase]] = None
     inputs: Optional[List[InputCase]] = None
+    scan_dir: Optional[str] = None
+    scan_filter: Optional[str] = None
     pipeline_override: Optional[PipelineOverride] = None
     default_case: Optional[Union[str, List[str]]] = None
 
@@ -292,10 +294,19 @@ class Option(BaseModel):
         if self.type == "input":
             if not self.inputs:
                 raise ValueError("当 type 为 input 时，inputs 不能为空")
-        if self.type in {"select", "switch"}:
+        if self.type == "scan_select":
+            if not self.scan_dir:
+                raise ValueError("当 type 为 scan_select 时，scan_dir 不能为空")
+            if not self.scan_filter:
+                raise ValueError("当 type 为 scan_select 时，scan_filter 不能为空")
+            if not self.pipeline_override:
+                raise ValueError(
+                    "当 type 为 scan_select 时，pipeline_override 不能为空"
+                )
+        if self.type in {"select", "switch", "scan_select"}:
             if self.default_case is not None and not isinstance(self.default_case, str):
                 raise ValueError(
-                    "当 type 为 select 或 switch 时，default_case 必须为字符串"
+                    "当 type 为 select、switch 或 scan_select 时，default_case 必须为字符串"
                 )
         return self
 

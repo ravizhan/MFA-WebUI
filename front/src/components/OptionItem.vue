@@ -25,7 +25,7 @@
             />
           </template>
           <!-- Select -->
-          <template v-else-if="option.type === 'select'">
+          <template v-else-if="option.type === 'select' || option.type === 'scan_select'">
             <n-select class="w-40" :options="selectOptions" v-model:value="options[name]" />
           </template>
           <!-- Input -->
@@ -136,7 +136,7 @@ const checkboxValue = computed<string[]>({
 
 const selectOptions = computed(() => {
   const opt = option.value
-  if (opt?.type === "select") {
+  if (opt?.type === "select" || opt?.type === "scan_select") {
     return opt.cases.map((c) => ({
       label: c.label || c.name,
       value: c.name,
@@ -155,7 +155,7 @@ const nestedOptions = computed(() => {
     return activeCase?.option || []
   }
 
-  if (opt.type === "select") {
+  if (opt.type === "select" || opt.type === "scan_select") {
     const activeCase = opt.cases.find((c) => c.name === currentVal)
     return activeCase?.option || []
   }

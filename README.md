@@ -59,6 +59,79 @@ _✨ 基于 **[Vue](https://github.com/vuejs/vue)** 和 **[FastAPI](https://gith
 | 可执行文件名 | MWU               | 暂不可修改                                                   |
 | LOGO         |                         | 暂不可修改                                                   |
 
+### 📦 额外拓展功能
+#### scan_select 选项类型
+
+`scan_select` 用于在加载 `interface.json` 时扫描目录文件，并把扫描结果自动写入当前选项的 `cases`，适用于“配置文件选择”等动态枚举场景。
+
+字段定义如下：
+
+| 字段 | 类型 | 必填 | 说明 |
+| --- | --- | --- | --- |
+| `type` | `"scan_select"` | 是 | 选项类型 |
+| `label` | `string` | 否 | 前端显示名称 |
+| `description` | `string` | 否 | 描述信息 |
+| `scan_dir` | `string` | 是 | 扫描目录。相对路径基于进程当前工作目录解析 |
+| `scan_filter` | `string` | 是 | `glob pattern`，用于筛选文件，如 `**/*.json` |
+| `pipeline_override` | `object` | 是 | 任务执行时使用的覆盖配置，须包含 `{option_name}` 占位符 |
+| `cases` | `OptionCase[]` | 否（配置阶段应省略或空数组） | 加载时自动生成，`name`/`label` 均为相对 `scan_dir` 的路径+文件名 |
+| `default_case` | `string` | 否 | 默认选项名称 |
+
+示例：
+
+加载前：
+
+```json
+{
+  "option": {
+    "bbc_team_config": {
+      "type": "scan_select",
+      "label": "BBC 队伍配置",
+      "description": "选择 BBC 队伍配置文件",
+      "scan_dir": "./resource/BBchannel/settings",
+      "scan_filter": "**/*.json",
+      "pipeline_override": {
+        "队伍配置": {
+          "custom_action_param": "{bbc_team_config}"
+        }
+      }
+    }
+  }
+}
+```
+
+加载完成且用户选择 `1.json`：
+> 该结果仅在内存保留，不会实际修改interface.json
+
+```json
+{
+  "option": {
+    "bbc_team_config": {
+      "type": "scan_select",
+      "label": "BBC 队伍配置",
+      "description": "选择 BBC 队伍配置文件",
+      "scan_dir": "./resource/BBchannel/settings",
+      "scan_filter": "**/*.json",
+      "pipeline_override": {
+        "队伍配置": {
+          "custom_action_param": "1.json"
+        }
+      },
+      "cases": [
+        {
+          "name": "1.json",
+          "label": "1.json"
+        },
+        {
+          "name": "bbb/c.json",
+          "label": "bbb/c.json"
+        }
+      ]
+    }
+  }
+}
+```
+
 ## 🏗️ 项目架构与开发
 
 > **如果您需要更多的定制化功能或想为本项目做出贡献，请阅读以下部分**
