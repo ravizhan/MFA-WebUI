@@ -105,8 +105,15 @@ uv run python -m nuitka --standalone --assume-yes-for-downloads --user-package-c
 MWU/
 ├── main.py                      # FastAPI 应用入口，自动打开浏览器
 ├── maa_utils.py                 # MaaWorker 类，处理所有 MAA 框架交互
+├── app_state.py                 # 全局应用状态管理
 ├── scheduler_manager.py         # 定时任务调度管理器
 ├── interface.json               # 项目接口配置（V2 协议）
+│
+├── agent/                       # Agent 动态扩展目录
+│   ├── main.py                  # Agent 主程序
+│   ├── custom/                  # 自定义 Action/Reco/Sink 实现
+│   ├── libs/                    # Agent 依赖库
+│   └── utils/                   # Agent 工具类
 │
 ├── config/                      # 配置文件目录
 │   ├── settings.json            # 应用设置
@@ -115,106 +122,142 @@ MWU/
 │
 ├── models/                      # 数据模型目录
 │   ├── api.py                   # API 请求/响应模型
-│   ├── interface.py             # interface 数据模型（V2 协议）
+│   ├── interface.py             # interface 数据模型
+│   ├── interface_loader.py      # interface 加载逻辑
 │   ├── scheduler.py             # 定时任务相关模型
 │   ├── settings.py              # 设置数据模型
 │   └── task_config.py           # 任务配置模型
+│
+├── maa_worker/                  # MAA 核心工作进程
+│   ├── agent_loader.py          # Agent 动态加载器
+│   ├── device_manager.py        # 设备管理器
+│   └── task_runner.py           # 任务执行器
+│
+├── services/                    # 后端业务服务
+│   └── update_service.py        # 更新服务实现
 │
 ├── updater/                     # Go 更新器目录
 │   ├── main.go                  # 更新器主程序
 │   ├── go.mod                   # Go 模块定义
 │   └── go.sum                   # Go 依赖校验
 │
-├── deploy/                      # 部署相关脚本
-│   ├── install.yml              # GitHub Actions 安装脚本
+├── deploy/                      # 部署与 CI 相关脚本
+│   ├── install.yml              # GitHub Actions 部署配置
 │   ├── download_deps.py         # 依赖下载脚本
 │   └── copy_resources.py        # 资源复制脚本
 │
 ├── page/                        # 前端构建输出（FastAPI 静态服务）
 │
-├── resource/                    # MAA 资源文件目录
+├── resource/                    # MAA 资源文件目录（base, data, tasks等）
 │
 └── front/                       # 前端项目目录
     └── src/                     # 源代码目录
         ├── App.vue              # 根组件
         ├── main.ts              # 前端入口文件
         ├── components/          # Vue 组件
-        │   ├── LeftPanel.vue    # 左侧面板组件
-        │   ├── MediumPanel.vue  # 中间面板组件
-        │   ├── OptionItem.vue   # 选项项组件
-        │   └── RightPanel.vue   # 右侧面板组件
+        │   ├── LeftPanel.vue    # 左侧任务列表
+        │   ├── MediumPanel.vue  # 中间选项面板
+        │   ├── RightPanel.vue   # 右侧日志与控制
+        │   └── ...              # 其他功能组件
         ├── router/              # Vue Router 路由配置
-        │   └── index.ts
-        ├── script/              # API 和 WebSocket 工具函数
-        │   ├── api.ts
-        │   └── ws.ts
-        ├── stores/              # Pinia 状态管理
-        │   ├── index.ts         # Store 入口
-        │   ├── interface.ts     # 接口状态管理
-        │   ├── settings.ts      # 设置状态管理
-        │   └── userConfig.ts    # 用户配置状态管理
+        ├── theme.ts             # 主题配置
+        ├── services/            # API 调用与实时通信实现
+        │   ├── api/             # 领域 API (device, task, settings等)
+        │   ├── sse.ts           # SSE 客户端实现
+        │   └── realtime.ts      # 实时状态同步
+        ├── stores/              # Pinia 状态管理 (interface, settings等)
         ├── types/               # TypeScript 类型定义
-        │   ├── interface.ts     # interface 类型
-        │   └── settings.ts      # 设置类型
-        └── views/               # 页面视图组件
-            ├── PanelView.vue    # 主面板视图
-            └── SettingView.vue  # 设置视图
+        ├── views/               # 页面视图 (PanelView, SettingView)
+        └── utils/               # 前端工具类
 ```
 
 ### 全代码开发集成
 
-> 以下仅为推荐写法，对于全代码开发，选择权都在您的手上
+> 以下仅为推荐写法，对于全代码开发，选择权都在于您
 
-#### 🔧 扩展 MaaWorker 类
+#### 📐 关键文件说明
 
-`MaaWorker` 是处理 MAA 框架交互的核心类，您可以直接修改此类来添加自定义功能：
+- `main.py`：FastAPI 路由与生命周期管理（启动 `MaaWorker`、调度器、日志流）
+- `app_state.py`：运行时状态与日志广播
+- `maa_utils.py`：`MaaWorker` 编排层（事件通知、`pipeline_override` 合并、任务入口）
+- `maa_worker/device_manager.py`：设备发现、连接、资源加载
+- `maa_worker/task_runner.py`：任务线程启动/停止与执行主循环
+
+#### 🔧 扩展任务执行流程
+
+任务执行主循环位于 `maa_worker/task_runner.py` 的 `run_process`。如果您需要“特殊任务分支 + 默认 pipeline 共存”，推荐按下面方式扩展：
 
 ```python
-# maa_utils.py
+# maa_worker/task_runner.py
 
-class MaaWorker:
-    def __init__(self, queue: SimpleQueue, interface):
-        # ... 原有初始化代码 ...
-        self.send_log("MAA初始化成功")
-        self.agent_process: subprocess.Popen | None = None
-        self.load_agent()
-        self.send_log("Agent加载完成")
-        self.http_client = httpx.Client(timeout=30)
+def run_process(worker, task_list, options):
+    try:
+        worker._emit_task_started(task_list)
+        for task in task_list:
+            if worker.stop_flag:
+                worker.tasker.post_stop().wait()
+                worker.last_task_status = "stopped"
+                worker.last_task_error = "任务已终止"
+                worker.send_log("任务已终止")
+                return
 
-    # ========== 在此添加您的自定义方法 ==========
+            # 自定义入口：按 task entry 分发到专用逻辑
+            if task == "MyCustomEntry":
+                if not _run_my_custom_entry(worker, options):
+                    return
+                continue
 
-    def my_custom_task(self, param: str):
-        """自定义任务示例"""
-        self.send_log(f"开始执行自定义任务: {param}")
+            # 默认入口：继续走 interface.json 的 pipeline 任务
+            pipeline_override = worker._build_task_pipeline_override(task, options)
+            t = (
+                worker.tasker.post_task(task, pipeline_override)
+                if pipeline_override
+                else worker.tasker.post_task(task)
+            )
+            worker.send_log("正在运行任务: " + task)
 
-        # 获取当前屏幕截图
-        image = self.controller.post_screencap().wait().get()
+            while not t.done:
+                time.sleep(0.5)
+                if worker.stop_flag:
+                    worker.tasker.post_stop().wait()
+                    worker.last_task_status = "stopped"
+                    worker.last_task_error = "任务已终止"
+                    worker.send_log("任务已终止")
+                    return
 
-        # 执行 pipeline 任务
-        result = self.tasker.post_task("MyCustomEntry").wait().get()
+        worker.last_task_status = "success"
+        worker.last_task_error = None
+        worker._emit_task_completed(task_list)
+    except Exception as exc:
+        worker.last_task_status = "failed"
+        worker.last_task_error = str(exc) or "任务执行失败"
+        worker._emit_task_failed(task_list, worker.last_task_error)
+        worker.send_log("任务出现异常，请检查终端日志")
+    finally:
+        worker.running = False
+        worker._task_thread = None
+        worker._current_task_name = None
+        time.sleep(0.5)
 
-        # 处理结果
-        if result.status.succeeded:
-            self.send_log("任务执行成功")
-        else:
-            self.send_log("任务执行失败")
 
-        return result.status.succeeded
-
-    def detect_custom_objects(self) -> tuple[list, list]:
-        """自定义识别示例 - 使用 YOLO 检测"""
-        result = self.tasker.post_task("yolo_detect").wait().get()
-        if result.status.failed:
-            return [], []
-
-        details = result.nodes[0].recognition.raw_detail["all"]
-        boxes, labels = [], []
-        for detail in details:
-            boxes.append(detail["box"])
-            labels.append(detail["label"])
-        return boxes, labels
-
-    # ========== 自定义方法结束 ==========
+def _run_my_custom_entry(worker, options):
+    worker.send_log("开始执行自定义任务: MyCustomEntry")
+    pipeline_override = worker._build_task_pipeline_override("MyCustomEntry", options)
+    t = (
+        worker.tasker.post_task("MyCustomEntry", pipeline_override)
+        if pipeline_override
+        else worker.tasker.post_task("MyCustomEntry")
+    )
+    while not t.done:
+        time.sleep(0.5)
+        if worker.stop_flag:
+            worker.tasker.post_stop().wait()
+            worker.last_task_status = "stopped"
+            worker.last_task_error = "任务已终止"
+            worker.send_log("任务已终止")
+            return False
+    worker.send_log("自定义任务执行完成")
+    return True
 ```
 
 #### 📝 自定义 Action 和 Recognition
@@ -262,67 +305,13 @@ class MyCustomAction(CustomAction):
         return CustomAction.RunResult(success=True)
 ```
 
-#### 🔌 集成自定义逻辑到任务流程
-
-修改 `_run_process` 方法或添加新的任务入口，将您的自定义逻辑集成到任务流程中：
-
-```python
-# maa_utils.py
-
-def _run_process(self, task_list):
-    """任务执行主流程 - 可在此扩展"""
-    self.send_log("任务开始")
-    try:
-        for task in task_list:
-            if self.stop_flag:
-                self.tasker.post_stop().wait()
-                self.send_log("任务已终止")
-                return
-
-            # 原有任务执行
-            if task == "启动游戏":
-                self._startup_game()
-            elif task == "我的自定义任务":
-                # 调用您的自定义方法
-                self.my_custom_task("参数")
-            else:
-                # 默认 pipeline 任务
-                t = self.tasker.post_task(task)
-                self.send_log("正在运行任务: " + task)
-                while not t.done:
-                    time.sleep(0.5)
-                    if self.stop_flag:
-                        self.tasker.post_stop().wait()
-                        self.send_log("任务已终止")
-                        return
-
-    except Exception:
-        traceback.print_exc()
-        self.send_notification("错误", "任务出现异常")
-        self.send_log("任务出现异常，请检查终端日志")
-    finally:
-        self.running = False
-        self._task_thread = None
-        self.send_log("所有任务完成")
-
-
-def _startup_game(self):
-    """封装启动游戏逻辑"""
-    self.send_log("正在启动游戏...")
-    self.tasker.post_task("StartUp").wait()
-```
-
-#### 📋 interface.json 配置
-
-如果您想在WebUI展示自定义任务，您也需要在 `interface.json` 中添加您的自定义任务。
-
 #### 💡 开发建议
 
-1. **日志输出**：使用 `self.send_log(msg)` 输出日志，会自动推送到前端
-2. **通知推送**：使用 `self.send_notification(title, message)` 发送系统通知和浏览器通知
-3. **截图获取**：`self.controller.post_screencap().wait().get()` 获取当前屏幕
-4. **任务状态**：通过 `self.running` 和 `self.stop_flag` 控制任务生命周期
-6. **配置读取**：通过 `self.interface` 访问 `interface.json` 的配置
+1. **优先按模块改动**：设备相关优先改 `maa_worker/device_manager.py`，任务流优先改 `maa_worker/task_runner.py`，避免把所有逻辑塞进 `maa_utils.py`。
+2. **统一事件出口**：日志与通知尽量走 `MaaWorker.emit_event` / `send_log` / `send_notification`，便于前端 SSE 与通知配置统一生效。
+3. **保持任务状态可观测**：自定义流程要维护 `last_task_status` / `last_task_error`，这样定时调度执行记录才能正确展示。
+4. **谨慎新增实时事件类型**：若新增事件名，请同步更新后端 `RealtimeEventName` 与前端事件处理逻辑。
+5. **避免命名冲突**：不要新建顶层 `utils` 包，避免与 agent 动态加载路径冲突。
 
 ## 📄 开源许可
 
