@@ -113,10 +113,15 @@ export const useTaskConfigStore = defineStore("taskConfig", {
         Object.assign(this.options, taskConfig.taskOptions)
       }
 
-      this.taskList = this.buildDefaultTaskList()
-      if (taskConfig.taskOrder && taskConfig.taskChecked) {
-        const taskMap = new Map(this.taskList.map((task) => [task.id, task]))
+      const defaultTaskList = this.buildDefaultTaskList()
+      this.taskList = defaultTaskList
+
+      if (taskConfig.taskOrder?.length) {
+        const taskMap = new Map(defaultTaskList.map((task) => [task.id, task]))
+        const taskChecked = taskConfig.taskChecked || {}
         const reorderedTasks: TaskListItem[] = []
+        const seenTaskIds = new Set<string>()
+
         for (const id of taskConfig.taskOrder) {
           const task = taskMap.get(id)
           if (task) {
@@ -124,10 +129,23 @@ export const useTaskConfigStore = defineStore("taskConfig", {
               id: task.id,
               name: task.name,
               order: task.order,
-              checked: taskConfig.taskChecked?.[id] || false,
+              checked: taskChecked[id] || false,
+            })
+            seenTaskIds.add(id)
+          }
+        }
+
+        for (const task of defaultTaskList) {
+          if (!seenTaskIds.has(task.id)) {
+            reorderedTasks.push({
+              id: task.id,
+              name: task.name,
+              order: task.order,
+              checked: taskChecked[task.id] || false,
             })
           }
         }
+
         this.taskList = reorderedTasks
       }
 
