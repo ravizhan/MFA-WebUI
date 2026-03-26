@@ -26,6 +26,21 @@ def validate_regex(v: Any, info: ValidationInfo) -> Any:
         raise ValueError(f"{info.field_name} 无法编译为正则表达式")
 
 
+def _pipeline_override_contains_placeholder(value: Any, placeholder: str) -> bool:
+    if isinstance(value, dict):
+        for nested_value in value.values():
+            if _pipeline_override_contains_placeholder(nested_value, placeholder):
+                return True
+        return False
+    if isinstance(value, list):
+        return any(
+            _pipeline_override_contains_placeholder(item, placeholder) for item in value
+        )
+    if isinstance(value, str):
+        return placeholder in value
+    return False
+
+
 class AdbController(BaseModel):
     """Adb 控制器配置，V2 协议中 input/screencap 由 MaaFramework 自动检测"""
 
@@ -357,4 +372,23 @@ class InterfaceModel(BaseModel):
             self.label = self.name
         if self.title is None and self.label and self.version:
             self.title = f"{self.label} {self.version}"
+        return self
+
+    @model_validator(mode="after")
+    def check_scan_select_pipeline_override_placeholder(self):
+        if not self.option:
+            return self
+
+        for option_name, option in self.option.items():
+            if option.type != "scan_select" or option.pipeline_override is None:
+                continue
+
+            placeholder = f"{{{option_name}}}"
+            if not _pipeline_override_contains_placeholder(
+                option.pipeline_override,
+                placeholder,
+            ):
+                raise ValueError(
+                    f"scan_select 选项 {option_name} 的 pipeline_override 必须在任意字符串值中至少包含一次占位符 {placeholder}"
+                )
         return self
