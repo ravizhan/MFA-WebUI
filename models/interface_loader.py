@@ -180,7 +180,51 @@ def _resolve_scan_dir_path(scan_dir: str) -> Path:
     return path.resolve()
 
 
-def _expand_scan_select_options(data: dict[str, Any]) -> None:
+def _contains_parent_segment(path_value: str) -> bool:
+    return any(part == ".." for part in Path(path_value).parts)
+
+
+def _validate_scan_dir(scan_dir: str, option_name: str) -> str:
+    normalized_scan_dir = scan_dir.strip()
+    scan_dir_path = Path(normalized_scan_dir)
+    if scan_dir_path.is_absolute() or scan_dir_path.drive or scan_dir_path.root:
+        raise InterfaceLoadError(
+            f"scan_select 选项 {option_name} 的 scan_dir 不允许使用绝对路径"
+        )
+    if _contains_parent_segment(normalized_scan_dir):
+        raise InterfaceLoadError(
+            f"scan_select 选项 {option_name} 的 scan_dir 不允许包含父级目录跳转"
+        )
+    return normalized_scan_dir
+
+
+def _validate_scan_filter(scan_filter: str, option_name: str) -> str:
+    normalized_scan_filter = scan_filter.strip()
+    scan_filter_path = Path(normalized_scan_filter)
+    if (
+        scan_filter_path.is_absolute()
+        or scan_filter_path.drive
+        or scan_filter_path.root
+    ):
+        raise InterfaceLoadError(
+            f"scan_select 选项 {option_name} 的 scan_filter 不允许使用绝对路径"
+        )
+    if _contains_parent_segment(normalized_scan_filter):
+        raise InterfaceLoadError(
+            f"scan_select 选项 {option_name} 的 scan_filter 不允许包含父级目录跳转"
+        )
+    return normalized_scan_filter
+
+
+def _is_within_base_dir(path: Path, base_dir: Path) -> bool:
+    try:
+        path.relative_to(base_dir)
+        return True
+    except ValueError:
+        return False
+
+
+def _expand_scan_select_options(data: dict[str, Any], base_dir: Path) -> None:
     options = data.get("option")
     if options is None or not isinstance(options, dict):
         return
@@ -214,7 +258,16 @@ def _expand_scan_select_options(data: dict[str, Any]) -> None:
                 f"scan_select 选项 {option_name} 的 scan_filter 必须为非空字符串"
             )
 
-        resolved_scan_dir = _resolve_scan_dir_path(scan_dir.strip())
+        normalized_scan_dir = _validate_scan_dir(scan_dir, option_name)
+        normalized_scan_filter = _validate_scan_filter(scan_filter, option_name)
+
+        resolved_scan_dir = _resolve_scan_dir_path(
+            str((base_dir / normalized_scan_dir).resolve())
+        )
+        if not _is_within_base_dir(resolved_scan_dir, base_dir):
+            raise InterfaceLoadError(
+                f"scan_select 选项 {option_name} 的 scan_dir 越界，禁止访问 interface.json 目录之外的路径"
+            )
         if not resolved_scan_dir.exists() or not resolved_scan_dir.is_dir():
             raise InterfaceLoadError(
                 f"scan_select 选项 {option_name} 的 scan_dir 不存在或不是目录: {scan_dir}"
@@ -224,13 +277,13 @@ def _expand_scan_select_options(data: dict[str, Any]) -> None:
             matched_paths = sorted(
                 {
                     file_path.relative_to(resolved_scan_dir).as_posix()
-                    for file_path in resolved_scan_dir.glob(scan_filter)
+                    for file_path in resolved_scan_dir.glob(normalized_scan_filter)
                     if file_path.is_file()
                 }
             )
         except Exception as exc:
             raise InterfaceLoadError(
-                f"scan_select 选项 {option_name} 扫描失败，scan_filter={scan_filter}"
+                f"scan_select 选项 {option_name} 扫描失败，scan_filter={normalized_scan_filter}"
             ) from exc
 
         option_data["cases"] = [
@@ -281,7 +334,7 @@ def load_interface_model(interface_path: str | Path) -> InterfaceModel:
         merge_state,
         [root_path],
     )
-    _expand_scan_select_options(merged_data)
+    _expand_scan_select_options(merged_data, root_path.parent)
 
     try:
         return InterfaceModel.model_validate(merged_data)
