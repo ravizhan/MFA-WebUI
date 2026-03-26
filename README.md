@@ -71,7 +71,7 @@ _✨ 基于 **[Vue](https://github.com/vuejs/vue)** 和 **[FastAPI](https://gith
 | `type` | `"scan_select"` | 是 | 选项类型 |
 | `label` | `string` | 否 | 前端显示名称 |
 | `description` | `string` | 否 | 描述信息 |
-| `scan_dir` | `string` | 是 | 扫描目录。相对路径基于进程当前工作目录解析 |
+| `scan_dir` | `string` | 是 | 扫描目录。相对路径基于 interface.json 所在目录解析，并做越界限制（不允许跳出该目录） |
 | `scan_filter` | `string` | 是 | `glob pattern`，用于筛选文件，如 `**/*.json` |
 | `pipeline_override` | `object` | 是 | 任务执行时使用的覆盖配置，须包含 `{option_name}` 占位符 |
 | `cases` | `OptionCase[]` | 否（配置阶段应省略或空数组） | 加载时自动生成，`name`/`label` 均为相对 `scan_dir` 的路径+文件名 |
