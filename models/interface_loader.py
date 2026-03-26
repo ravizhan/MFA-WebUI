@@ -261,9 +261,8 @@ def _expand_scan_select_options(data: dict[str, Any], base_dir: Path) -> None:
         normalized_scan_dir = _validate_scan_dir(scan_dir, option_name)
         normalized_scan_filter = _validate_scan_filter(scan_filter, option_name)
 
-        resolved_scan_dir = _resolve_scan_dir_path(
-            str((base_dir / normalized_scan_dir).resolve())
-        )
+        # 直接在 base_dir 下解析 scan_dir，避免多余的字符串转换与基于 cwd 的再次解析
+        resolved_scan_dir = (base_dir / normalized_scan_dir).resolve()
         if not _is_within_base_dir(resolved_scan_dir, base_dir):
             raise InterfaceLoadError(
                 f"scan_select 选项 {option_name} 的 scan_dir 越界，禁止访问 interface.json 目录之外的路径"
