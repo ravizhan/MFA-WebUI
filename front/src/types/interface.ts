@@ -155,7 +155,15 @@ export interface SwitchOption extends OptionBase {
   default_case?: string
 }
 
-export type Option = SelectOption | InputOption | CheckboxOption | SwitchOption
+export interface ScanSelectOption extends OptionBase {
+  type: "scan_select"
+  scan_dir: string
+  scan_filter: string
+  cases: OptionCase[]
+  default_case?: string
+}
+
+export type Option = SelectOption | InputOption | CheckboxOption | SwitchOption | ScanSelectOption
 
 export type PresetTaskOptionValue = string | string[] | Record<string, string>
 

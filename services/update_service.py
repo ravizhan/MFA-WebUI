@@ -2,7 +2,6 @@ import platform
 
 import httpx
 
-from models.interface import InterfaceModel
 from models.settings import SettingsModel
 
 MIRRORCHYAN_API_BASES = [
@@ -70,9 +69,12 @@ def check_mirrorchyan_update(
     return None
 
 
-def check_github_update(interface: InterfaceModel, settings: SettingsModel):
+def check_github_update(
+    github_url: str,
+    current_version: str,
+    settings: SettingsModel,
+):
     """通过 GitHub Releases API 检查更新"""
-    github_url = interface.github or ""
     repo_parts = github_url.split("/")
     if len(repo_parts) < 5:
         return None
@@ -86,7 +88,6 @@ def check_github_update(interface: InterfaceModel, settings: SettingsModel):
         timeout=15,
     ).json()
     latest_version = response["tag_name"]
-    current_version = interface.version
 
     plat, arch = get_platform_info()
 

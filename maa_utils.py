@@ -433,6 +433,29 @@ class MaaWorker:
             ),
         )
 
+    def _build_scan_select_pipeline_override(
+        self,
+        option_name: str,
+        option,
+        options: dict[str, TaskOptionValue],
+    ) -> PipelineOverride:
+        if not option.pipeline_override:
+            return {}
+
+        if option.cases is None:
+            return copy.deepcopy(option.pipeline_override)
+
+        selected_value = self._normalize_choice_value(option_name, option, options)
+        placeholder = f"{{{option_name}}}"
+        return cast(
+            PipelineOverride,
+            self._substitute_pipeline_placeholders(
+                option.pipeline_override,
+                {placeholder: selected_value},
+                {placeholder: selected_value},
+            ),
+        )
+
     def _build_option_pipeline_override(
         self,
         option_name: str,
@@ -460,7 +483,16 @@ class MaaWorker:
             )
             return merged
 
-        if option.pipeline_override:
+        if option.type == "scan_select":
+            merged = self._deep_merge_pipeline_override(
+                merged,
+                self._build_scan_select_pipeline_override(
+                    option_name,
+                    option,
+                    options,
+                ),
+            )
+        elif option.pipeline_override:
             merged = self._deep_merge_pipeline_override(
                 merged, option.pipeline_override
             )
@@ -587,7 +619,13 @@ class MaaWorker:
         options: dict[str, TaskOptionValue],
         task_name: str | None = None,
     ) -> bool:
-        return start_worker_task(self, task_list, options, task_name)
+        cleaned_options: dict[str, TaskOptionValue] = {}
+        for key, value in options.items():
+            if value is None:
+                cleaned_options[key] = ""
+            else:
+                cleaned_options[key] = value
+        return start_worker_task(self, task_list, cleaned_options, task_name)
 
     def stop_task(self) -> bool:
         return stop_worker_task(self)

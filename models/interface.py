@@ -26,6 +26,21 @@ def validate_regex(v: Any, info: ValidationInfo) -> Any:
         raise ValueError(f"{info.field_name} 无法编译为正则表达式")
 
 
+def _pipeline_override_contains_placeholder(value: Any, placeholder: str) -> bool:
+    if isinstance(value, dict):
+        for nested_value in value.values():
+            if _pipeline_override_contains_placeholder(nested_value, placeholder):
+                return True
+        return False
+    if isinstance(value, list):
+        return any(
+            _pipeline_override_contains_placeholder(item, placeholder) for item in value
+        )
+    if isinstance(value, str):
+        return placeholder in value
+    return False
+
+
 class AdbController(BaseModel):
     """Adb 控制器配置，V2 协议中 input/screencap 由 MaaFramework 自动检测"""
 
@@ -259,7 +274,7 @@ class InputCase(BaseModel):
 
 
 class Option(BaseModel):
-    type: Literal["select", "input", "checkbox", "switch"] = "select"
+    type: Literal["select", "input", "checkbox", "switch", "scan_select"] = "select"
     label: Optional[str] = None
     description: Optional[str] = None
     icon: Optional[str] = None
@@ -267,6 +282,8 @@ class Option(BaseModel):
     resource: Optional[List[str]] = None
     cases: Optional[List[OptionCase]] = None
     inputs: Optional[List[InputCase]] = None
+    scan_dir: Optional[str] = None
+    scan_filter: Optional[str] = None
     pipeline_override: Optional[PipelineOverride] = None
     default_case: Optional[Union[str, List[str]]] = None
 
@@ -292,10 +309,19 @@ class Option(BaseModel):
         if self.type == "input":
             if not self.inputs:
                 raise ValueError("当 type 为 input 时，inputs 不能为空")
-        if self.type in {"select", "switch"}:
+        if self.type == "scan_select":
+            if not self.scan_dir:
+                raise ValueError("当 type 为 scan_select 时，scan_dir 不能为空")
+            if not self.scan_filter:
+                raise ValueError("当 type 为 scan_select 时，scan_filter 不能为空")
+            if not self.pipeline_override:
+                raise ValueError(
+                    "当 type 为 scan_select 时，pipeline_override 不能为空"
+                )
+        if self.type in {"select", "switch", "scan_select"}:
             if self.default_case is not None and not isinstance(self.default_case, str):
                 raise ValueError(
-                    "当 type 为 select 或 switch 时，default_case 必须为字符串"
+                    "当 type 为 select、switch 或 scan_select 时，default_case 必须为字符串"
                 )
         return self
 
@@ -346,4 +372,23 @@ class InterfaceModel(BaseModel):
             self.label = self.name
         if self.title is None and self.label and self.version:
             self.title = f"{self.label} {self.version}"
+        return self
+
+    @model_validator(mode="after")
+    def check_scan_select_pipeline_override_placeholder(self):
+        if not self.option:
+            return self
+
+        for option_name, option in self.option.items():
+            if option.type != "scan_select" or option.pipeline_override is None:
+                continue
+
+            placeholder = f"{{{option_name}}}"
+            if not _pipeline_override_contains_placeholder(
+                option.pipeline_override,
+                placeholder,
+            ):
+                raise ValueError(
+                    f"scan_select 选项 {option_name} 的 pipeline_override 必须在任意字符串值中至少包含一次占位符 {placeholder}"
+                )
         return self

@@ -2,6 +2,7 @@ import asyncio
 import threading
 import webbrowser
 from contextlib import asynccontextmanager
+from pathlib import Path
 import uvicorn
 import os
 import signal
@@ -9,7 +10,12 @@ import sys
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from models.interface_loader import load_interface_model
+from pydantic import BaseModel
+from models.interface_loader import (
+    InterfaceLoadError,
+    load_interface_model,
+    rescan_scan_select_option,
+)
 from models.api import DeviceModel
 from models.task_config import TaskConfigModel
 from models.settings import SettingsModel
@@ -33,7 +39,14 @@ import hashlib
 
 import json_utils as json
 
-interface = load_interface_model("interface.json")
+INTERFACE_PATH = Path("interface.json").resolve()
+interface = load_interface_model(INTERFACE_PATH)
+interface_lock = threading.Lock()
+
+
+class ScanSelectRescanRequest(BaseModel):
+    option_name: str
+
 
 if not os.path.exists("config"):
     os.makedirs("config")
@@ -107,7 +120,32 @@ async def serve_homepage():
 
 @app.get("/api/interface")
 def get_interface():
-    return interface.model_dump()
+    with interface_lock:
+        return interface.model_dump()
+
+
+@app.post("/api/interface/scan-select/rescan")
+def rescan_scan_select(payload: ScanSelectRescanRequest):
+    option_name = payload.option_name.strip()
+    if not option_name:
+        return {"status": "failed", "message": "option_name 不能为空"}
+
+    try:
+        with interface_lock:
+            cases = rescan_scan_select_option(
+                interface, option_name, INTERFACE_PATH.parent
+            )
+    except InterfaceLoadError as exc:
+        return {"status": "failed", "message": str(exc)}
+    except Exception as exc:
+        app_state.send_log(f"重扫 scan_select 失败: {exc}")
+        return {"status": "failed", "message": "重扫失败"}
+
+    return {
+        "status": "success",
+        "option_name": option_name,
+        "cases": cases,
+    }
 
 
 async def video_stream_generator(fps: int = 15):
@@ -242,6 +280,7 @@ def check_update():
         settings = app_state.settings or SettingsModel()
         current_version = interface.version or ""
         mirrorchyan_rid = getattr(interface, "mirrorchyan_rid", None)
+        github_url = interface.github or ""
         cdk = settings.update.mirrorchyanCdk
 
         if mirrorchyan_rid:
@@ -273,9 +312,13 @@ def check_update():
                     }
 
                 # 无 CDK 或无下载链接，尝试 GitHub 获取下载链接
-                if has_update and interface.github:
+                if has_update and github_url:
                     try:
-                        gh_info = check_github_update(interface, settings)
+                        gh_info = check_github_update(
+                            github_url,
+                            current_version,
+                            settings,
+                        )
                         if gh_info:
                             # 保留 mirrorchyan 的版本信息，用 GitHub 的下载链接
                             app_state.update_info["download_url"] = gh_info[
@@ -292,8 +335,8 @@ def check_update():
                     "update_info": app_state.update_info,
                 }
 
-        if interface.github:
-            gh_info = check_github_update(interface, settings)
+        if github_url:
+            gh_info = check_github_update(github_url, current_version, settings)
             if gh_info:
                 app_state.update_info = gh_info
                 return {"status": "success", "update_info": app_state.update_info}

@@ -1,5 +1,8 @@
 import { defineStore } from "pinia"
-import { getInterface } from "../services/api"
+import {
+  getInterface,
+  rescanScanSelectOption as requestRescanScanSelectOption,
+} from "../services/api"
 import type { InterfaceModel, Option } from "../types/interface"
 
 export interface TaskListItem {
@@ -35,6 +38,21 @@ export const useInterfaceStore = defineStore("interface", {
       this.interface = data
     },
 
+    async rescanScanSelectOption(optionName: string): Promise<boolean> {
+      const targetOption = this.interface?.option?.[optionName]
+      if (!targetOption || targetOption.type !== "scan_select") {
+        return false
+      }
+
+      const cases = await requestRescanScanSelectOption(optionName)
+      const latestOption = this.interface?.option?.[optionName]
+      if (!latestOption || latestOption.type !== "scan_select") {
+        return false
+      }
+      latestOption.cases = cases
+      return true
+    },
+
     getOptionList(entry: string): Record<string, Option> {
       const result: Record<string, Option> = {}
       if (!this.interface?.option) return result
@@ -45,7 +63,11 @@ export const useInterfaceStore = defineStore("interface", {
           const optionValue = this.interface.option?.[optionName]
           if (optionValue !== undefined) {
             result[optionName] = optionValue
-            if (optionValue.type === "switch" || optionValue.type === "select") {
+            if (
+              optionValue.type === "switch" ||
+              optionValue.type === "select" ||
+              optionValue.type === "scan_select"
+            ) {
               for (const caseItem of optionValue.cases) {
                 if (caseItem.option) {
                   collectOptions(caseItem.option)

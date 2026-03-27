@@ -28,6 +28,26 @@
           <template v-else-if="option.type === 'select'">
             <n-select class="w-40" :options="selectOptions" v-model:value="options[name]" />
           </template>
+          <!-- Scan Select -->
+          <template v-else-if="option.type === 'scan_select'">
+            <div class="flex items-center gap-2">
+              <n-select class="w-40" :options="selectOptions" v-model:value="options[name]" />
+              <n-button
+                circle
+                quaternary
+                size="small"
+                :loading="scanSelectRefreshing"
+                :disabled="scanSelectRefreshing"
+                @click="handleRescanScanSelect"
+              >
+                <template #icon>
+                  <n-icon>
+                    <div class="i-mdi-refresh" />
+                  </n-icon>
+                </template>
+              </n-button>
+            </div>
+          </template>
           <!-- Input -->
           <template v-else-if="option.type === 'input'">
             <div class="flex flex-col gap-2 w-full max-w-xs">
@@ -68,7 +88,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue"
+import { computed, ref, watch } from "vue"
 import { useInterfaceStore } from "../stores/interface"
 import { useTaskConfigStore } from "../stores/taskConfig"
 import { storeToRefs } from "pinia"
@@ -88,6 +108,31 @@ const options = props.options ? computed(() => props.options!) : storeToRefs(con
 
 const option = computed(() => interfaceStore.interface?.option?.[props.name])
 const label = computed(() => option.value?.label)
+const scanSelectRefreshing = ref(false)
+
+async function handleRescanScanSelect() {
+  const opt = option.value
+  if (!opt || opt.type !== "scan_select") {
+    return
+  }
+
+  // 在重扫前保存旧值，避免请求失败导致用户选择丢失
+  const previousValue = options.value[props.name]
+
+  scanSelectRefreshing.value = true
+  try {
+    options.value[props.name] = null as any
+    await interfaceStore.rescanScanSelectOption(props.name)
+  } catch (error) {
+    // 重扫失败时恢复旧值
+    options.value[props.name] = previousValue
+    if (error instanceof Error && error.message) {
+      message.error(error.message)
+    }
+  } finally {
+    scanSelectRefreshing.value = false
+  }
+}
 
 function normalizeCheckboxValue(value: TaskOptionValue | undefined, caseOrder: string[]): string[] {
   let selectedValues: string[] = []
@@ -136,7 +181,7 @@ const checkboxValue = computed<string[]>({
 
 const selectOptions = computed(() => {
   const opt = option.value
-  if (opt?.type === "select") {
+  if (opt?.type === "select" || opt?.type === "scan_select") {
     return opt.cases.map((c) => ({
       label: c.label || c.name,
       value: c.name,
@@ -144,6 +189,30 @@ const selectOptions = computed(() => {
   }
   return []
 })
+
+const isSelectValueInvalid = computed(() => {
+  const opt = option.value
+  if (opt?.type !== "select" && opt?.type !== "scan_select") {
+    return false
+  }
+
+  const currentValue = options.value[props.name]
+  if (currentValue == null || typeof currentValue !== "string") {
+    return false
+  }
+
+  return !selectOptions.value.some((item) => item.value === currentValue)
+})
+
+watch(
+  () => isSelectValueInvalid.value,
+  (invalid) => {
+    if (invalid) {
+      options.value[props.name] = null as any
+    }
+  },
+  { immediate: true },
+)
 
 const nestedOptions = computed(() => {
   const opt = option.value
@@ -155,7 +224,7 @@ const nestedOptions = computed(() => {
     return activeCase?.option || []
   }
 
-  if (opt.type === "select") {
+  if (opt.type === "select" || opt.type === "scan_select") {
     const activeCase = opt.cases.find((c) => c.name === currentVal)
     return activeCase?.option || []
   }
