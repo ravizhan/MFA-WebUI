@@ -8,6 +8,7 @@
             :placeholder="t('panel.selectDeviceType')"
             :options="controllerOptions"
             :loading="loading"
+            :disabled="isDeviceResourceLocked"
             @update:value="handleControllerChange"
             class="max-w-35%"
           />
@@ -15,6 +16,7 @@
             v-if="selectedControllerCapability?.type === 'PlayCover'"
             v-model:value="playCoverAddress"
             :placeholder="t('panel.playcoverAddress')"
+            :disabled="isDeviceResourceLocked"
             class="max-w-45%"
           />
           <n-select
@@ -23,13 +25,18 @@
             :placeholder="t('panel.selectDevice')"
             :options="deviceOptions"
             :loading="loading"
-            :disabled="!selectedController || selectedControllerDisabled"
+            :disabled="!selectedController || selectedControllerDisabled || isDeviceResourceLocked"
             @click="refreshDevices"
             class="max-w-45%"
           />
-          <n-button strong secondary type="info" @click="connectDevices">{{
-            t("panel.connect")
-          }}</n-button>
+          <n-button
+            strong
+            secondary
+            type="info"
+            :disabled="isDeviceResourceLocked"
+            @click="connectDevices"
+            >{{ t("panel.connect") }}</n-button
+          >
         </n-flex>
       </n-tab-pane>
       <n-tab-pane name="resource" :tab="t('panel.resource')">
@@ -40,7 +47,7 @@
             :options="resources_list"
             :loading="loading"
             remote
-            :disabled="!isCurrentSelectionConnected"
+            :disabled="!isCurrentSelectionConnected || isDeviceResourceLocked"
             @click="getResourceList"
             class="max-w-80%"
           />
@@ -48,7 +55,7 @@
             strong
             secondary
             type="info"
-            :disabled="!isCurrentSelectionConnected"
+            :disabled="!isCurrentSelectionConnected || isDeviceResourceLocked"
             @click="post_resource"
             >{{ t("panel.confirm") }}</n-button
           >
@@ -127,6 +134,7 @@ const playCoverAddress = ref("")
 const resource = ref<string | null>(null)
 const resources_list = ref<Array<{ label: string; value: string }>>([])
 const loading = ref(false)
+const isDeviceResourceLocked = ref(false)
 
 const selectedTaskIds = computed(() => {
   return configStore.taskList.filter((task) => task.checked).map((task) => task.id)
@@ -443,6 +451,9 @@ async function fetchDevices(controllerName?: string, restoreStored = false) {
 }
 
 function handleControllerChange(value: string) {
+  if (isDeviceResourceLocked.value) {
+    return
+  }
   selectedDeviceKey.value = null
   const capability = controllerCapabilities.value.find((item) => item.display_label === value)
   if (capability?.type === "PlayCover" && !playCoverAddress.value) {
@@ -452,6 +463,9 @@ function handleControllerChange(value: string) {
 }
 
 function refreshDevices() {
+  if (isDeviceResourceLocked.value) {
+    return
+  }
   if (
     !selectedControllerCapability.value ||
     selectedControllerCapability.value.type === "PlayCover"
@@ -462,6 +476,9 @@ function refreshDevices() {
 }
 
 async function connectDevices() {
+  if (isDeviceResourceLocked.value) {
+    return
+  }
   const selectedCapability = selectedControllerCapability.value
   if (!selectedCapability) {
     message.error(t("panel.selectDeviceType"))
@@ -510,6 +527,9 @@ async function connectDevices() {
 }
 
 async function getResourceList() {
+  if (isDeviceResourceLocked.value) {
+    return
+  }
   if (!isCurrentSelectionConnected.value) {
     return
   }
@@ -536,6 +556,9 @@ async function getResourceList() {
 }
 
 async function post_resource() {
+  if (isDeviceResourceLocked.value) {
+    return
+  }
   if (!isCurrentSelectionConnected.value) {
     message.error(t("panel.connectFirstHint"))
     return
@@ -549,8 +572,18 @@ async function post_resource() {
   const success = await postResource(resource.value)
   if (success) {
     await persistLastResource(resource.value)
+    isDeviceResourceLocked.value = true
   }
 }
+
+watch(
+  () => indexStore.Connected,
+  (connected) => {
+    if (!connected) {
+      isDeviceResourceLocked.value = false
+    }
+  },
+)
 
 onMounted(async () => {
   if (!settingsStore.initialized) {
