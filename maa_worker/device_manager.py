@@ -367,7 +367,6 @@ def set_resource(worker: "MaaWorker", resource_name: str, resource: Resource):
             worker.send_log(f"资源已设置为: {i.name}")
             if worker.connected:
                 worker.configuration_locked = True
-                worker.send_log("设备与资源已锁定，当前生命周期内不允许重新连接或修改")
             return True
 
     worker.last_resource_config_error = f"未找到资源: {resource_name}"

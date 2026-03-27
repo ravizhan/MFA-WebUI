@@ -3,7 +3,6 @@ import io
 import subprocess
 import threading
 import time
-import tomllib
 from importlib import metadata
 from pathlib import Path
 from queue import SimpleQueue
@@ -38,8 +37,17 @@ resource = Resource()
 resource.set_cpu()
 
 PI_INTERFACE_VERSION = "v2.5.0"
-PI_CLIENT_NAME = "MWU"
 PI_CLIENT_LANGUAGE = "zh_cn"
+
+
+def current_time() -> str:
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
+
+
+def load_settings() -> SettingsModel:
+    with open("config/settings.json", "r", encoding="utf-8") as f:
+        config_data = json.load(f)
+    return SettingsModel(**config_data)
 
 
 class MaaWorker:
@@ -73,16 +81,7 @@ class MaaWorker:
         self.send_log("MAA初始化成功")
         self.agent_process: subprocess.Popen | None = None
         self.agent_processes: list[subprocess.Popen] = []
-        self.send_log("Agent将在首次开始任务时初始化")
         self.http_client = httpx.Client(timeout=30)
-
-    def _current_time(self) -> str:
-        return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())
-
-    def _load_settings(self) -> SettingsModel:
-        with open("config/settings.json", "r", encoding="utf-8") as f:
-            config_data = json.load(f)
-        return SettingsModel(**config_data)
 
     def _publish_event(self, event: RealtimeEvent):
         self.message_conn.put(event)
@@ -94,55 +93,6 @@ class MaaWorker:
         if isinstance(self.interface.agent, list):
             return self.interface.agent
         return [self.interface.agent]
-
-    def _normalize_version(self, version: str | None) -> str:
-        if not version:
-            return ""
-        normalized = version.strip()
-        if not normalized:
-            return ""
-        if normalized.startswith("v"):
-            return normalized
-        return f"v{normalized}"
-
-    def _get_package_version(self, package_name: str) -> str | None:
-        try:
-            return metadata.version(package_name)
-        except metadata.PackageNotFoundError:
-            return None
-        except Exception:
-            return None
-
-    def _get_project_version_from_pyproject(self) -> str | None:
-        pyproject_path = Path("pyproject.toml")
-        if not pyproject_path.exists():
-            return None
-        try:
-            with pyproject_path.open("rb") as f:
-                pyproject = tomllib.load(f)
-        except Exception:
-            return None
-
-        project = pyproject.get("project")
-        if isinstance(project, dict):
-            version = project.get("version")
-            if isinstance(version, str):
-                return version
-        return None
-
-    def _resolve_client_version(self) -> str:
-        raw_version = (
-            self._get_package_version("MWU")
-            or self._get_package_version("mwu")
-            or self._get_project_version_from_pyproject()
-            or self.interface.version
-            or ""
-        )
-        return self._normalize_version(raw_version)
-
-    def _resolve_maafw_version(self) -> str:
-        raw_version = self._get_package_version("maafw") or ""
-        return self._normalize_version(raw_version)
 
     def _load_i18n_mapping(self) -> dict[str, Any]:
         if self._i18n_text_mapping is not None:
@@ -202,9 +152,6 @@ class MaaWorker:
                 return translated
         return payload
 
-    def _compact_json_dumps(self, payload: Any) -> str:
-        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
-
     def _get_selected_controller_payload(self) -> dict[str, Any]:
         controller = self._get_controller_definition(self.controller_name)
         if controller is None:
@@ -228,15 +175,21 @@ class MaaWorker:
     def _build_pi_env(self) -> dict[str, str]:
         controller_payload = self._get_selected_controller_payload()
         resource_payload = self._get_selected_resource_payload()
+        with open("version", "r") as f:
+            client_version = f.read().strip()
         return {
             "PI_INTERFACE_VERSION": PI_INTERFACE_VERSION,
-            "PI_CLIENT_NAME": PI_CLIENT_NAME,
-            "PI_CLIENT_VERSION": self._resolve_client_version(),
+            "PI_CLIENT_NAME": "MWU",
+            "PI_CLIENT_VERSION": client_version,
             "PI_CLIENT_LANGUAGE": PI_CLIENT_LANGUAGE,
-            "PI_CLIENT_MAAFW_VERSION": self._resolve_maafw_version(),
+            "PI_CLIENT_MAAFW_VERSION": "v" + metadata.version("maafw"),
             "PI_VERSION": self.interface.version or "",
-            "PI_CONTROLLER": self._compact_json_dumps(controller_payload),
-            "PI_RESOURCE": self._compact_json_dumps(resource_payload),
+            "PI_CONTROLLER": json.dumps(
+                controller_payload, ensure_ascii=False, separators=(",", ":")
+            ),
+            "PI_RESOURCE": json.dumps(
+                resource_payload, ensure_ascii=False, separators=(",", ":")
+            ),
         }
 
     def _ensure_agent_started_once(self) -> bool:
@@ -292,7 +245,7 @@ class MaaWorker:
             event=event,
             level=level,
             message=message,
-            time=self._current_time(),
+            time=current_time(),
             notify=notify,
             title=title,
         )
@@ -302,7 +255,7 @@ class MaaWorker:
         if not notify:
             return
 
-        settings = self._load_settings()
+        settings = load_settings()
 
         if settings.notification.systemNotification:
             try:
@@ -398,7 +351,7 @@ class MaaWorker:
         )
 
     def _emit_task_completed(self, task_list: list[str]):
-        settings = self._load_settings()
+        settings = load_settings()
         self.emit_event(
             "task.completed",
             f"{self._build_task_subject(task_list)} 执行完成",
@@ -408,7 +361,7 @@ class MaaWorker:
         )
 
     def _emit_task_failed(self, task_list: list[str], error_message: str):
-        settings = self._load_settings()
+        settings = load_settings()
         self.emit_event(
             "task.failed",
             f"{self._build_task_subject(task_list)} 执行失败，请检查日志",
