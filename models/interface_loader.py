@@ -173,13 +173,6 @@ def _resolve_import_path(import_path: str, base_dir: Path) -> Path:
     return path.resolve()
 
 
-def _resolve_scan_dir_path(scan_dir: str) -> Path:
-    path = Path(scan_dir)
-    if not path.is_absolute():
-        path = Path.cwd() / path
-    return path.resolve()
-
-
 def _contains_parent_segment(path_value: str) -> bool:
     return any(part == ".." for part in Path(path_value).parts)
 
