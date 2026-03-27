@@ -619,10 +619,15 @@ class MaaWorker:
         options: dict[str, TaskOptionValue],
         task_name: str | None = None,
     ) -> bool:
+        # 这里避免原地修改调用方传入的 options，构造一份新的配置再传给 worker
+        cleaned_options: dict[str, TaskOptionValue] = {}
         for key, value in options.items():
             if value is None:
-                options[key] = ""
-        return start_worker_task(self, task_list, options, task_name)
+                # 保持旧逻辑：将 None 视为等价于空字符串
+                cleaned_options[key] = ""
+            else:
+                cleaned_options[key] = value
+        return start_worker_task(self, task_list, cleaned_options, task_name)
 
     def stop_task(self) -> bool:
         return stop_worker_task(self)
