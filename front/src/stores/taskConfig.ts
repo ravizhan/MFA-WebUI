@@ -76,10 +76,10 @@ export const useTaskConfigStore = defineStore("taskConfig", {
       const relevantOptions: Record<string, TaskOptionValue> = {}
       for (const key of Object.keys(defaults)) {
         if (this.options[key] !== undefined) {
-          relevantOptions[key] = this.options[key]
+          relevantOptions[key] = this.options[key] === null ? "" : this.options[key]
         }
         if (overrides[key] !== undefined) {
-          relevantOptions[key] = overrides[key]
+          relevantOptions[key] = overrides[key] === null ? "" : overrides[key]
         }
       }
 
@@ -168,10 +168,15 @@ export const useTaskConfigStore = defineStore("taskConfig", {
         taskChecked[task.id] = task.checked || false
       })
 
+      const cleanedOptions: Record<string, TaskOptionValue> = {}
+      for (const [key, value] of Object.entries(this.options)) {
+        cleanedOptions[key] = value === null ? "" : value
+      }
+
       const config: TaskConfig = {
         taskOrder,
         taskChecked,
-        taskOptions: { ...this.options },
+        taskOptions: cleanedOptions,
       }
       await saveTaskConfig(config)
     },

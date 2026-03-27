@@ -88,7 +88,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from "vue"
+import { computed, ref, watch } from "vue"
 import { useInterfaceStore } from "../stores/interface"
 import { useTaskConfigStore } from "../stores/taskConfig"
 import { storeToRefs } from "pinia"
@@ -184,6 +184,22 @@ const selectOptions = computed(() => {
   }
   return []
 })
+
+watch(
+  () => [selectOptions.value, options.value[props.name]] as const,
+  ([newOptions, currentVal]) => {
+    const opt = option.value
+    if (opt?.type === "select" || opt?.type === "scan_select") {
+      if (currentVal != null && typeof currentVal === "string") {
+        const exists = newOptions.some((o) => o.value === currentVal)
+        if (!exists) {
+          options.value[props.name] = null as any
+        }
+      }
+    }
+  },
+  { immediate: true, deep: true },
+)
 
 const nestedOptions = computed(() => {
   const opt = option.value

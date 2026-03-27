@@ -619,6 +619,9 @@ class MaaWorker:
         options: dict[str, TaskOptionValue],
         task_name: str | None = None,
     ) -> bool:
+        for key, value in options.items():
+            if value is None:
+                options[key] = ""
         return start_worker_task(self, task_list, options, task_name)
 
     def stop_task(self) -> bool:

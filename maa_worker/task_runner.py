@@ -63,6 +63,7 @@ def run_process(
                 worker.send_log("任务已终止")
                 return
             pipeline_override = worker._build_task_pipeline_override(task, options)
+            print(pipeline_override)
             if pipeline_override:
                 t = worker.tasker.post_task(task, pipeline_override)
             else:
