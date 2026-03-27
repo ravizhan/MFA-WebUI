@@ -38,6 +38,16 @@ export interface Win32Controller {
   screencap?: Win32Screencap
 }
 
+export type MacOSInput = "GlobalEvent" | "PostToPid"
+
+export type MacOSScreencap = "ScreenCaptureKit"
+
+export interface MacOSController {
+  title_regex?: string
+  input?: MacOSInput
+  screencap?: MacOSScreencap
+}
+
 export interface PlayCoverController {
   uuid?: string
 }
@@ -51,7 +61,7 @@ export interface GamepadController {
   screencap?: GamepadScreencap
 }
 
-export type ControllerType = "Adb" | "Win32" | "PlayCover" | "Gamepad"
+export type ControllerType = "Adb" | "Win32" | "MacOS" | "PlayCover" | "Gamepad"
 
 export interface Controller {
   name: string
@@ -61,6 +71,7 @@ export interface Controller {
   type: ControllerType
   adb?: Record<string, unknown>
   win32?: Win32Controller
+  macos?: MacOSController
   playcover?: PlayCoverController
   gamepad?: GamepadController
   display_short_side?: number
@@ -96,10 +107,19 @@ export interface Task {
   doc?: DocumentationContent
   desc?: DocumentationContent
   icon?: string
+  group?: string[]
   resource?: string[]
   controller?: string[]
   pipeline_override?: PipelineOverride
   option?: string[]
+}
+
+export interface Group {
+  name: string
+  label?: string
+  description?: string
+  icon?: string
+  default_expand?: boolean
 }
 
 export interface OptionCase {
@@ -198,6 +218,7 @@ export interface InterfaceModel {
   description?: string
   controller: Controller[]
   resource: Resource[]
+  group?: Group[]
   agent?: Agent | Agent[]
   task?: Task[]
   option?: Record<string, Option>
