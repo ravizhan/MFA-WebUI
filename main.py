@@ -120,7 +120,8 @@ async def serve_homepage():
 
 @app.get("/api/interface")
 def get_interface():
-    return interface.model_dump()
+    with interface_lock:
+        return interface.model_dump()
 
 
 @app.post("/api/interface/scan-select/rescan")
@@ -279,6 +280,7 @@ def check_update():
         settings = app_state.settings or SettingsModel()
         current_version = interface.version or ""
         mirrorchyan_rid = getattr(interface, "mirrorchyan_rid", None)
+        github_url = interface.github or ""
         cdk = settings.update.mirrorchyanCdk
 
         if mirrorchyan_rid:
@@ -310,9 +312,13 @@ def check_update():
                     }
 
                 # 无 CDK 或无下载链接，尝试 GitHub 获取下载链接
-                if has_update and interface.github:
+                if has_update and github_url:
                     try:
-                        gh_info = check_github_update(interface, settings)
+                        gh_info = check_github_update(
+                            github_url,
+                            current_version,
+                            settings,
+                        )
                         if gh_info:
                             # 保留 mirrorchyan 的版本信息，用 GitHub 的下载链接
                             app_state.update_info["download_url"] = gh_info[
@@ -329,8 +335,8 @@ def check_update():
                     "update_info": app_state.update_info,
                 }
 
-        if interface.github:
-            gh_info = check_github_update(interface, settings)
+        if github_url:
+            gh_info = check_github_update(github_url, current_version, settings)
             if gh_info:
                 app_state.update_info = gh_info
                 return {"status": "success", "update_info": app_state.update_info}

@@ -2,41 +2,13 @@ import { computed, reactive } from "vue"
 import { useInterfaceStore } from "../stores/interface"
 import type { Option } from "../types/interface"
 import type { TaskOptionValue } from "../types/scheduler"
+import { buildDefaultsFromOptionMap } from "../utils/taskOptions"
 import type {
   TaskConfig,
   TaskConfigState,
   TaskConfigActions,
   UseTaskConfigReturn,
 } from "../types/taskConfig"
-
-function buildOrderedCheckboxValue(option: Extract<Option, { type: "checkbox" }>): string[] {
-  const selectedSet = new Set(option.default_case || [])
-  return option.cases.filter((item) => selectedSet.has(item.name)).map((item) => item.name)
-}
-
-/**
- * 根据选项定义生成默认值
- */
-function buildDefaultsFromOptionMap(
-  optionMap: Record<string, Option>,
-): Record<string, TaskOptionValue> {
-  const options: Record<string, TaskOptionValue> = {}
-  for (const key in optionMap) {
-    const option = optionMap[key]!
-    if (option.type === "select" || option.type === "scan_select") {
-      options[key] = option.default_case || option.cases[0]?.name || ""
-    } else if (option.type === "input") {
-      for (const input of option.inputs) {
-        options[`${key}_${input.name}`] = input.default || ""
-      }
-    } else if (option.type === "switch") {
-      options[key] = option.default_case || option.cases[0]?.name || ""
-    } else if (option.type === "checkbox") {
-      options[key] = buildOrderedCheckboxValue(option)
-    }
-  }
-  return options
-}
 
 /**
  * 任务配置 composable

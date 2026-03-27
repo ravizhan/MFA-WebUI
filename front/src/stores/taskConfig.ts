@@ -3,33 +3,7 @@ import { getTaskConfig, saveTaskConfig, resetTaskConfig, type TaskConfig } from 
 import { type TaskListItem, useInterfaceStore } from "./interface"
 import type { Option } from "../types/interface"
 import type { TaskExecutionPayload, TaskOptionValue } from "../types/scheduler"
-
-function buildOrderedCheckboxValue(option: Extract<Option, { type: "checkbox" }>): string[] {
-  const selectedSet = new Set(option.default_case || [])
-  return option.cases.filter((item) => selectedSet.has(item.name)).map((item) => item.name)
-}
-
-// 根据选项定义生成默认值
-function buildDefaultsFromOptionMap(
-  optionMap: Record<string, Option>,
-): Record<string, TaskOptionValue> {
-  const options: Record<string, TaskOptionValue> = {}
-  for (const key in optionMap) {
-    const option = optionMap[key]!
-    if (option.type === "select" || option.type === "scan_select") {
-      options[key] = option.default_case || option.cases[0]?.name || ""
-    } else if (option.type === "input") {
-      for (const input of option.inputs) {
-        options[`${key}_${input.name}`] = input.default || ""
-      }
-    } else if (option.type === "switch") {
-      options[key] = option.default_case || option.cases[0]?.name || ""
-    } else if (option.type === "checkbox") {
-      options[key] = buildOrderedCheckboxValue(option)
-    }
-  }
-  return options
-}
+import { buildDefaultsFromOptionMap, normalizeOptionValueForBoundary } from "../utils/taskOptions"
 
 export const useTaskConfigStore = defineStore("taskConfig", {
   state: () => {
@@ -75,11 +49,18 @@ export const useTaskConfigStore = defineStore("taskConfig", {
       // 只过滤出相关的用户配置
       const relevantOptions: Record<string, TaskOptionValue> = {}
       for (const key of Object.keys(defaults)) {
-        if (this.options[key] !== undefined) {
-          relevantOptions[key] = this.options[key] === null ? "" : this.options[key]
+        const currentValue = normalizeOptionValueForBoundary(
+          this.options[key] as TaskOptionValue | null | undefined,
+        )
+        if (currentValue !== undefined) {
+          relevantOptions[key] = currentValue
         }
-        if (overrides[key] !== undefined) {
-          relevantOptions[key] = overrides[key] === null ? "" : overrides[key]
+
+        const overrideValue = normalizeOptionValueForBoundary(
+          overrides[key] as TaskOptionValue | null | undefined,
+        )
+        if (overrideValue !== undefined) {
+          relevantOptions[key] = overrideValue
         }
       }
 
@@ -170,7 +151,12 @@ export const useTaskConfigStore = defineStore("taskConfig", {
 
       const cleanedOptions: Record<string, TaskOptionValue> = {}
       for (const [key, value] of Object.entries(this.options)) {
-        cleanedOptions[key] = value === null ? "" : value
+        const normalizedValue = normalizeOptionValueForBoundary(
+          value as TaskOptionValue | null | undefined,
+        )
+        if (normalizedValue !== undefined) {
+          cleanedOptions[key] = normalizedValue
+        }
       }
 
       const config: TaskConfig = {

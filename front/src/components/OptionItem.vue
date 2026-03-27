@@ -190,20 +190,28 @@ const selectOptions = computed(() => {
   return []
 })
 
+const isSelectValueInvalid = computed(() => {
+  const opt = option.value
+  if (opt?.type !== "select" && opt?.type !== "scan_select") {
+    return false
+  }
+
+  const currentValue = options.value[props.name]
+  if (currentValue == null || typeof currentValue !== "string") {
+    return false
+  }
+
+  return !selectOptions.value.some((item) => item.value === currentValue)
+})
+
 watch(
-  () => [selectOptions.value, options.value[props.name]] as const,
-  ([newOptions, currentVal]) => {
-    const opt = option.value
-    if (opt?.type === "select" || opt?.type === "scan_select") {
-      if (currentVal != null && typeof currentVal === "string") {
-        const exists = newOptions.some((o) => o.value === currentVal)
-        if (!exists) {
-          options.value[props.name] = null as any
-        }
-      }
+  () => isSelectValueInvalid.value,
+  (invalid) => {
+    if (invalid) {
+      options.value[props.name] = null as any
     }
   },
-  { immediate: true, deep: true },
+  { immediate: true },
 )
 
 const nestedOptions = computed(() => {
