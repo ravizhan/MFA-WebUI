@@ -101,7 +101,7 @@ _✨ 基于 **[Vue](https://github.com/vuejs/vue)** 和 **[FastAPI](https://gith
 ```
 
 加载完成且用户选择 `1.json`：
-> 该结果仅在内存保留，不会实际修改interface.json
+> 该结果仅在内存中保留，不会实际修改 interface.json
 
 ```json
 {
