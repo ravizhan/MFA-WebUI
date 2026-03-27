@@ -202,7 +202,6 @@ def load_agents(
 
     if not agent_configs:
         return agent_process, agent_processes
-    print(pi_env)
     for agent_config in agent_configs:
         if "python" in agent_config.child_exec:
             assert agent_config.child_args, "Agent解析错误，缺少child_args"
