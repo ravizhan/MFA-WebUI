@@ -62,9 +62,21 @@ export interface DeviceSearchData {
   devices: ConnectableDevice[]
 }
 
+export interface DeviceRuntimeState {
+  connected: boolean
+  configuration_locked: boolean
+  controller_name: string | null
+  resource_name: string | null
+}
+
 interface DeviceResponse {
   status: string
   data: DeviceSearchData
+}
+
+interface DeviceStateResponse {
+  status: string
+  state: DeviceRuntimeState
 }
 
 export function getDevices(controllerName?: string): Promise<DeviceSearchData> {
@@ -93,5 +105,16 @@ export function postDevices(payload: ConnectDevicePayload): Promise<boolean> {
       }
       showGlobalMessage("error", "设备连接失败，请检查终端日志")
       return false
+    })
+}
+
+export function getDeviceState(): Promise<DeviceRuntimeState> {
+  return fetch("/api/device/state", { method: "GET" })
+    .then((res) => res.json())
+    .then((data: DeviceStateResponse & ApiResponse) => {
+      if (data.status !== "success") {
+        throw new Error(data.message || "获取设备状态失败")
+      }
+      return data.state
     })
 }

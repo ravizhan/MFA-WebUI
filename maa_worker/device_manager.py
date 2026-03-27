@@ -260,11 +260,14 @@ def connect_device(
     resource: Resource,
 ) -> bool:
     if worker.configuration_locked:
-        worker.last_device_config_error = (
-            "设备与资源已锁定，当前生命周期内不允许重新连接"
-        )
-        worker.send_log(worker.last_device_config_error)
-        return False
+        if not worker.is_connection_alive():
+            worker.reset_connection_state("检测到设备连接已断开，已解除设备与资源锁定")
+        else:
+            worker.last_device_config_error = (
+                "设备与资源已锁定，当前生命周期内不允许重新连接"
+            )
+            worker.send_log(worker.last_device_config_error)
+            return False
 
     worker.last_device_config_error = None
     device_type = device_config.type
@@ -340,11 +343,14 @@ def connect_device(
 
 def set_resource(worker: "MaaWorker", resource_name: str, resource: Resource):
     if worker.configuration_locked:
-        worker.last_resource_config_error = (
-            "设备与资源已锁定，当前生命周期内不允许修改资源"
-        )
-        worker.send_log(worker.last_resource_config_error)
-        return False
+        if not worker.is_connection_alive():
+            worker.reset_connection_state("检测到设备连接已断开，已解除设备与资源锁定")
+        else:
+            worker.last_resource_config_error = (
+                "设备与资源已锁定，当前生命周期内不允许修改资源"
+            )
+            worker.send_log(worker.last_resource_config_error)
+            return False
 
     worker.last_resource_config_error = None
     for i in worker.interface.resource:

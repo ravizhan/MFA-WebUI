@@ -11,6 +11,23 @@ from typing import Any, Callable
 from maa.resource import Resource
 
 
+def _cleanup_agent_processes(
+    agent_processes: list[subprocess.Popen],
+    send_log: Callable[[str], None],
+) -> None:
+    for process in agent_processes:
+        try:
+            if process.poll() is not None:
+                continue
+            process.terminate()
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=3)
+        except Exception as e:
+            send_log(f"Agent进程回收失败(pid={process.pid}): {e}")
+
+
 def run_black_magic(agent_config: Any, resource: Resource):
     """
     将Agent转换为custom的黑魔法
@@ -185,7 +202,7 @@ def load_agents(
 
     if not agent_configs:
         return agent_process, agent_processes
-
+    print(pi_env)
     for agent_config in agent_configs:
         if "python" in agent_config.child_exec:
             assert agent_config.child_args, "Agent解析错误，缺少child_args"
@@ -215,6 +232,7 @@ def load_agents(
                 traceback.print_exc()
 
     if errors:
+        _cleanup_agent_processes(agent_processes, send_log)
         raise RuntimeError("；".join(errors))
 
     return agent_process, agent_processes

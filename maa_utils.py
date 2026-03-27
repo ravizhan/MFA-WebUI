@@ -156,7 +156,7 @@ class MaaWorker:
         controller = self._get_controller_definition(self.controller_name)
         if controller is None:
             return {}
-        payload = controller.model_dump(exclude_none=True)
+        payload = controller.model_dump(exclude_none=True, mode="json")
         resolved_payload = self._resolve_i18n_payload(payload)
         if isinstance(resolved_payload, dict):
             return resolved_payload
@@ -166,11 +166,36 @@ class MaaWorker:
         resource_definition = self._get_current_resource_definition()
         if resource_definition is None:
             return {}
-        payload = resource_definition.model_dump(exclude_none=True)
+        payload = resource_definition.model_dump(exclude_none=True, mode="json")
         resolved_payload = self._resolve_i18n_payload(payload)
         if isinstance(resolved_payload, dict):
             return resolved_payload
         return {}
+
+    def is_connection_alive(self) -> bool:
+        if not self.connected or self.controller is None:
+            return False
+        return self.controller.connected
+
+    def reset_connection_state(self, reason: str | None = None):
+        state_changed = (
+            self.connected
+            or self.configuration_locked
+            or self.controller is not None
+            or self.controller_name is not None
+            or self.controller_type is not None
+        )
+        self.connected = False
+        self.configuration_locked = False
+        self.controller = None
+        self.controller_name = None
+        self.controller_type = None
+        self.current_resource_name = None
+
+        if reason:
+            self.last_device_config_error = reason
+            if state_changed:
+                self.send_log(reason)
 
     def _build_pi_env(self) -> dict[str, str]:
         controller_payload = self._get_selected_controller_payload()
@@ -791,5 +816,5 @@ class MaaWorker:
                 image_pil.save(img_byte_arr, format="JPEG")
                 return img_byte_arr.getvalue()
         except Exception:
-            pass
+            self.reset_connection_state("检测到设备连接已断开，已解除设备与资源锁定")
         return None

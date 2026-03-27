@@ -121,7 +121,7 @@ async def serve_homepage():
 @app.get("/api/interface")
 def get_interface():
     with interface_lock:
-        return interface.model_dump()
+        return interface.model_dump(mode="json")
 
 
 @app.post("/api/interface/scan-select/rescan")
@@ -191,6 +191,26 @@ async def connect_device(device: DeviceModel):
         return {"status": "success"}
     msg = app_state.worker.last_device_config_error or "设备连接失败"
     return {"status": "failed", "message": msg}
+
+
+@app.get("/api/device/state")
+def get_device_state():
+    if app_state.worker is None:
+        return {"status": "failed", "message": "Worker未初始化"}
+    if app_state.worker.connected and not app_state.worker.is_connection_alive():
+        app_state.worker.reset_connection_state(
+            "检测到设备连接已断开，已解除设备与资源锁定"
+        )
+
+    return {
+        "status": "success",
+        "state": {
+            "connected": app_state.worker.connected,
+            "configuration_locked": app_state.worker.configuration_locked,
+            "controller_name": app_state.worker.controller_name,
+            "resource_name": app_state.worker.current_resource_name,
+        },
+    }
 
 
 @app.get("/api/resource")
