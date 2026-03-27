@@ -2,6 +2,7 @@ import asyncio
 import threading
 import webbrowser
 from contextlib import asynccontextmanager
+from pathlib import Path
 import uvicorn
 import os
 import signal
@@ -9,7 +10,12 @@ import sys
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from models.interface_loader import load_interface_model
+from pydantic import BaseModel
+from models.interface_loader import (
+    InterfaceLoadError,
+    load_interface_model,
+    rescan_scan_select_option,
+)
 from models.api import DeviceModel
 from models.task_config import TaskConfigModel
 from models.settings import SettingsModel
@@ -33,7 +39,14 @@ import hashlib
 
 import json_utils as json
 
-interface = load_interface_model("interface.json")
+INTERFACE_PATH = Path("interface.json").resolve()
+interface = load_interface_model(INTERFACE_PATH)
+interface_lock = threading.Lock()
+
+
+class ScanSelectRescanRequest(BaseModel):
+    option_name: str
+
 
 if not os.path.exists("config"):
     os.makedirs("config")
@@ -108,6 +121,30 @@ async def serve_homepage():
 @app.get("/api/interface")
 def get_interface():
     return interface.model_dump()
+
+
+@app.post("/api/interface/scan-select/rescan")
+def rescan_scan_select(payload: ScanSelectRescanRequest):
+    option_name = payload.option_name.strip()
+    if not option_name:
+        return {"status": "failed", "message": "option_name 不能为空"}
+
+    try:
+        with interface_lock:
+            cases = rescan_scan_select_option(
+                interface, option_name, INTERFACE_PATH.parent
+            )
+    except InterfaceLoadError as exc:
+        return {"status": "failed", "message": str(exc)}
+    except Exception as exc:
+        app_state.send_log(f"重扫 scan_select 失败: {exc}")
+        return {"status": "failed", "message": "重扫失败"}
+
+    return {
+        "status": "success",
+        "option_name": option_name,
+        "cases": cases,
+    }
 
 
 async def video_stream_generator(fps: int = 15):

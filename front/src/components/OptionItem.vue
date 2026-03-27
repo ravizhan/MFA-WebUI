@@ -25,8 +25,28 @@
             />
           </template>
           <!-- Select -->
-          <template v-else-if="option.type === 'select' || option.type === 'scan_select'">
+          <template v-else-if="option.type === 'select'">
             <n-select class="w-40" :options="selectOptions" v-model:value="options[name]" />
+          </template>
+          <!-- Scan Select -->
+          <template v-else-if="option.type === 'scan_select'">
+            <div class="flex items-center gap-2">
+              <n-select class="w-40" :options="selectOptions" v-model:value="options[name]" />
+              <n-button
+                circle
+                quaternary
+                size="small"
+                :loading="scanSelectRefreshing"
+                :disabled="scanSelectRefreshing"
+                @click="handleRescanScanSelect"
+              >
+                <template #icon>
+                  <n-icon>
+                    <div class="i-mdi-refresh" />
+                  </n-icon>
+                </template>
+              </n-button>
+            </div>
           </template>
           <!-- Input -->
           <template v-else-if="option.type === 'input'">
@@ -68,7 +88,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue"
+import { computed, ref } from "vue"
 import { useInterfaceStore } from "../stores/interface"
 import { useTaskConfigStore } from "../stores/taskConfig"
 import { storeToRefs } from "pinia"
@@ -88,6 +108,26 @@ const options = props.options ? computed(() => props.options!) : storeToRefs(con
 
 const option = computed(() => interfaceStore.interface?.option?.[props.name])
 const label = computed(() => option.value?.label)
+const scanSelectRefreshing = ref(false)
+
+async function handleRescanScanSelect() {
+  const opt = option.value
+  if (!opt || opt.type !== "scan_select") {
+    return
+  }
+
+  scanSelectRefreshing.value = true
+  try {
+    options.value[props.name] = null as any
+    await interfaceStore.rescanScanSelectOption(props.name)
+  } catch (error) {
+    if (error instanceof Error && error.message) {
+      message.error(error.message)
+    }
+  } finally {
+    scanSelectRefreshing.value = false
+  }
+}
 
 function normalizeCheckboxValue(value: TaskOptionValue | undefined, caseOrder: string[]): string[] {
   let selectedValues: string[] = []
