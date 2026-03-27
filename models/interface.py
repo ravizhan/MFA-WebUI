@@ -143,6 +143,19 @@ class PlayCoverController(BaseModel):
     uuid: Optional[str] = None
 
 
+class MacOSController(BaseModel):
+    """MacOS 控制器配置"""
+
+    title_regex: Optional[re.Pattern] = None
+    input: Optional[Literal["GlobalEvent", "PostToPid"]] = None
+    screencap: Optional[Literal["ScreenCaptureKit"]] = None
+
+    @field_validator("title_regex", mode="before")
+    @classmethod
+    def check_regex(cls, v: Any, info: ValidationInfo):
+        return validate_regex(v, info)
+
+
 class GamepadController(BaseModel):
     """虚拟游戏手柄控制器配置（仅 Windows）"""
 
@@ -194,7 +207,7 @@ class Controller(BaseModel):
     label: Optional[str] = None
     description: Optional[str] = None
     icon: Optional[str] = None
-    type: Literal["Adb", "Win32", "PlayCover", "Gamepad"]
+    type: Literal["Adb", "Win32", "MacOS", "PlayCover", "Gamepad"]
     display_short_side: Optional[int] = 720
     display_long_side: Optional[int] = None
     display_raw: Optional[bool] = False
@@ -203,6 +216,7 @@ class Controller(BaseModel):
     option: Optional[List[str]] = None
     adb: Optional[AdbController] = None
     win32: Optional[Win32Controller] = None
+    macos: Optional[MacOSController] = None
     playcover: Optional[PlayCoverController] = None
     gamepad: Optional[GamepadController] = None
 
@@ -248,10 +262,19 @@ class Task(BaseModel):
     doc: Optional[DocumentContent] = None
     desc: Optional[DocumentContent] = None
     icon: Optional[str] = None
+    group: Optional[List[str]] = None
     resource: Optional[List[str]] = None
     controller: Optional[List[str]] = None
     pipeline_override: Optional[PipelineOverride] = None
     option: Optional[List[str]] = None
+
+
+class Group(BaseModel):
+    name: str
+    label: Optional[str] = None
+    description: Optional[str] = None
+    icon: Optional[str] = None
+    default_expand: Optional[bool] = True
 
 
 class OptionCase(BaseModel):
@@ -359,6 +382,7 @@ class InterfaceModel(BaseModel):
     description: Optional[str] = None
     controller: List[Controller]
     resource: List[Resource]
+    group: Optional[List[Group]] = None
     agent: Optional[Union[Agent, List[Agent]]] = None
     task: Optional[List[Task]] = None
     option: Optional[Dict[str, Option]] = None

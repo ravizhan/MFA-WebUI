@@ -11,6 +11,23 @@ from typing import Any, Callable
 from maa.resource import Resource
 
 
+def _cleanup_agent_processes(
+    agent_processes: list[subprocess.Popen],
+    send_log: Callable[[str], None],
+) -> None:
+    for process in agent_processes:
+        try:
+            if process.poll() is not None:
+                continue
+            process.terminate()
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=3)
+        except Exception as e:
+            send_log(f"Agent进程回收失败(pid={process.pid}): {e}")
+
+
 def run_black_magic(agent_config: Any, resource: Resource):
     """
     将Agent转换为custom的黑魔法
@@ -177,32 +194,44 @@ def load_agents(
     agent_configs: list[Any],
     resource: Resource,
     send_log: Callable[[str], None],
+    pi_env: dict[str, str] | None = None,
 ) -> tuple[subprocess.Popen | None, list[subprocess.Popen]]:
     agent_process: subprocess.Popen | None = None
     agent_processes: list[subprocess.Popen] = []
+    errors: list[str] = []
 
     if not agent_configs:
         return agent_process, agent_processes
-
     for agent_config in agent_configs:
         if "python" in agent_config.child_exec:
             assert agent_config.child_args, "Agent解析错误，缺少child_args"
             try:
+                if pi_env:
+                    os.environ.update(pi_env)
                 run_black_magic(agent_config, resource)
             except Exception as e:
                 send_log("黑魔法爆炸了！")
                 send_log(f"自定义Agent加载失败: {e}")
+                errors.append(f"自定义Agent加载失败: {e}")
                 traceback.print_exc()
         else:
             command = [agent_config.child_exec]
             if agent_config.child_args:
                 command += agent_config.child_args
             try:
-                agent_process = subprocess.Popen(command)
+                env = os.environ.copy()
+                if pi_env:
+                    env.update(pi_env)
+                agent_process = subprocess.Popen(command, env=env)
                 agent_processes.append(agent_process)
             except Exception as e:
                 agent_process = None
                 send_log(f"Agent进程启动失败: {e}")
+                errors.append(f"Agent进程启动失败: {e}")
                 traceback.print_exc()
+
+    if errors:
+        _cleanup_agent_processes(agent_processes, send_log)
+        raise RuntimeError("；".join(errors))
 
     return agent_process, agent_processes

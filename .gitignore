@@ -326,3 +326,6 @@ test*.py
 *.psd
 *.bak
 *.exe
+todo.md
+version
+.aiignore

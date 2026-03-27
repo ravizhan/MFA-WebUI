@@ -121,7 +121,7 @@ async def serve_homepage():
 @app.get("/api/interface")
 def get_interface():
     with interface_lock:
-        return interface.model_dump()
+        return interface.model_dump(mode="json")
 
 
 @app.post("/api/interface/scan-select/rescan")
@@ -189,8 +189,28 @@ async def connect_device(device: DeviceModel):
         return {"status": "failed", "message": msg}
     if await asyncio.to_thread(app_state.worker.connect_device, device):
         return {"status": "success"}
-    app_state.send_log("设备连接失败")
-    return {"status": "failed"}
+    msg = app_state.worker.last_device_config_error or "设备连接失败"
+    return {"status": "failed", "message": msg}
+
+
+@app.get("/api/device/state")
+def get_device_state():
+    if app_state.worker is None:
+        return {"status": "failed", "message": "Worker未初始化"}
+    if app_state.worker.connected and not app_state.worker.is_connection_alive():
+        app_state.worker.reset_connection_state(
+            "检测到设备连接已断开，已解除设备与资源锁定"
+        )
+
+    return {
+        "status": "success",
+        "state": {
+            "connected": app_state.worker.connected,
+            "configuration_locked": app_state.worker.configuration_locked,
+            "controller_name": app_state.worker.controller_name,
+            "resource_name": app_state.worker.current_resource_name,
+        },
+    }
 
 
 @app.get("/api/resource")
@@ -214,7 +234,10 @@ async def set_resource(name: str):
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
     try:
-        await asyncio.to_thread(app_state.worker.set_resource, name)
+        ok = await asyncio.to_thread(app_state.worker.set_resource, name)
+        if not ok:
+            msg = app_state.worker.last_resource_config_error or "设置资源失败"
+            return {"status": "failed", "message": msg}
     except Exception as e:
         app_state.send_log(f"设置资源失败: {e}")
         return {"status": "failed", "message": str(e)}
@@ -517,7 +540,18 @@ def start(task_execution: TaskExecutionPayload):
         msg = "请先连接设备"
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
-    app_state.worker.start_task(task_execution.task_list, task_execution.task_options)
+    if not app_state.worker.start_task(
+        task_execution.task_list,
+        task_execution.task_options,
+    ):
+        msg = (
+            app_state.worker.last_resource_config_error
+            or app_state.worker.last_device_config_error
+            or app_state.worker._agent_start_error
+            or "任务启动失败"
+        )
+        app_state.send_log(msg)
+        return {"status": "failed", "message": msg}
     return {"status": "success"}
 
 
