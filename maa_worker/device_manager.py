@@ -259,13 +259,22 @@ def connect_device(
     device_config: DeviceModel,
     resource: Resource,
 ) -> bool:
+    if worker.configuration_locked:
+        worker.last_device_config_error = (
+            "设备与资源已锁定，当前生命周期内不允许重新连接"
+        )
+        worker.send_log(worker.last_device_config_error)
+        return False
+
+    worker.last_device_config_error = None
     device_type = device_config.type
     selected_controller = get_controller_definition(
         worker, device_config.controller_name
     )
     if selected_controller is None or selected_controller.type != device_type:
-        worker.send_log("未找到匹配的控制器配置")
-        return worker.connected
+        worker.last_device_config_error = "未找到匹配的控制器配置"
+        worker.send_log(worker.last_device_config_error)
+        return False
 
     status = False
     controller = None
@@ -307,25 +316,37 @@ def connect_device(
             worker.interface.title or worker.interface.label or "MWU",
             conn_fail_msg,
         )
-        worker.send_log(conn_fail_msg)
-        return worker.connected
+        worker.last_device_config_error = conn_fail_msg
+        worker.send_log(worker.last_device_config_error)
+        return False
     time.sleep(1)
     if worker.tasker.bind(resource, controller):
         worker.connected = True
         setattr(worker, "controller", controller)
         worker.controller_type = device_type
         worker.controller_name = selected_controller.name
+        worker.last_device_config_error = None
         worker.send_log("设备连接成功")
+        return True
     else:
         worker._show_system_notification(
             worker.interface.title or worker.interface.label or "MWU",
             conn_fail_msg,
         )
-        worker.send_log(conn_fail_msg)
-    return worker.connected
+        worker.last_device_config_error = conn_fail_msg
+        worker.send_log(worker.last_device_config_error)
+        return False
 
 
 def set_resource(worker: "MaaWorker", resource_name: str, resource: Resource):
+    if worker.configuration_locked:
+        worker.last_resource_config_error = (
+            "设备与资源已锁定，当前生命周期内不允许修改资源"
+        )
+        worker.send_log(worker.last_resource_config_error)
+        return False
+
+    worker.last_resource_config_error = None
     for i in worker.interface.resource:
         if i.name == resource_name:
             loaded_paths = [load_resource_bundle(path, resource) for path in i.path]
@@ -344,5 +365,11 @@ def set_resource(worker: "MaaWorker", resource_name: str, resource: Resource):
                     f"已为控制器 {controller_label} 加载附加资源: {', '.join(attached_paths)}"
                 )
             worker.send_log(f"资源已设置为: {i.name}")
-            return None
-    return None
+            if worker.connected:
+                worker.configuration_locked = True
+                worker.send_log("设备与资源已锁定，当前生命周期内不允许重新连接或修改")
+            return True
+
+    worker.last_resource_config_error = f"未找到资源: {resource_name}"
+    worker.send_log(worker.last_resource_config_error)
+    return False

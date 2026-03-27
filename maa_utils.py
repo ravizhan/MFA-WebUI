@@ -3,8 +3,11 @@ import io
 import subprocess
 import threading
 import time
+import tomllib
+from importlib import metadata
+from pathlib import Path
 from queue import SimpleQueue
-from typing import cast
+from typing import Any, cast
 
 import httpx
 import plyer
@@ -34,11 +37,16 @@ from models.settings import SettingsModel
 resource = Resource()
 resource.set_cpu()
 
+PI_INTERFACE_VERSION = "v2.5.0"
+PI_CLIENT_NAME = "MWU"
+PI_CLIENT_LANGUAGE = "zh_cn"
+
 
 class MaaWorker:
     def __init__(self, message_conn: SimpleQueue, interface):
         Toolkit.init_option("./")
         self.interface: InterfaceModel = interface
+        self._interface_base_dir = Path("interface.json").resolve().parent
         self.message_conn = message_conn
         self.tasker = Tasker()
         self.controller = None
@@ -53,11 +61,19 @@ class MaaWorker:
         self.last_task_status = "idle"
         self.last_task_error: str | None = None
         self._current_task_name: str | None = None
+        self.last_device_config_error: str | None = None
+        self.last_resource_config_error: str | None = None
+        self.configuration_locked = False
+        self._agent_start_lock = threading.Lock()
+        self._agent_started_once = False
+        self._agent_start_succeeded = False
+        self._agent_start_error: str | None = None
+        self._pi_env: dict[str, str] | None = None
+        self._i18n_text_mapping: dict[str, Any] | None = None
         self.send_log("MAA初始化成功")
         self.agent_process: subprocess.Popen | None = None
         self.agent_processes: list[subprocess.Popen] = []
-        self.load_agent()
-        self.send_log("Agent加载完成")
+        self.send_log("Agent将在首次开始任务时初始化")
         self.http_client = httpx.Client(timeout=30)
 
     def _current_time(self) -> str:
@@ -78,6 +94,174 @@ class MaaWorker:
         if isinstance(self.interface.agent, list):
             return self.interface.agent
         return [self.interface.agent]
+
+    def _normalize_version(self, version: str | None) -> str:
+        if not version:
+            return ""
+        normalized = version.strip()
+        if not normalized:
+            return ""
+        if normalized.startswith("v"):
+            return normalized
+        return f"v{normalized}"
+
+    def _get_package_version(self, package_name: str) -> str | None:
+        try:
+            return metadata.version(package_name)
+        except metadata.PackageNotFoundError:
+            return None
+        except Exception:
+            return None
+
+    def _get_project_version_from_pyproject(self) -> str | None:
+        pyproject_path = Path("pyproject.toml")
+        if not pyproject_path.exists():
+            return None
+        try:
+            with pyproject_path.open("rb") as f:
+                pyproject = tomllib.load(f)
+        except Exception:
+            return None
+
+        project = pyproject.get("project")
+        if isinstance(project, dict):
+            version = project.get("version")
+            if isinstance(version, str):
+                return version
+        return None
+
+    def _resolve_client_version(self) -> str:
+        raw_version = (
+            self._get_package_version("MWU")
+            or self._get_package_version("mwu")
+            or self._get_project_version_from_pyproject()
+            or self.interface.version
+            or ""
+        )
+        return self._normalize_version(raw_version)
+
+    def _resolve_maafw_version(self) -> str:
+        raw_version = self._get_package_version("maafw") or ""
+        return self._normalize_version(raw_version)
+
+    def _load_i18n_mapping(self) -> dict[str, Any]:
+        if self._i18n_text_mapping is not None:
+            return self._i18n_text_mapping
+
+        self._i18n_text_mapping = {}
+        if not self.interface.languages:
+            return self._i18n_text_mapping
+
+        language_file = self.interface.languages.get(PI_CLIENT_LANGUAGE)
+        if not isinstance(language_file, str) or not language_file.strip():
+            return self._i18n_text_mapping
+
+        language_path = (self._interface_base_dir / language_file).resolve()
+        try:
+            with language_path.open("r", encoding="utf-8") as f:
+                mapping = json.load(f)
+            if isinstance(mapping, dict):
+                self._i18n_text_mapping = mapping
+        except Exception as exc:
+            self.send_log(f"加载语言映射失败: {exc}")
+        return self._i18n_text_mapping
+
+    def _lookup_i18n_text(self, key: str) -> str | None:
+        mapping = self._load_i18n_mapping()
+        if not mapping:
+            return None
+
+        normalized_key = key[1:] if key.startswith("$") else key
+        if not normalized_key:
+            return None
+
+        current: Any = mapping
+        for part in normalized_key.split("."):
+            if not isinstance(current, dict) or part not in current:
+                current = None
+                break
+            current = current[part]
+        if isinstance(current, str):
+            return current
+
+        flat_value = mapping.get(normalized_key)
+        if isinstance(flat_value, str):
+            return flat_value
+        return None
+
+    def _resolve_i18n_payload(self, payload: Any):
+        if isinstance(payload, dict):
+            return {
+                key: self._resolve_i18n_payload(value) for key, value in payload.items()
+            }
+        if isinstance(payload, list):
+            return [self._resolve_i18n_payload(item) for item in payload]
+        if isinstance(payload, str) and payload.startswith("$"):
+            translated = self._lookup_i18n_text(payload)
+            if translated is not None:
+                return translated
+        return payload
+
+    def _compact_json_dumps(self, payload: Any) -> str:
+        return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+    def _get_selected_controller_payload(self) -> dict[str, Any]:
+        controller = self._get_controller_definition(self.controller_name)
+        if controller is None:
+            return {}
+        payload = controller.model_dump(exclude_none=True)
+        resolved_payload = self._resolve_i18n_payload(payload)
+        if isinstance(resolved_payload, dict):
+            return resolved_payload
+        return {}
+
+    def _get_selected_resource_payload(self) -> dict[str, Any]:
+        resource_definition = self._get_current_resource_definition()
+        if resource_definition is None:
+            return {}
+        payload = resource_definition.model_dump(exclude_none=True)
+        resolved_payload = self._resolve_i18n_payload(payload)
+        if isinstance(resolved_payload, dict):
+            return resolved_payload
+        return {}
+
+    def _build_pi_env(self) -> dict[str, str]:
+        controller_payload = self._get_selected_controller_payload()
+        resource_payload = self._get_selected_resource_payload()
+        return {
+            "PI_INTERFACE_VERSION": PI_INTERFACE_VERSION,
+            "PI_CLIENT_NAME": PI_CLIENT_NAME,
+            "PI_CLIENT_VERSION": self._resolve_client_version(),
+            "PI_CLIENT_LANGUAGE": PI_CLIENT_LANGUAGE,
+            "PI_CLIENT_MAAFW_VERSION": self._resolve_maafw_version(),
+            "PI_VERSION": self.interface.version or "",
+            "PI_CONTROLLER": self._compact_json_dumps(controller_payload),
+            "PI_RESOURCE": self._compact_json_dumps(resource_payload),
+        }
+
+    def _ensure_agent_started_once(self) -> bool:
+        if not self._get_agent_configs():
+            return True
+
+        if self._agent_started_once:
+            return self._agent_start_succeeded
+
+        with self._agent_start_lock:
+            if self._agent_started_once:
+                return self._agent_start_succeeded
+
+            self._agent_started_once = True
+            try:
+                self._pi_env = self._build_pi_env()
+                self.load_agent(self._pi_env)
+                self._agent_start_succeeded = True
+                self.send_log("Agent加载完成")
+            except Exception as exc:
+                self._agent_start_succeeded = False
+                self._agent_start_error = str(exc) or "未知错误"
+                self.send_log(f"Agent初始化失败: {self._agent_start_error}")
+
+        return self._agent_start_succeeded
 
     def _show_system_notification(self, title: str, message: str):
         notifier = plyer.notification
@@ -606,11 +790,12 @@ class MaaWorker:
     def black_magic(self, agent_config):
         run_black_magic(agent_config, resource)
 
-    def load_agent(self):
+    def load_agent(self, pi_env: dict[str, str] | None = None):
         self.agent_process, self.agent_processes = load_agents(
             self._get_agent_configs(),
             resource,
             self.send_log,
+            pi_env=pi_env,
         )
 
     def start_task(
@@ -619,6 +804,15 @@ class MaaWorker:
         options: dict[str, TaskOptionValue],
         task_name: str | None = None,
     ) -> bool:
+        if not self.connected:
+            return False
+        if not self.current_resource_name:
+            self.last_resource_config_error = "请先设置资源"
+            self.send_log(self.last_resource_config_error)
+            return False
+        if not self._ensure_agent_started_once():
+            return False
+
         cleaned_options: dict[str, TaskOptionValue] = {}
         for key, value in options.items():
             if value is None:

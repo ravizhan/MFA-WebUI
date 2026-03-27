@@ -189,8 +189,8 @@ async def connect_device(device: DeviceModel):
         return {"status": "failed", "message": msg}
     if await asyncio.to_thread(app_state.worker.connect_device, device):
         return {"status": "success"}
-    app_state.send_log("设备连接失败")
-    return {"status": "failed"}
+    msg = app_state.worker.last_device_config_error or "设备连接失败"
+    return {"status": "failed", "message": msg}
 
 
 @app.get("/api/resource")
@@ -214,7 +214,10 @@ async def set_resource(name: str):
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
     try:
-        await asyncio.to_thread(app_state.worker.set_resource, name)
+        ok = await asyncio.to_thread(app_state.worker.set_resource, name)
+        if not ok:
+            msg = app_state.worker.last_resource_config_error or "设置资源失败"
+            return {"status": "failed", "message": msg}
     except Exception as e:
         app_state.send_log(f"设置资源失败: {e}")
         return {"status": "failed", "message": str(e)}
@@ -517,7 +520,18 @@ def start(task_execution: TaskExecutionPayload):
         msg = "请先连接设备"
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
-    app_state.worker.start_task(task_execution.task_list, task_execution.task_options)
+    if not app_state.worker.start_task(
+        task_execution.task_list,
+        task_execution.task_options,
+    ):
+        msg = (
+            app_state.worker.last_resource_config_error
+            or app_state.worker.last_device_config_error
+            or app_state.worker._agent_start_error
+            or "任务启动失败"
+        )
+        app_state.send_log(msg)
+        return {"status": "failed", "message": msg}
     return {"status": "success"}
 
 
