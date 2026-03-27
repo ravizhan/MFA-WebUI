@@ -116,11 +116,16 @@ async function handleRescanScanSelect() {
     return
   }
 
+  // 在重扫前保存旧值，避免请求失败导致用户选择丢失
+  const previousValue = options.value[props.name]
+
   scanSelectRefreshing.value = true
   try {
     options.value[props.name] = null as any
     await interfaceStore.rescanScanSelectOption(props.name)
   } catch (error) {
+    // 重扫失败时恢复旧值
+    options.value[props.name] = previousValue
     if (error instanceof Error && error.message) {
       message.error(error.message)
     }
