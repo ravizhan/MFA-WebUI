@@ -145,7 +145,7 @@ jobs:
         with:
           repository: ravizhan/MWU
           latest: true
-          fileName: MWU-*-${{ matrix.platform }}-${{ matrix.arch }}.7z
+          fileName: MWU-${{ matrix.platform }}-${{ matrix.arch }}-*.7z
           out-file-path: ./
           token: ${{ secrets.GITHUB_TOKEN }}
 
