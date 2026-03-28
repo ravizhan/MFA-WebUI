@@ -203,8 +203,12 @@ MWU/
 │
 ├── maa_worker/                  # MAA 核心工作进程
 │   ├── agent_loader.py          # Agent 动态加载器
-│   ├── device_manager.py        # 设备管理器
-│   └── task_runner.py           # 任务执行器
+│   ├── agent_service.py         # Agent 生命周期与 PI 环境
+│   ├── device_service.py        # 设备发现、连接、资源加载
+│   ├── event_service.py         # 日志、实时事件与通知
+│   ├── pipeline_override.py     # pipeline_override 合并逻辑
+│   ├── runtime.py               # Worker 运行时状态对象
+│   └── task_service.py          # 任务线程启动/停止与执行主循环
 │
 ├── services/                    # 后端业务服务
 │   └── update_service.py        # 更新服务实现
@@ -252,84 +256,92 @@ MWU/
 
 - `main.py`：FastAPI 路由与生命周期管理（启动 `MaaWorker`、调度器、日志流）
 - `app_state.py`：运行时状态与日志广播
-- `maa_utils.py`：`MaaWorker` 编排层（事件通知、`pipeline_override` 合并、任务入口）
-- `maa_worker/device_manager.py`：设备发现、连接、资源加载
-- `maa_worker/task_runner.py`：任务线程启动/停止与执行主循环
+- `maa_utils.py`：`MaaWorker` 组装层（依赖初始化、Service 装配、截图与关闭）
+- `maa_worker/device_service.py`：设备发现、连接、资源加载
+- `maa_worker/task_service.py`：任务线程启动/停止与执行主循环
+- `maa_worker/pipeline_override.py`：任务选项与 pipeline_override 合并
+- `maa_worker/event_service.py`：统一日志、实时事件、系统通知与外部通知
 
 #### 🔧 扩展任务执行流程
 
-任务执行主循环位于 `maa_worker/task_runner.py` 的 `run_process`。如果您需要“特殊任务分支 + 默认 pipeline 共存”，推荐按下面方式扩展：
+任务执行主循环位于 `maa_worker/task_service.py` 的 `run_process`。如果您需要“特殊任务分支 + 默认 pipeline 共存”，推荐按下面方式扩展：
 
 ```python
-# maa_worker/task_runner.py
+# maa_worker/task_service.py
 
-def run_process(worker, task_list, options):
+def run_process(self, task_list, options):
     try:
-        worker._emit_task_started(task_list)
+        state = self.worker.task_state
+        self.worker.events.emit_task_started(task_list)
         for task in task_list:
-            if worker.stop_flag:
-                worker.tasker.post_stop().wait()
-                worker.last_task_status = "stopped"
-                worker.last_task_error = "任务已终止"
-                worker.send_log("任务已终止")
+            if state.stop_flag:
+                self.worker.tasker.post_stop().wait()
+                state.last_status = "stopped"
+                state.last_error = "任务已终止"
+                self.worker.events.send_log("任务已终止")
                 return
 
             # 自定义入口：按 task entry 分发到专用逻辑
             if task == "MyCustomEntry":
-                if not _run_my_custom_entry(worker, options):
+                if not _run_my_custom_entry(self, options):
                     return
                 continue
 
             # 默认入口：继续走 interface.json 的 pipeline 任务
-            pipeline_override = worker._build_task_pipeline_override(task, options)
-            t = (
-                worker.tasker.post_task(task, pipeline_override)
-                if pipeline_override
-                else worker.tasker.post_task(task)
+            pipeline_override = self.worker.pipeline.build_task_pipeline_override(
+                task, options
             )
-            worker.send_log("正在运行任务: " + task)
+            t = (
+                self.worker.tasker.post_task(task, pipeline_override)
+                if pipeline_override
+                else self.worker.tasker.post_task(task)
+            )
+            self.worker.events.send_log("正在运行任务: " + task)
 
             while not t.done:
                 time.sleep(0.5)
-                if worker.stop_flag:
-                    worker.tasker.post_stop().wait()
-                    worker.last_task_status = "stopped"
-                    worker.last_task_error = "任务已终止"
-                    worker.send_log("任务已终止")
+                if state.stop_flag:
+                    self.worker.tasker.post_stop().wait()
+                    state.last_status = "stopped"
+                    state.last_error = "任务已终止"
+                    self.worker.events.send_log("任务已终止")
                     return
 
-        worker.last_task_status = "success"
-        worker.last_task_error = None
-        worker._emit_task_completed(task_list)
+        state.last_status = "success"
+        state.last_error = None
+        self.worker.events.emit_task_completed(task_list)
     except Exception as exc:
-        worker.last_task_status = "failed"
-        worker.last_task_error = str(exc) or "任务执行失败"
-        worker._emit_task_failed(task_list, worker.last_task_error)
-        worker.send_log("任务出现异常，请检查终端日志")
+        state.last_status = "failed"
+        state.last_error = str(exc) or "任务执行失败"
+        self.worker.events.emit_task_failed(task_list, state.last_error)
+        self.worker.events.send_log("任务出现异常，请检查终端日志")
     finally:
-        worker.running = False
-        worker._task_thread = None
-        worker._current_task_name = None
+        state.running = False
+        state.thread = None
+        state.current_task_name = None
         time.sleep(0.5)
 
 
-def _run_my_custom_entry(worker, options):
-    worker.send_log("开始执行自定义任务: MyCustomEntry")
-    pipeline_override = worker._build_task_pipeline_override("MyCustomEntry", options)
+def _run_my_custom_entry(task_service, options):
+    state = task_service.worker.task_state
+    task_service.worker.events.send_log("开始执行自定义任务: MyCustomEntry")
+    pipeline_override = task_service.worker.pipeline.build_task_pipeline_override(
+        "MyCustomEntry", options
+    )
     t = (
-        worker.tasker.post_task("MyCustomEntry", pipeline_override)
+        task_service.worker.tasker.post_task("MyCustomEntry", pipeline_override)
         if pipeline_override
-        else worker.tasker.post_task("MyCustomEntry")
+        else task_service.worker.tasker.post_task("MyCustomEntry")
     )
     while not t.done:
         time.sleep(0.5)
-        if worker.stop_flag:
-            worker.tasker.post_stop().wait()
-            worker.last_task_status = "stopped"
-            worker.last_task_error = "任务已终止"
-            worker.send_log("任务已终止")
+        if state.stop_flag:
+            task_service.worker.tasker.post_stop().wait()
+            state.last_status = "stopped"
+            state.last_error = "任务已终止"
+            task_service.worker.events.send_log("任务已终止")
             return False
-    worker.send_log("自定义任务执行完成")
+    task_service.worker.events.send_log("自定义任务执行完成")
     return True
 ```
 
@@ -380,9 +392,9 @@ class MyCustomAction(CustomAction):
 
 #### 💡 开发建议
 
-1. **优先按模块改动**：设备相关优先改 `maa_worker/device_manager.py`，任务流优先改 `maa_worker/task_runner.py`，避免把所有逻辑塞进 `maa_utils.py`。
-2. **统一事件出口**：日志与通知尽量走 `MaaWorker.emit_event` / `send_log` / `send_notification`，便于前端 SSE 与通知配置统一生效。
-3. **保持任务状态可观测**：自定义流程要维护 `last_task_status` / `last_task_error`，这样定时调度执行记录才能正确展示。
+1. **优先按模块改动**：设备相关优先改 `maa_worker/device_service.py`，任务流优先改 `maa_worker/task_service.py`，避免把所有逻辑塞进 `maa_utils.py`。
+2. **统一事件出口**：日志与通知尽量走 `worker.events.emit` / `send_log` / `send_notification`，便于前端 SSE 与通知配置统一生效。
+3. **保持任务状态可观测**：自定义流程要维护 `worker.task_state.last_status` / `worker.task_state.last_error`，这样定时调度执行记录才能正确展示。
 4. **谨慎新增实时事件类型**：若新增事件名，请同步更新后端 `RealtimeEventName` 与前端事件处理逻辑。
 5. **避免命名冲突**：不要新建顶层 `utils` 包，避免与 agent 动态加载路径冲突。
 

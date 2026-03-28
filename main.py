@@ -1,43 +1,44 @@
 import asyncio
+import hashlib
+import os
+import signal
+import subprocess
+import sys
 import threading
+import time
 import webbrowser
 from contextlib import asynccontextmanager
 from pathlib import Path
+
 import uvicorn
-import os
-import signal
-import sys
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+
+import json_utils as json
+from app_state import AppState, LogBroadcaster, normalize_event
+from maa_utils import MaaWorker
+from models.api import DeviceModel
 from models.interface_loader import (
     InterfaceLoadError,
     load_interface_model,
     rescan_scan_select_option,
 )
-from models.api import DeviceModel
-from models.task_config import TaskConfigModel
-from models.settings import SettingsModel
 from models.scheduler import (
     ScheduledTaskCreate,
     ScheduledTaskUpdate,
     TaskExecutionPayload,
 )
-from maa_utils import MaaWorker
+from models.settings import SettingsModel
+from models.task_config import TaskConfigModel
 from scheduler_manager import SchedulerManager
-from app_state import AppState, LogBroadcaster, normalize_event
 from services.update_service import (
     check_github_update,
     check_mirrorchyan_update,
     download_file,
     get_platform_info,
 )
-import subprocess
-import time
-import hashlib
-
-import json_utils as json
 
 INTERFACE_PATH = Path("interface.json").resolve()
 interface = load_interface_model(INTERFACE_PATH)
@@ -86,11 +87,7 @@ async def lifespan(app: FastAPI):
     yield
     monitor_task.cancel()
     if app_state.worker:
-        if app_state.worker.agent_processes:
-            for process in app_state.worker.agent_processes:
-                process.terminate()
-        elif app_state.worker.agent_process:
-            app_state.worker.agent_process.terminate()
+        app_state.worker.shutdown()
     # 关闭调度器
     if app_state.scheduler_manager:
         await app_state.scheduler_manager.shutdown()
@@ -153,7 +150,7 @@ async def video_stream_generator(fps: int = 15):
     interval = 1.0 / fps
 
     while True:
-        if app_state.worker and app_state.worker.connected:
+        if app_state.worker and app_state.worker.device_state.connected:
             frame_bytes = await asyncio.to_thread(app_state.worker.get_screencap_bytes)
             if frame_bytes:
                 yield (
@@ -177,7 +174,7 @@ async def stream_live(fps: int = 15):
 def get_device(controller: str | None = None):
     if app_state.worker is None:
         return {"status": "failed", "message": "Worker未初始化"}
-    data = app_state.worker.get_device(controller)
+    data = app_state.worker.device.get_device(controller)
     return {"status": "success", "data": data}
 
 
@@ -187,9 +184,9 @@ async def connect_device(device: DeviceModel):
         msg = "Worker未初始化"
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
-    if await asyncio.to_thread(app_state.worker.connect_device, device):
+    if await asyncio.to_thread(app_state.worker.device.connect, device):
         return {"status": "success"}
-    msg = app_state.worker.last_device_config_error or "设备连接失败"
+    msg = app_state.worker.device_state.last_device_error or "设备连接失败"
     return {"status": "failed", "message": msg}
 
 
@@ -197,18 +194,21 @@ async def connect_device(device: DeviceModel):
 def get_device_state():
     if app_state.worker is None:
         return {"status": "failed", "message": "Worker未初始化"}
-    if app_state.worker.connected and not app_state.worker.is_connection_alive():
-        app_state.worker.reset_connection_state(
+    if (
+        app_state.worker.device_state.connected
+        and not app_state.worker.device.is_connection_alive()
+    ):
+        app_state.worker.device.reset_connection_state(
             "检测到设备连接已断开，已解除设备与资源锁定"
         )
 
     return {
         "status": "success",
         "state": {
-            "connected": app_state.worker.connected,
-            "configuration_locked": app_state.worker.configuration_locked,
-            "controller_name": app_state.worker.controller_name,
-            "resource_name": app_state.worker.current_resource_name,
+            "connected": app_state.worker.device_state.connected,
+            "configuration_locked": app_state.worker.device_state.configuration_locked,
+            "controller_name": app_state.worker.device_state.controller_name,
+            "resource_name": app_state.worker.device_state.current_resource_name,
         },
     }
 
@@ -217,7 +217,7 @@ def get_device_state():
 def get_resource():
     if app_state.worker is None:
         return {"status": "failed", "message": "Worker未初始化"}
-    if not app_state.worker.connected:
+    if not app_state.worker.device_state.connected:
         return {"status": "failed", "message": "请先连接设备后再选择资源"}
     return {"status": "success", "resource": [i.name for i in interface.resource]}
 
@@ -229,14 +229,14 @@ async def set_resource(name: str):
         msg = "Worker未初始化"
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
-    if not app_state.worker.connected:
+    if not app_state.worker.device_state.connected:
         msg = "请先连接设备后再选择资源"
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
     try:
-        ok = await asyncio.to_thread(app_state.worker.set_resource, name)
+        ok = await asyncio.to_thread(app_state.worker.device.set_resource, name)
         if not ok:
-            msg = app_state.worker.last_resource_config_error or "设置资源失败"
+            msg = app_state.worker.device_state.last_resource_error or "设置资源失败"
             return {"status": "failed", "message": msg}
     except Exception as e:
         app_state.send_log(f"设置资源失败: {e}")
@@ -514,7 +514,7 @@ def test_notification():
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
     try:
-        app_state.worker.send_notification(
+        app_state.worker.events.send_notification(
             "测试通知",
             "这是一条测试通知。",
             event="notification.test",
@@ -532,22 +532,22 @@ def start(task_execution: TaskExecutionPayload):
         msg = "Worker未初始化"
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
-    if app_state.worker.running:
+    if app_state.worker.task_state.running:
         msg = "任务已开始"
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
-    if not app_state.worker.connected:
+    if not app_state.worker.device_state.connected:
         msg = "请先连接设备"
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
-    if not app_state.worker.start_task(
+    if not app_state.worker.tasks.start(
         task_execution.task_list,
         task_execution.task_options,
     ):
         msg = (
-            app_state.worker.last_resource_config_error
-            or app_state.worker.last_device_config_error
-            or app_state.worker._agent_start_error
+            app_state.worker.device_state.last_resource_error
+            or app_state.worker.device_state.last_device_error
+            or app_state.worker.agent_state.start_error
             or "任务启动失败"
         )
         app_state.send_log(msg)
@@ -557,11 +557,11 @@ def start(task_execution: TaskExecutionPayload):
 
 @app.post("/api/stop")
 def stop():
-    if app_state.worker is None or not app_state.worker.running:
+    if app_state.worker is None or not app_state.worker.task_state.running:
         msg = "任务未开始"
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
-    app_state.worker.stop_task()
+    app_state.worker.tasks.stop()
     return {"status": "success"}
 
 

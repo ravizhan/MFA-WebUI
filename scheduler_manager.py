@@ -174,7 +174,7 @@ class SchedulerManager:
 
         try:
             # 检查是否有任务正在运行
-            if self._worker and self._worker.running:
+            if self._worker and self._worker.task_state.running:
                 logger.warning(f"任务已在运行，跳过定时任务 {task_id}")
                 await self._update_execution_status(
                     execution_id, "stopped", "任务已在运行"
@@ -182,7 +182,7 @@ class SchedulerManager:
                 return
 
             # 检查设备是否已连接
-            if not self._worker or not self._worker.connected:
+            if not self._worker or not self._worker.device_state.connected:
                 logger.error(f"设备未连接，无法执行定时任务 {task_id}")
                 await self._update_execution_status(
                     execution_id, "failed", "设备未连接"
@@ -190,7 +190,7 @@ class SchedulerManager:
                 return
 
             # 启动任务
-            if not self._worker.start_task(
+            if not self._worker.tasks.start(
                 task_list, task_options, task_name=task_name
             ):
                 logger.warning(f"任务已在运行，跳过定时任务 {task_id}")
@@ -200,11 +200,11 @@ class SchedulerManager:
                 return
 
             # 等待任务完成
-            while self._worker and self._worker.running:
+            while self._worker and self._worker.task_state.running:
                 await asyncio.sleep(1)
 
-            task_status = getattr(self._worker, "last_task_status", "failed")
-            task_error = getattr(self._worker, "last_task_error", None)
+            task_status = getattr(self._worker.task_state, "last_status", "failed")
+            task_error = getattr(self._worker.task_state, "last_error", None)
 
             if task_status == "success":
                 await self._update_execution_status(execution_id, "success")

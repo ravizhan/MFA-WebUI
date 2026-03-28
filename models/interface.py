@@ -1,5 +1,4 @@
 import re
-
 from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import (
@@ -10,7 +9,6 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-
 
 DocumentContent = Union[str, List[str]]
 PipelineOverride = Dict[str, Any]
