@@ -24,18 +24,20 @@ def validate_regex(v: Any, info: ValidationInfo) -> Any:
         raise ValueError(f"{info.field_name} 无法编译为正则表达式")
 
 
-def _pipeline_override_contains_placeholder(value: Any, placeholder: str) -> bool:
+def _pipeline_override_contains_attach_option(value: Any, option_name: str) -> bool:
     if isinstance(value, dict):
+        attach_value = value.get("attach")
+        if isinstance(attach_value, dict) and option_name in attach_value:
+            return True
         for nested_value in value.values():
-            if _pipeline_override_contains_placeholder(nested_value, placeholder):
+            if _pipeline_override_contains_attach_option(nested_value, option_name):
                 return True
         return False
     if isinstance(value, list):
         return any(
-            _pipeline_override_contains_placeholder(item, placeholder) for item in value
+            _pipeline_override_contains_attach_option(item, option_name)
+            for item in value
         )
-    if isinstance(value, str):
-        return placeholder in value
     return False
 
 
@@ -405,12 +407,11 @@ class InterfaceModel(BaseModel):
             if option.type != "scan_select" or option.pipeline_override is None:
                 continue
 
-            placeholder = f"{{{option_name}}}"
-            if not _pipeline_override_contains_placeholder(
+            if not _pipeline_override_contains_attach_option(
                 option.pipeline_override,
-                placeholder,
+                option_name,
             ):
                 raise ValueError(
-                    f"scan_select 选项 {option_name} 的 pipeline_override 必须在任意字符串值中至少包含一次占位符 {placeholder}"
+                    f"scan_select 选项 {option_name} 的 pipeline_override 必须在任意层级的 attach 中至少包含一次键 {option_name}"
                 )
         return self

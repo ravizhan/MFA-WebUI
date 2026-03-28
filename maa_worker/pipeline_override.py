@@ -151,6 +151,38 @@ class PipelineOverrideService:
             return substituted
         return copy.deepcopy(value)
 
+    def _assign_scan_select_attach_value(
+        self,
+        value,
+        option_name: str,
+        selected_value: str,
+    ):
+        if isinstance(value, dict):
+            copied = {
+                key: self._assign_scan_select_attach_value(
+                    nested_value,
+                    option_name,
+                    selected_value,
+                )
+                for key, nested_value in value.items()
+            }
+            attach_value = copied.get("attach")
+            if isinstance(attach_value, dict) and option_name in attach_value:
+                updated_attach = copy.deepcopy(attach_value)
+                updated_attach[option_name] = selected_value
+                copied["attach"] = updated_attach
+            return copied
+        if isinstance(value, list):
+            return [
+                self._assign_scan_select_attach_value(
+                    item,
+                    option_name,
+                    selected_value,
+                )
+                for item in value
+            ]
+        return copy.deepcopy(value)
+
     def _build_input_override(
         self,
         option_name: str,
@@ -199,13 +231,12 @@ class PipelineOverrideService:
             return copy.deepcopy(option.pipeline_override)
 
         selected_value = self._normalize_choice_value(option_name, option, options)
-        placeholder = f"{{{option_name}}}"
         return cast(
             PipelineOverride,
-            self._substitute_placeholders(
+            self._assign_scan_select_attach_value(
                 option.pipeline_override,
-                {placeholder: selected_value},
-                {placeholder: selected_value},
+                option_name,
+                selected_value,
             ),
         )
 

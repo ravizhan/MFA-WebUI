@@ -73,7 +73,7 @@ _✨ 基于 **[Vue](https://github.com/vuejs/vue)** 和 **[FastAPI](https://gith
 | `description` | `string` | 否 | 描述信息 |
 | `scan_dir` | `string` | 是 | 扫描目录。相对路径基于 interface.json 所在目录解析，并做越界限制（不允许跳出该目录） |
 | `scan_filter` | `string` | 是 | `glob pattern`，用于筛选文件，如 `**/*.json` |
-| `pipeline_override` | `object` | 是 | 任务执行时使用的覆盖配置，须包含 `{option_name}` 占位符 |
+| `pipeline_override` | `object` | 是 | 任务执行时使用的覆盖配置，必须在任意层级的 `attach` 中至少包含一次当前选项名键（如 `attach.bbc_team_config`） |
 | `cases` | `OptionCase[]` | 否（配置阶段应省略或空数组） | 加载时自动生成，`name`/`label` 均为相对 `scan_dir` 的路径+文件名 |
 | `default_case` | `string` | 否 | 默认选项名称 |
 
@@ -92,7 +92,9 @@ _✨ 基于 **[Vue](https://github.com/vuejs/vue)** 和 **[FastAPI](https://gith
       "scan_filter": "**/*.json",
       "pipeline_override": {
         "队伍配置": {
-          "custom_action_param": "{bbc_team_config}"
+          "attach": {
+            "bbc_team_config": ""
+          }
         }
       }
     }
@@ -114,7 +116,9 @@ _✨ 基于 **[Vue](https://github.com/vuejs/vue)** 和 **[FastAPI](https://gith
       "scan_filter": "**/*.json",
       "pipeline_override": {
         "队伍配置": {
-          "custom_action_param": "1.json"
+          "attach": {
+            "bbc_team_config": "1.json"
+          }
         }
       },
       "cases": [
@@ -131,6 +135,9 @@ _✨ 基于 **[Vue](https://github.com/vuejs/vue)** 和 **[FastAPI](https://gith
   }
 }
 ```
+
+`scan_select` 会递归遍历 `pipeline_override`，并对所有命中的 `attach.option_name` 赋值。
+例如在 `队伍配置1` 和 `队伍配置2` 下都存在 `attach.bbc_team_config` 时，两处都会被写入同一个用户选择结果。
 
 ## 🏗️ 项目架构与开发
 
