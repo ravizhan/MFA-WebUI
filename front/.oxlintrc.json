@@ -1,0 +1,25 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "env": {
+    "es6": true
+  },
+  "ignorePatterns": ["auto-imports.d.ts", "components.d.ts", "env.d.ts"],
+  "overrides": [
+    {
+      "files": ["src/**/*.{js,jsx,ts,tsx,vue}"],
+      "env": {
+        "browser": true
+      }
+    },
+    {
+      "files": ["src/**/*.vue"],
+      "plugins": ["vue"]
+    },
+    {
+      "files": ["vite.config.ts", "uno.config.ts"],
+      "env": {
+        "node": true
+      }
+    }
+  ]
+}

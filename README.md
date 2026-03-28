@@ -223,29 +223,30 @@ MWU/
 │   ├── download_deps.py         # 依赖下载脚本
 │   └── copy_resources.py        # 资源复制脚本
 │
-├── page/                        # 前端构建输出（FastAPI 静态服务）
-│
-├── resource/                    # MAA 资源文件目录（base, data, tasks等）
-│
 └── front/                       # 前端项目目录
     └── src/                     # 源代码目录
-        ├── App.vue              # 根组件
-        ├── main.ts              # 前端入口文件
-        ├── components/          # Vue 组件
-        │   ├── LeftPanel.vue    # 左侧任务列表
-        │   ├── MediumPanel.vue  # 中间选项面板
-        │   ├── RightPanel.vue   # 右侧日志与控制
-        │   └── ...              # 其他功能组件
-        ├── router/              # Vue Router 路由配置
-        ├── theme.ts             # 主题配置
-        ├── services/            # API 调用与实时通信实现
-        │   ├── api/             # 领域 API (device, task, settings等)
-        │   ├── sse.ts           # SSE 客户端实现
-        │   └── realtime.ts      # 实时状态同步
-        ├── stores/              # Pinia 状态管理 (interface, settings等)
-        ├── types/               # TypeScript 类型定义
-        ├── views/               # 页面视图 (PanelView, SettingView)
-        └── utils/               # 前端工具类
+        ├── app/                 # 应用入口、路由、主题、i18n、全局样式
+        │   ├── App.vue
+        │   ├── main.ts
+        │   ├── router/
+        │   ├── theme/
+        │   ├── i18n/
+        │   └── styles/
+        ├── views/               # 页面视图装配层
+        │   ├── panel/
+        │   └── settings/
+        ├── components/          # 技术层组件目录
+        │   ├── panel/           # 主面板相关组件
+        │   └── settings/        # 设置页区块、弹窗、调度组件
+        ├── services/            # API、SSE、消息反馈等服务
+        │   ├── api/
+        │   │   ├── core/
+        │   │   └── modules/
+        │   ├── realtime/
+        │   └── feedback/
+        ├── stores/              # Pinia 状态管理，按技术层内子目录划分
+        ├── types/               # 类型定义
+        └── utils/               # 纯函数工具
 ```
 
 ### 全代码开发集成

@@ -1,22 +1,5 @@
-import { defineStore } from "pinia"
-
-export const useIndexStore = defineStore("index", {
-  state: () => {
-    return {
-      SelectedTaskID: "",
-      RunningLog: "",
-      Connected: false,
-    }
-  },
-  actions: {
-    SelectTask(id: string) {
-      this.SelectedTaskID = id
-    },
-    UpdateLog(log: string) {
-      this.RunningLog += log + "\n"
-    },
-    setConnected(status: boolean) {
-      this.Connected = status
-    },
-  },
-})
+export { useIndexStore } from "@/stores/panel/session"
+export { useSettingsStore } from "@/stores/settings/settings"
+export { useSchedulerStore } from "@/stores/scheduler/scheduler"
+export { useInterfaceStore } from "@/stores/interface/interface"
+export { useTaskConfigStore } from "@/stores/task-config/taskConfig"
