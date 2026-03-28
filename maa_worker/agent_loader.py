@@ -5,6 +5,8 @@ import re
 import subprocess
 import sys
 import traceback
+import types
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable
 
@@ -26,6 +28,109 @@ def _cleanup_agent_processes(
             process.wait(timeout=3)
         except Exception as e:
             send_log(f"Agent进程回收失败(pid={process.pid}): {e}")
+
+
+class _BlackMagicAgentServer:
+    """黑魔法导入用的 AgentServer 替身，保留装饰器语义但不触发真实注册。"""
+
+    @staticmethod
+    def _noop_decorator():
+        def wrapper(*args, **kwargs):
+            def decorator(target):
+                return target
+
+            return decorator
+
+        return wrapper
+
+    custom_action = _noop_decorator.__func__()
+    custom_recognition = _noop_decorator.__func__()
+    resource_sink = _noop_decorator.__func__()
+    controller_sink = _noop_decorator.__func__()
+    tasker_sink = _noop_decorator.__func__()
+    context_sink = _noop_decorator.__func__()
+
+    @staticmethod
+    def register_custom_action(*args, **kwargs) -> bool:
+        return True
+
+    @staticmethod
+    def register_custom_recognition(*args, **kwargs) -> bool:
+        return True
+
+    @staticmethod
+    def add_resource_sink(*args, **kwargs) -> None:
+        return None
+
+    @staticmethod
+    def add_controller_sink(*args, **kwargs) -> None:
+        return None
+
+    @staticmethod
+    def add_tasker_sink(*args, **kwargs) -> None:
+        return None
+
+    @staticmethod
+    def add_context_sink(*args, **kwargs) -> None:
+        return None
+
+    @staticmethod
+    def start_up(*args, **kwargs) -> bool:
+        return True
+
+    @staticmethod
+    def join(*args, **kwargs) -> None:
+        return None
+
+    @staticmethod
+    def shut_down(*args, **kwargs) -> None:
+        return None
+
+    @staticmethod
+    def detach(*args, **kwargs) -> None:
+        return None
+
+
+@contextmanager
+def _black_magic_agent_server_stub():
+    """
+    临时注入 maa.agent / maa.agent.agent_server 的 stub，
+    防止导入 AgentServer 时把全局 Library 切到 agent_server 模式。
+    """
+    maa_module = importlib.import_module("maa")
+    saved_modules = {
+        name: sys.modules.get(name) for name in ("maa.agent", "maa.agent.agent_server")
+    }
+    had_agent_attr = hasattr(maa_module, "agent")
+    saved_agent_attr = getattr(maa_module, "agent", None)
+
+    stub_agent_module = types.ModuleType("maa.agent")
+    stub_agent_module.__package__ = "maa.agent"
+    stub_agent_module.__path__ = []
+
+    stub_agent_server_module = types.ModuleType("maa.agent.agent_server")
+    stub_agent_server_module.__package__ = "maa.agent"
+    stub_agent_server_module.AgentServer = _BlackMagicAgentServer
+
+    stub_agent_module.agent_server = stub_agent_server_module
+
+    sys.modules["maa.agent"] = stub_agent_module
+    sys.modules["maa.agent.agent_server"] = stub_agent_server_module
+    setattr(maa_module, "agent", stub_agent_module)
+
+    try:
+        yield
+    finally:
+        for name, saved in saved_modules.items():
+            if saved is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = saved
+
+        if had_agent_attr:
+            setattr(maa_module, "agent", saved_agent_attr)
+        else:
+            delattr(maa_module, "agent")
 
 
 def run_black_magic(agent_config: Any, resource: Resource):
@@ -101,13 +206,6 @@ def run_black_magic(agent_config: Any, resource: Resource):
             with open(file_path, "r", encoding="utf-8") as f:
                 source = f.read()
 
-            # 移除 @AgentServer 装饰器，避免注册时重复绑定
-            if "@AgentServer" in source:
-                filtered_lines = [
-                    line for line in source.split("\n") if "AgentServer" not in line
-                ]
-                source = "\n".join(filtered_lines)
-
             module.__file__ = file_path
             module.__loader__ = self
             if record["is_pkg"]:
@@ -161,29 +259,34 @@ def run_black_magic(agent_config: Any, resource: Resource):
             print(f"Error scanning {file_path}: {e}")
 
     try:
-        # 加载所有模块（支持循环/相互导入）
-        for module_name in module_map:
-            try:
-                importlib.import_module(module_name)
-            except Exception as e:
-                print(f"Warning: Failed to import module {module_name}: {e}")
-                traceback.print_exc()
-
-        # 注册实例
-        for key in ["recognition", "action"]:
-            for item in to_register[key]:
+        with _black_magic_agent_server_stub():
+            # 加载所有模块（支持循环/相互导入）
+            for module_name in module_map:
                 try:
-                    module = sys.modules.get(item["module_name"])
-                    if module:
-                        cls = getattr(module, item["class_name"])
-                        instance = cls()
-                        if key == "action":
-                            resource.register_custom_action(item["name"], instance)
-                        else:
-                            resource.register_custom_recognition(item["name"], instance)
+                    importlib.import_module(module_name)
                 except Exception as e:
-                    print(f"Warning: Failed to register {key} '{item['name']}': {e}")
+                    print(f"Warning: Failed to import module {module_name}: {e}")
                     traceback.print_exc()
+
+            # 注册实例
+            for key in ["recognition", "action"]:
+                for item in to_register[key]:
+                    try:
+                        module = sys.modules.get(item["module_name"])
+                        if module:
+                            cls = getattr(module, item["class_name"])
+                            instance = cls()
+                            if key == "action":
+                                resource.register_custom_action(item["name"], instance)
+                            else:
+                                resource.register_custom_recognition(
+                                    item["name"], instance
+                                )
+                    except Exception as e:
+                        print(
+                            f"Warning: Failed to register {key} '{item['name']}': {e}"
+                        )
+                        traceback.print_exc()
     finally:
         # 确保清理 loader，避免污染全局导入链
         if loader in sys.meta_path:
