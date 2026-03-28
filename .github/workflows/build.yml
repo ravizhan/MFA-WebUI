@@ -147,7 +147,7 @@ jobs:
         run: uv run python -m nuitka --standalone --lto=no --linux-icon=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --output-dir=build --include-package=PIL --include-package=maa -o MWU main.py
 
       - name: Build Executable
-        if: ${{ matrix.platform == 'osx' }}
+        if: ${{ matrix.platform == 'macos' }}
         run: uv run python -m nuitka --standalone --lto=no --macos-app-icon=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --output-dir=build --include-package=PIL --include-package=maa -o MWU main.py
 
       - name: Build Updater
