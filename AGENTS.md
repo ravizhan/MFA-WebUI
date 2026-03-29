@@ -1,28 +1,28 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-`main.py` is the FastAPI entrypoint; backend code lives in `maa_utils.py`, `app_state.py`, `scheduler_manager.py`, `maa_worker/`, `models/`, and `services/`. Runtime config lives in `config/`, resources in `resource/`, the Vue app in `front/`, and the built frontend in `page/`. The Go updater is isolated in `updater/`, and dynamic extensions belong under `agent/custom/`.
+`main.py` is the FastAPI entrypoint and serves the built frontend from `page/`. Backend domain code is split across `maa_worker/` for task runtime and device orchestration, `models/` for Pydantic models, and `services/` for business services such as updates. `updater/` contains the Go-based updater binary. Frontend code lives in `front/src/`: `app/` for bootstrapping, router, theme, and i18n; `views/` for page composition; `components/` for UI blocks; `stores/` for Pinia state; `services/` for API/SSE access; `types/` and `utils/` for shared TS models and helpers. `deploy/` holds packaging and CI scripts.
 
 ## Build, Test, and Development Commands
-Use the repo toolchains directly:
+Use `uv` for Python, `pnpm` for the frontend, and Go tooling for the updater.
 
-- `uv sync`: install and lock Python dependencies from `pyproject.toml` and `uv.lock`.
-- `uv run main.py`: start the backend at `http://127.0.0.1:55666`.
+- `uv sync`: install Python dependencies from `pyproject.toml` and `uv.lock`.
+- `uv run main.py`: start the FastAPI app on `http://127.0.0.1:55666`.
 - `cd front && pnpm install`: install frontend dependencies.
 - `cd front && pnpm dev`: run the Vite dev server with `/api` proxied to the backend.
 - `cd front && pnpm build`: build the frontend into `page/`.
-- `cd front && pnpm lint && pnpm format`: apply frontend linting and formatting.
+- `cd front && pnpm lint`: run `oxlint`.
+- `cd front && pnpm format`: format frontend files with `oxfmt`.
 - `cd updater && go build`: compile the updater.
-- `uv run pre-commit run -a`: run the repo formatting hooks before review.
 
 ## Coding Style & Naming Conventions
-Python targets 3.12+ and uses 4-space indentation. Vue/TypeScript files in `front/` use the existing 2-space style and relative imports. Keep comments in Chinese when adding or updating them. Use PascalCase for Vue components, `useXxxStore` for Pinia stores, and keep shared types in `front/src/types/`. Do not create a top-level Python package named `utils`; it conflicts with dynamic agent loading.
+Python uses 4-space indentation, `snake_case` for functions/modules, and typed Pydantic models in `models/`. Keep backend changes scoped to the relevant module instead of growing `maa_utils.py`. Vue single-file components use `PascalCase` filenames such as `PanelView.vue`; TypeScript modules and stores use `camelCase` names such as `taskConfig.ts`. Follow the existing Vite/Vue style and run `pnpm format` before submitting. Avoid adding a top-level `utils` Python package; it conflicts with agent-loading conventions.
 
 ## Testing Guidelines
-There is no single repository-wide test command yet. Validate the area you changed: backend changes should at least boot with `uv run main.py`, frontend changes should pass `pnpm build` and `pnpm lint`, and updater changes should pass `go build`. If you add tests, use native names such as `test_*.py` or `*.spec.ts` and document the command in your PR.
+There is no committed first-party automated test suite yet. Every change should at minimum pass `cd front && pnpm lint`, `cd front && pnpm build`, and any relevant `go build` or `uv run main.py` smoke test. PRs that change runtime behavior should describe the manual verification performed, especially around `interface.json`, scheduling, SSE events, and updater flows.
 
 ## Commit & Pull Request Guidelines
-Commits follow Conventional Commits, usually with concise Chinese subjects, for example `fix(api): 修复任务状态推送` or `refactor(front): 调整设置页结构`. Keep commits focused and use scopes when helpful. PRs should include a short summary, linked issue or context, the validation commands you ran, and screenshots for visible UI changes. Call out dependency updates explicitly and keep lockfiles in sync.
+Follow the existing Conventional Commit pattern: `feat:`, `refactor:`, `chore:`, `ci(build):`, or `BREAKING:`. Keep subjects short and imperative; scoped forms like `refactor(agent): ...` match current history. PRs should include a concise summary, linked issue if applicable, validation steps, and screenshots for frontend changes. Call out schema or config-impacting changes explicitly when touching `interface.json`, `config/`, or packaging scripts.
 
-## Security & Configuration Tips
+## Configuration Tips
 Manage Python dependencies with `uv`, frontend dependencies with `pnpm`, and Go dependencies with Go modules. Keep external API fields and protocol keys stable. Review `.github/instructions/` before larger changes.
