@@ -110,9 +110,9 @@ def _black_magic_agent_server_stub():
 
     stub_agent_server_module = types.ModuleType("maa.agent.agent_server")
     stub_agent_server_module.__package__ = "maa.agent"
-    stub_agent_server_module.AgentServer = _BlackMagicAgentServer
+    setattr(stub_agent_server_module, "AgentServer", _BlackMagicAgentServer)
 
-    stub_agent_module.agent_server = stub_agent_server_module
+    setattr(stub_agent_module, "agent_server", stub_agent_server_module)
 
     sys.modules["maa.agent"] = stub_agent_module
     sys.modules["maa.agent.agent_server"] = stub_agent_server_module
@@ -257,6 +257,8 @@ def run_black_magic(agent_config: Any, resource: Resource):
                             )
         except Exception as e:
             print(f"Error scanning {file_path}: {e}")
+            traceback.print_exc()
+            raise
 
     try:
         with _black_magic_agent_server_stub():
@@ -267,6 +269,7 @@ def run_black_magic(agent_config: Any, resource: Resource):
                 except Exception as e:
                     print(f"Warning: Failed to import module {module_name}: {e}")
                     traceback.print_exc()
+                    raise
 
             # 注册实例
             for key in ["recognition", "action"]:
@@ -287,6 +290,7 @@ def run_black_magic(agent_config: Any, resource: Resource):
                             f"Warning: Failed to register {key} '{item['name']}': {e}"
                         )
                         traceback.print_exc()
+                        raise
     finally:
         # 确保清理 loader，避免污染全局导入链
         if loader in sys.meta_path:
