@@ -41,7 +41,13 @@ from services.update_service import (
 )
 
 INTERFACE_PATH = Path("interface.json").resolve()
-interface = load_interface_model(INTERFACE_PATH)
+try:
+    interface = load_interface_model(INTERFACE_PATH)
+except Exception as e:
+    print(e)
+    input("interface.json加载异常，请修正后重新启动程序，按任意键退出...")
+    exit(1)
+
 interface_lock = threading.Lock()
 
 
