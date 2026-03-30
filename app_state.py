@@ -58,6 +58,7 @@ class AppState:
     def __init__(self):
         self.message_conn = SimpleQueue()
         self.worker: MaaWorker | None = None
+        self.is_shutting_down = False
         self.history_message: list[RealtimeEvent] = []
         self.current_status = None
         self.broadcaster: LogBroadcaster | None = None

@@ -7,7 +7,7 @@ import sys
 import threading
 import time
 import webbrowser
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 import uvicorn
@@ -67,7 +67,7 @@ app_state = AppState()
 
 
 async def log_monitor():
-    while True:
+    while not app_state.is_shutting_down:
         while not app_state.message_conn.empty():
             message = normalize_event(app_state.message_conn.get_nowait())
             app_state.history_message.append(message)
@@ -78,6 +78,7 @@ async def log_monitor():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    app_state.is_shutting_down = False
     app_state.worker = MaaWorker(app_state.message_conn, interface)
     app_state.broadcaster = LogBroadcaster()
     with open("config/settings.json", "r", encoding="utf-8") as f:
@@ -91,7 +92,10 @@ async def lifespan(app: FastAPI):
     monitor_task = asyncio.create_task(log_monitor())
     webbrowser.open_new("http://127.0.0.1:55666")
     yield
+    app_state.is_shutting_down = True
     monitor_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await monitor_task
     if app_state.worker:
         app_state.worker.shutdown()
     # 关闭调度器
@@ -155,7 +159,7 @@ async def video_stream_generator(fps: int = 15):
     fps = max(1, min(60, fps))
     interval = 1.0 / fps
 
-    while True:
+    while not app_state.is_shutting_down:
         if app_state.worker and app_state.worker.device_state.connected:
             frame_bytes = await asyncio.to_thread(app_state.worker.get_screencap_bytes)
             if frame_bytes:
@@ -576,7 +580,9 @@ async def stream_logs(request: Request):
     if app_state.broadcaster is None:
 
         async def empty_generator():
-            while not await request.is_disconnected():
+            while (
+                not app_state.is_shutting_down and not await request.is_disconnected()
+            ):
                 yield ": keep-alive\n\n"
                 await asyncio.sleep(15)
 
@@ -586,7 +592,7 @@ async def stream_logs(request: Request):
 
     async def event_generator():
         try:
-            while True:
+            while not app_state.is_shutting_down:
                 if await request.is_disconnected():
                     break
                 try:
@@ -744,4 +750,9 @@ async def get_scheduler_executions(limit: int = 50):
 
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=55666)
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=55666,
+        timeout_graceful_shutdown=1,
+    )
