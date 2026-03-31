@@ -14,3 +14,7 @@ class TaskConfigModel(BaseModel):
     taskOptions: Dict[str, TaskOptionValue] = Field(
         default_factory=dict, description="任务选项配置，key为选项名，value为选项值"
     )
+    selectedPreset: Optional[str] = Field(
+        default=None, description="当前选中的预设名称"
+    )
+    presetDirty: bool = Field(default=False, description="当前配置是否已偏离预设")

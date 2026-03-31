@@ -5,6 +5,8 @@ export interface TaskConfig {
   taskOrder?: string[]
   taskChecked?: Record<string, boolean>
   taskOptions?: Record<string, TaskOptionValue>
+  selectedPreset?: string | null
+  presetDirty?: boolean
 }
 
 interface TaskConfigResponse {

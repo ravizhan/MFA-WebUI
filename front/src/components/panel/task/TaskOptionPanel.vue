@@ -27,9 +27,11 @@
 
 <script setup lang="ts">
 import { computed } from "vue"
+import { useI18n } from "vue-i18n"
 import { useInterfaceStore } from "@/stores"
 import type { TaskOptionValue } from "@/types/scheduler/model"
 import OptionItem from "@/components/panel/task/OptionItem.vue"
+import { resolveInterfaceText } from "@/utils/interface/content"
 
 interface Props {
   /** 当前配置的任务ID */
@@ -57,18 +59,17 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const interfaceStore = useInterfaceStore()
+const { locale } = useI18n()
 
-// 获取当前任务名称
 const currentTaskName = computed(() => {
   if (!props.currentTaskId) return ""
-  const task = interfaceStore.getTaskList.find((t) => t.id === props.currentTaskId)
-  return task?.name || ""
+  const task = interfaceStore.getTaskByEntry(props.currentTaskId)
+  return resolveInterfaceText(interfaceStore.interface, locale.value, task?.label, task?.name || "")
 })
 
-// 获取当前任务的选项列表
 const taskOptions = computed(() => {
   if (!props.currentTaskId) return []
-  const task = interfaceStore.interface?.task?.find((t) => t.entry === props.currentTaskId)
+  const task = interfaceStore.getTaskByEntry(props.currentTaskId)
   return task?.option || []
 })
 </script>

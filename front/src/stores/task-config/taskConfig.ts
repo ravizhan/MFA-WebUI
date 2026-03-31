@@ -1,7 +1,7 @@
 import { defineStore } from "pinia"
 import { getTaskConfig, resetTaskConfig, saveTaskConfig, type TaskConfig } from "@/services/api"
 import { useInterfaceStore } from "@/stores"
-import type { Option } from "@/types/interface/model"
+import type { Option, PresetTaskOptionValue } from "@/types/interface/model"
 import type { TaskExecutionPayload, TaskOptionValue } from "@/types/scheduler/model"
 import type { TaskListItem } from "@/types/task-config/model"
 import {
@@ -9,10 +9,86 @@ import {
   normalizeOptionValueForBoundary,
 } from "@/utils/task-config/options"
 
+function areTaskListsEquivalent(left: TaskListItem[], right: TaskListItem[]): boolean {
+  if (left.length !== right.length) {
+    return false
+  }
+
+  return left.every((task, index) => {
+    const target = right[index]
+    return target && task.id === target.id && Boolean(task.checked) === Boolean(target.checked)
+  })
+}
+
+function areOptionValuesEqual(
+  left: TaskOptionValue | undefined,
+  right: TaskOptionValue | undefined,
+): boolean {
+  if (Array.isArray(left) || Array.isArray(right)) {
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) {
+      return false
+    }
+    return left.every((value, index) => value === right[index])
+  }
+  return left === right
+}
+
+function areOptionMapsEquivalent(
+  left: Record<string, TaskOptionValue>,
+  right: Record<string, TaskOptionValue>,
+): boolean {
+  const keys = new Set([...Object.keys(left), ...Object.keys(right)])
+  for (const key of keys) {
+    if (!areOptionValuesEqual(left[key], right[key])) {
+      return false
+    }
+  }
+  return true
+}
+
+function applyPresetOptionValue(
+  optionName: string,
+  value: PresetTaskOptionValue,
+  optionMap: Record<string, Option>,
+  targetOptions: Record<string, TaskOptionValue>,
+) {
+  const option = optionMap[optionName]
+  if (!option) {
+    return
+  }
+
+  if (option.type === "input") {
+    if (typeof value !== "object" || Array.isArray(value) || value === null) {
+      return
+    }
+    const inputValues = value as Record<string, string>
+    for (const input of option.inputs) {
+      const inputValue = inputValues[input.name]
+      if (typeof inputValue === "string") {
+        targetOptions[`${optionName}_${input.name}`] = inputValue
+      }
+    }
+    return
+  }
+
+  if (option.type === "checkbox") {
+    if (Array.isArray(value)) {
+      targetOptions[optionName] = value.filter((item): item is string => typeof item === "string")
+    }
+    return
+  }
+
+  if (typeof value === "string") {
+    targetOptions[optionName] = value
+  }
+}
+
 export const useTaskConfigStore = defineStore("taskConfig", {
   state: () => ({
     options: {} as Record<string, TaskOptionValue>,
     taskList: [] as TaskListItem[],
+    selectedPresetName: null as string | null,
+    presetDirty: false,
     configLoaded: false,
     saveTimer: null as ReturnType<typeof setTimeout> | null,
   }),
@@ -83,7 +159,97 @@ export const useTaskConfigStore = defineStore("taskConfig", {
       return interfaceStore.getTaskList.map((task) => ({ ...task, checked: false }))
     },
 
+    buildPresetSnapshot(presetName: string) {
+      const interfaceStore = useInterfaceStore()
+      const preset = interfaceStore.getPresetByName(presetName)
+      if (!preset) {
+        return null
+      }
+
+      const defaultTaskList = this.buildDefaultTaskList()
+      const defaultOptions = this.buildDefaultOptions()
+      const taskMap = new Map(defaultTaskList.map((task) => [task.id, task]))
+      const orderedTasks: TaskListItem[] = []
+      const usedTaskIds = new Set<string>()
+      const optionMap = interfaceStore.interface?.option || {}
+
+      for (const presetTask of preset.task || []) {
+        const interfaceTask = interfaceStore.getTaskByName(presetTask.name)
+        if (!interfaceTask) {
+          continue
+        }
+
+        const taskItem = taskMap.get(interfaceTask.entry)
+        if (!taskItem) {
+          continue
+        }
+
+        orderedTasks.push({
+          ...taskItem,
+          checked: presetTask.enabled ?? true,
+        })
+        usedTaskIds.add(taskItem.id)
+
+        for (const [optionName, optionValue] of Object.entries(presetTask.option || {})) {
+          applyPresetOptionValue(optionName, optionValue, optionMap, defaultOptions)
+        }
+      }
+
+      for (const task of defaultTaskList) {
+        if (usedTaskIds.has(task.id)) {
+          continue
+        }
+        orderedTasks.push({
+          ...task,
+          checked: false,
+        })
+      }
+
+      return {
+        taskList: orderedTasks,
+        options: defaultOptions,
+      }
+    },
+
+    applyPreset(presetName: string): boolean {
+      const snapshot = this.buildPresetSnapshot(presetName)
+      if (!snapshot) {
+        return false
+      }
+
+      this.selectedPresetName = presetName
+      this.taskList = snapshot.taskList
+      this.options = snapshot.options
+      this.presetDirty = false
+      return true
+    },
+
+    clearPreset() {
+      this.selectedPresetName = null
+      this.presetDirty = false
+    },
+
+    reconcilePresetState() {
+      if (!this.selectedPresetName) {
+        this.presetDirty = false
+        return true
+      }
+
+      const snapshot = this.buildPresetSnapshot(this.selectedPresetName)
+      if (!snapshot) {
+        this.clearPreset()
+        return false
+      }
+
+      this.presetDirty = !(
+        areTaskListsEquivalent(this.taskList, snapshot.taskList) &&
+        areOptionMapsEquivalent(this.options, snapshot.options)
+      )
+      return !this.presetDirty
+    },
+
     async loadConfig() {
+      const interfaceStore = useInterfaceStore()
       const taskConfig = await getTaskConfig()
 
       this.options = this.buildDefaultOptions()
@@ -127,6 +293,11 @@ export const useTaskConfigStore = defineStore("taskConfig", {
         this.taskList = reorderedTasks
       }
 
+      const selectedPreset = taskConfig.selectedPreset?.trim()
+      this.selectedPresetName =
+        selectedPreset && interfaceStore.getPresetByName(selectedPreset) ? selectedPreset : null
+      this.presetDirty = Boolean(taskConfig.presetDirty)
+      this.reconcilePresetState()
       this.configLoaded = true
     },
 
@@ -160,6 +331,8 @@ export const useTaskConfigStore = defineStore("taskConfig", {
         taskOrder,
         taskChecked,
         taskOptions: cleanedOptions,
+        selectedPreset: this.selectedPresetName,
+        presetDirty: this.presetDirty,
       }
       await saveTaskConfig(config)
     },
@@ -168,6 +341,7 @@ export const useTaskConfigStore = defineStore("taskConfig", {
       await resetTaskConfig()
       this.options = this.buildDefaultOptions()
       this.taskList = this.buildDefaultTaskList()
+      this.clearPreset()
     },
   },
 })

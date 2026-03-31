@@ -8,10 +8,11 @@ import threading
 import time
 import webbrowser
 from contextlib import asynccontextmanager, suppress
+from mimetypes import guess_type
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -24,6 +25,7 @@ from models.interface_loader import (
     InterfaceLoadError,
     load_interface_model,
     rescan_scan_select_option,
+    resolve_interface_relative_path,
 )
 from models.scheduler import (
     ScheduledTaskCreate,
@@ -41,8 +43,37 @@ from services.update_service import (
 )
 
 INTERFACE_PATH = Path("interface.json").resolve()
+
+
+def load_interface_translations() -> dict[str, dict]:
+    translations: dict[str, dict] = {}
+    for locale, relative_path in (interface.languages or {}).items():
+        if not isinstance(relative_path, str) or not relative_path.strip():
+            raise InterfaceLoadError(f"languages[{locale}] 必须是非空字符串")
+
+        resolved_path = resolve_interface_relative_path(
+            INTERFACE_PATH.parent,
+            relative_path,
+            field_name=f"languages[{locale}]",
+        )
+        try:
+            with resolved_path.open("r", encoding="utf-8") as file:
+                data = json.load(file)
+        except json.JSONDecodeError as exc:
+            message = getattr(exc, "message", str(exc))
+            raise InterfaceLoadError(
+                f"解析语言文件失败: {resolved_path}: {message}"
+            ) from exc
+
+        if not isinstance(data, dict):
+            raise InterfaceLoadError(f"语言文件必须是 JSON 对象: {resolved_path}")
+        translations[locale] = data
+    return translations
+
+
 try:
     interface = load_interface_model(INTERFACE_PATH)
+    interface_translations = load_interface_translations()
 except Exception as e:
     print(e)
     input("interface.json加载异常，请修正后重新启动程序，按任意键退出...")
@@ -128,7 +159,25 @@ async def serve_homepage():
 @app.get("/api/interface")
 def get_interface():
     with interface_lock:
-        return interface.model_dump(mode="json")
+        data = interface.model_dump(mode="json")
+        if interface_translations:
+            data["translations"] = interface_translations
+        return data
+
+
+@app.get("/api/interface/resource")
+def get_interface_resource(path: str):
+    try:
+        resolved_path = resolve_interface_relative_path(
+            INTERFACE_PATH.parent,
+            path,
+            field_name="interface 资源路径",
+        )
+    except InterfaceLoadError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    media_type, _ = guess_type(resolved_path.name)
+    return FileResponse(resolved_path, media_type=media_type)
 
 
 @app.post("/api/interface/scan-select/rescan")

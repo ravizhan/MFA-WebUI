@@ -23,6 +23,8 @@
     @confirm-resource="postResourceSelection"
   />
 
+  <PresetSelectionCard />
+
   <TaskSelectionCard
     :tasks="configStore.taskList"
     :selected-task-ids="selectedTaskIds"
@@ -41,6 +43,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue"
 import { useDialog, useMessage } from "naive-ui"
 import { useI18n } from "vue-i18n"
 import PanelConnectionTabs from "@/components/panel/PanelConnectionTabs.vue"
+import PresetSelectionCard from "@/components/panel/preset/PresetSelectionCard.vue"
 import TaskSelectionCard from "@/components/panel/task/TaskSelectionCard.vue"
 import {
   getDeviceState,
@@ -78,6 +81,7 @@ if (typeof window !== "undefined") {
 }
 
 const scrollShow = ref(window.innerWidth > 768)
+const isMobileView = ref(window.innerWidth < 768)
 const selectedController = ref<string | null>(null)
 const selectedDeviceKey = ref<string | null>(null)
 const availableDevices = ref<ConnectableDevice[]>([])
@@ -173,12 +177,21 @@ function handleSelectedTasksUpdate(selectedIds: string[]) {
 
 function handleConfigTask(taskId: string) {
   indexStore.SelectTask(taskId)
+  if (isMobileView.value) {
+    indexStore.openTaskSettingsDrawer(taskId)
+  }
 }
 
 function saveTaskConfig() {
   if (configStore.configLoaded) {
+    configStore.reconcilePresetState()
     configStore.debouncedSave()
   }
+}
+
+function handleWindowResize() {
+  scrollShow.value = window.innerWidth > 768
+  isMobileView.value = window.innerWidth < 768
 }
 
 watch(
@@ -193,6 +206,8 @@ watch(
 
 watch(() => configStore.taskList, saveTaskConfig, { deep: true })
 watch(() => configStore.options, saveTaskConfig, { deep: true })
+watch(() => configStore.selectedPresetName, saveTaskConfig)
+watch(() => configStore.presetDirty, saveTaskConfig)
 
 async function persistLastConnectedDevice(deviceInfo: ConnectableDevice, controllerName: string) {
   let storedDevice: PanelLastConnectedDevice
@@ -454,6 +469,8 @@ watch(
 )
 
 onMounted(async () => {
+  window.addEventListener("resize", handleWindowResize)
+  handleWindowResize()
   await syncDeviceRuntimeState()
   if (!settingsStore.initialized) {
     await settingsStore.fetchSettings()
@@ -471,6 +488,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener("resize", handleWindowResize)
   if (deviceStatePollTimer !== null) {
     window.clearInterval(deviceStatePollTimer)
     deviceStatePollTimer = null

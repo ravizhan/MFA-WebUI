@@ -223,6 +223,18 @@
     "previewHint": "Click start to view live stream",
     "connectFirstHint": "Please connect device in left panel first",
     "log": "Live Log",
-    "copySuccess": "Copied successfully"
+    "copySuccess": "Copied successfully",
+    "preset": {
+      "title": "Preset",
+      "custom": "Custom",
+      "empty": "No presets available",
+      "name": "Preset",
+      "status": "Status",
+      "taskCount": "Tasks",
+      "applied": "Applied",
+      "modified": "Modified",
+      "noDescription": "No preset description",
+      "customDescription": "You are using a custom task snapshot and can continue editing it manually."
+    }
   }
 }

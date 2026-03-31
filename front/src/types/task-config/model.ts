@@ -12,6 +12,8 @@ export interface TaskConfig {
   taskList: string[]
   taskChecked?: Record<string, boolean>
   taskOptions: Record<string, TaskOptionValue>
+  selectedPreset?: string | null
+  presetDirty?: boolean
 }
 
 export interface TaskConfigState {

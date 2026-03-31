@@ -223,6 +223,18 @@
     "previewHint": "点击按钮开启实时画面预览",
     "connectFirstHint": "请先在左侧面板连接设备",
     "log": "实时日志",
-    "copySuccess": "复制成功"
+    "copySuccess": "复制成功",
+    "preset": {
+      "title": "预设配置",
+      "custom": "自定义",
+      "empty": "暂无可用预设",
+      "name": "当前预设",
+      "status": "状态",
+      "taskCount": "任务数",
+      "applied": "已应用",
+      "modified": "已修改",
+      "noDescription": "暂无预设说明",
+      "customDescription": "当前为自定义任务快照，可继续手动调整。"
+    }
   }
 }
