@@ -116,15 +116,23 @@ def normalize_snapshot(
             normalized_checked[task_id] = bool(checked)
 
     option_defaults, option_value_types = _build_option_defaults(interface_model)
+    option_case_name_sets = _build_option_case_name_sets(interface_model)
     normalized_options = dict(option_defaults)
     for option_key, option_value in raw_task_options.items():
         expected_type = option_value_types.get(option_key)
         if expected_type == "string" and isinstance(option_value, str):
+            allowed_cases = option_case_name_sets.get(option_key)
+            if allowed_cases is not None and option_value not in allowed_cases:
+                continue
             normalized_options[option_key] = option_value
         elif expected_type == "string_list" and isinstance(option_value, list):
-            normalized_options[option_key] = [
-                item for item in option_value if isinstance(item, str)
-            ]
+            normalized_items = [item for item in option_value if isinstance(item, str)]
+            allowed_cases = option_case_name_sets.get(option_key)
+            if allowed_cases is not None:
+                normalized_items = [
+                    item for item in normalized_items if item in allowed_cases
+                ]
+            normalized_options[option_key] = normalized_items
 
     return TaskPresetSnapshotModel(
         taskOrder=normalized_order,
@@ -297,6 +305,18 @@ def _build_option_defaults(
             value_types[option_name] = "string_list"
 
     return defaults, value_types
+
+
+def _build_option_case_name_sets(
+    interface_model: InterfaceModel,
+) -> dict[str, set[str]]:
+    case_name_sets: dict[str, set[str]] = {}
+
+    for option_name, option in (interface_model.option or {}).items():
+        if option.type in {"select", "scan_select", "switch", "checkbox"}:
+            case_name_sets[option_name] = {case.name for case in (option.cases or [])}
+
+    return case_name_sets
 
 
 def _apply_preset_option_value(

@@ -181,10 +181,7 @@ def _validate_scan_dir(scan_dir: str, option_name: str) -> str:
     normalized_scan_dir = scan_dir.strip()
     normalized_scan_dir_posix = normalized_scan_dir.replace("\\", "/")
 
-    if not (
-        normalized_scan_dir_posix == "resource"
-        or normalized_scan_dir_posix.startswith("resource/")
-    ):
+    if not normalized_scan_dir_posix.startswith("resource/"):
         raise InterfaceLoadError(
             f"scan_select 选项 {option_name} 的 scan_dir 必须以 resource/ 开头"
         )
