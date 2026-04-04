@@ -116,7 +116,7 @@ const presetCollapseName = "preset"
 
 const { isMobile: compactView } = useViewport()
 const descriptionContent = ref("")
-const desktopExpandedNames = ref<Array<string | number>>([presetCollapseName])
+const desktopExpandedNames = ref<Array<string | number>>([])
 const desktopTabsHost = ref<HTMLElement | null>(null)
 const canScrollLeft = ref(false)
 const canScrollRight = ref(false)
