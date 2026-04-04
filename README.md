@@ -60,6 +60,22 @@ _✨ 基于 **[Vue](https://github.com/vuejs/vue)** 和 **[FastAPI](https://gith
 | LOGO         |                         | 暂不可修改                                                   |
 
 ### 📦 额外拓展功能
+
+#### 📁 路径规范（重要）
+
+为简化路径处理，所有在 `interface.json` 与其导入片段中出现的资源文件路径，统一使用 `resource/...` 形式：
+
+- `resource[].path` 中的每一项必须以 `resource/` 开头
+- `import` 中的每一项必须以 `resource/` 开头
+- 任务与 pipeline 相关文档路径（如 `description` / `doc` / `desc` 中填写的 Markdown/文本文件路径）必须以 `resource/` 开头
+
+示例：
+
+- 正确：`resource/tasks/preset/Daily.json`
+- 正确：`resource/announcement/1.简介.md`
+- 错误：`./resource/tasks/preset/Daily.json`
+- 错误：`tasks/preset/Daily.json`
+
 #### scan_select 选项类型
 
 `scan_select` 用于在加载 `interface.json` 时扫描目录文件，并把扫描结果自动写入当前选项的 `cases`，适用于“配置文件选择”等动态枚举场景。
@@ -71,7 +87,7 @@ _✨ 基于 **[Vue](https://github.com/vuejs/vue)** 和 **[FastAPI](https://gith
 | `type` | `"scan_select"` | 是 | 选项类型 |
 | `label` | `string` | 否 | 前端显示名称 |
 | `description` | `string` | 否 | 描述信息 |
-| `scan_dir` | `string` | 是 | 扫描目录。相对路径基于 interface.json 所在目录解析，并做越界限制（不允许跳出该目录） |
+| `scan_dir` | `string` | 是 | 扫描目录。必须以 `resource/` 开头，路径基于 interface.json 所在目录解析，并做越界限制（不允许跳出该目录） |
 | `scan_filter` | `string` | 是 | `glob pattern`，用于筛选文件，如 `**/*.json` |
 | `pipeline_override` | `object` | 是 | 任务执行时使用的覆盖配置，必须在任意层级的 `attach` 中至少包含一次当前选项名键（如 `attach.bbc_team_config`） |
 | `cases` | `OptionCase[]` | 否（配置阶段应省略或空数组） | 加载时自动生成，`name`/`label` 均为相对 `scan_dir` 的路径+文件名 |
@@ -88,7 +104,7 @@ _✨ 基于 **[Vue](https://github.com/vuejs/vue)** 和 **[FastAPI](https://gith
       "type": "scan_select",
       "label": "BBC 队伍配置",
       "description": "选择 BBC 队伍配置文件",
-      "scan_dir": "./resource/BBchannel/settings",
+      "scan_dir": "resource/BBchannel/settings",
       "scan_filter": "**/*.json",
       "pipeline_override": {
         "队伍配置": {
@@ -112,7 +128,7 @@ _✨ 基于 **[Vue](https://github.com/vuejs/vue)** 和 **[FastAPI](https://gith
       "type": "scan_select",
       "label": "BBC 队伍配置",
       "description": "选择 BBC 队伍配置文件",
-      "scan_dir": "./resource/BBchannel/settings",
+      "scan_dir": "resource/BBchannel/settings",
       "scan_filter": "**/*.json",
       "pipeline_override": {
         "队伍配置": {

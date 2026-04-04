@@ -11,7 +11,7 @@ import { marked } from "marked"
 import type { Tokens } from "marked"
 import { NImage } from "naive-ui"
 import { computed, nextTick, ref, watch } from "vue"
-import { buildInterfaceResourceUrl, isExternalUrl } from "@/utils/interface/content"
+import { buildResourceUrl, isExternalUrl } from "@/utils/interface/content"
 
 const props = withDefaults(
   defineProps<{
@@ -34,7 +34,7 @@ render.image = function ({ href, title, text }: Tokens.Image) {
   const rawHref = href || ""
   const safeHref =
     rawHref && !isExternalUrl(rawHref) && !rawHref.startsWith("/")
-      ? buildInterfaceResourceUrl(rawHref)
+      ? buildResourceUrl(rawHref)
       : rawHref
   const titleAttr = title ? ` title="${title}"` : ""
   const altAttr = text ? ` alt="${text}"` : ""

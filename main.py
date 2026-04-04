@@ -8,11 +8,10 @@ import threading
 import time
 import webbrowser
 from contextlib import asynccontextmanager, suppress
-from mimetypes import guess_type
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -163,21 +162,6 @@ def get_interface():
         if interface_translations:
             data["translations"] = interface_translations
         return data
-
-
-@app.get("/api/interface/resource")
-def get_interface_resource(path: str):
-    try:
-        resolved_path = resolve_interface_relative_path(
-            INTERFACE_PATH.parent,
-            path,
-            field_name="interface 资源路径",
-        )
-    except InterfaceLoadError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    media_type, _ = guess_type(resolved_path.name)
-    return FileResponse(resolved_path, media_type=media_type)
 
 
 @app.post("/api/interface/scan-select/rescan")

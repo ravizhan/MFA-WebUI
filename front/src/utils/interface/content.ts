@@ -131,8 +131,15 @@ export function isExternalUrl(value: string): boolean {
   return /^(?:https?:)?\/\//i.test(value) || /^(?:data|blob):/i.test(value)
 }
 
-export function buildInterfaceResourceUrl(path: string): string {
-  return `/api/interface/resource?path=${encodeURIComponent(path)}`
+export function buildResourceUrl(path: string): string {
+  const normalizedPath = path.trim().replace(/\\/g, "/").replace(/^\.\//, "")
+  if (normalizedPath.startsWith("/resource")) {
+    return normalizedPath
+  }
+  if (normalizedPath.startsWith("resource")) {
+    return `/${normalizedPath}`
+  }
+  return normalizedPath
 }
 
 export function resolveInterfaceText(
@@ -187,7 +194,7 @@ export function resolveInterfaceAssetUrl(
   if (isExternalUrl(resolvedValue)) {
     return resolvedValue
   }
-  return buildInterfaceResourceUrl(resolvedValue)
+  return buildResourceUrl(resolvedValue)
 }
 
 export function invalidateInterfaceDocumentCache(value?: string | null) {
@@ -206,7 +213,7 @@ export function invalidateInterfaceDocumentCache(value?: string | null) {
     return
   }
 
-  documentCache.delete(buildInterfaceResourceUrl(trimmedValue))
+  documentCache.delete(buildResourceUrl(trimmedValue))
 }
 
 export async function resolveInterfaceDocumentContent(
@@ -228,7 +235,7 @@ export async function resolveInterfaceDocumentContent(
     return resolvedValue
   }
 
-  const url = buildInterfaceResourceUrl(trimmedValue)
+  const url = buildResourceUrl(trimmedValue)
   let pending = getValidCachedDocument(url)
   if (!pending) {
     pending = fetch(url).then(async (response) => {
