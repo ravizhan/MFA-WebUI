@@ -38,9 +38,16 @@ const interfaceStore = useInterfaceStore()
 const selectedTaskId = computed(() => indexStore.SelectedTaskID || null)
 const drawerTitle = computed(() => {
   const task = selectedTaskId.value ? interfaceStore.getTaskByEntry(selectedTaskId.value) : null
-  const taskName = task
-    ? resolveInterfaceText(interfaceStore.interface, locale.value, task.label, task.name)
-    : t("panel.taskSettings")
+  if (!task) {
+    return t("panel.taskSettings")
+  }
+
+  const taskName = resolveInterfaceText(
+    interfaceStore.interface,
+    locale.value,
+    task.label,
+    task.name,
+  )
   return `${t("panel.taskSettings")} · ${taskName}`
 })
 </script>

@@ -17,18 +17,14 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue"
+import { computed } from "vue"
 import PanelControlColumn from "@/components/panel/PanelControlColumn.vue"
 import PanelStatusColumn from "@/components/panel/PanelStatusColumn.vue"
 import PanelTaskColumn from "@/components/panel/PanelTaskColumn.vue"
 import TaskSettingsDrawer from "@/components/panel/task/TaskSettingsDrawer.vue"
+import { useViewport } from "@/utils/viewport/useViewport"
 
-const MOBILE_BREAKPOINT = 768
-const DESKTOP_BREAKPOINT = 1280
-
-const windowWidth = ref(window.innerWidth)
-const isMobile = computed(() => windowWidth.value < MOBILE_BREAKPOINT)
-const isDesktop = computed(() => windowWidth.value >= DESKTOP_BREAKPOINT)
+const { isMobile, isDesktop } = useViewport()
 const gridCols = computed(() => {
   if (isDesktop.value) {
     return 3
@@ -43,18 +39,5 @@ const statusSpan = computed(() => {
     return 1
   }
   return gridCols.value
-})
-
-function handleResize() {
-  windowWidth.value = window.innerWidth
-}
-
-onMounted(() => {
-  window.addEventListener("resize", handleResize)
-  handleResize()
-})
-
-onUnmounted(() => {
-  window.removeEventListener("resize", handleResize)
 })
 </script>

@@ -108,16 +108,17 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue"
+import { computed, nextTick, onUnmounted, ref, watch } from "vue"
 import { useI18n } from "vue-i18n"
 import MarkdownViewer from "@/components/panel/common/MarkdownViewer.vue"
 import { useIndexStore, useInterfaceStore, useTaskConfigStore } from "@/stores"
 import { resolveInterfaceDocumentContent, resolveInterfaceText } from "@/utils/interface/content"
+import { useViewport } from "@/utils/viewport/useViewport"
 
 const customPresetValue = "__custom__"
 const presetCollapseName = "preset"
 
-const compactView = ref(window.innerWidth < 768)
+const { isMobile: compactView } = useViewport()
 const descriptionContent = ref("")
 const desktopExpandedNames = ref<Array<string | number>>([presetCollapseName])
 const desktopTabsHost = ref<HTMLElement | null>(null)
@@ -160,11 +161,6 @@ const desktopCollapseTitle = computed(() => {
 
 function resolvePresetLabel(label: string | undefined, fallback: string) {
   return resolveInterfaceText(interfaceStore.interface, locale.value, label, fallback)
-}
-
-function updateCompactView() {
-  compactView.value = window.innerWidth < 768
-  void syncDesktopTabsScroll()
 }
 
 function selectFirstRelevantTask() {
@@ -284,13 +280,7 @@ watch(
   { immediate: true },
 )
 
-onMounted(() => {
-  window.addEventListener("resize", updateCompactView)
-  updateCompactView()
-})
-
 onUnmounted(() => {
-  window.removeEventListener("resize", updateCompactView)
   detachDesktopTabsScrollListener()
 })
 </script>

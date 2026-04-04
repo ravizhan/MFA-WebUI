@@ -1,8 +1,61 @@
 import i18n from "@/app/i18n"
 import type { InterfaceModel } from "@/types/interface/model"
 
-const documentCache = new Map<string, Promise<string>>()
+const DOCUMENT_CACHE_MAX_ENTRIES = 100
+const DOCUMENT_CACHE_TTL_MS = 10 * 60 * 1000
+
+interface DocumentCacheEntry {
+  pending: Promise<string>
+  createdAt: number
+}
+
+const documentCache = new Map<string, DocumentCacheEntry>()
 const textFilePattern = /^(?:\.\/)?(?:[^/]+[/])*[^/]+\.(?:md|markdown|txt|html?)$/i
+
+function cleanupExpiredDocumentCache(now = Date.now()) {
+  for (const [url, entry] of documentCache.entries()) {
+    if (now - entry.createdAt > DOCUMENT_CACHE_TTL_MS) {
+      documentCache.delete(url)
+    }
+  }
+}
+
+function enforceDocumentCacheLimit() {
+  while (documentCache.size > DOCUMENT_CACHE_MAX_ENTRIES) {
+    const oldestKey = documentCache.keys().next().value as string | undefined
+    if (!oldestKey) {
+      break
+    }
+    documentCache.delete(oldestKey)
+  }
+}
+
+function getValidCachedDocument(url: string, now = Date.now()): Promise<string> | undefined {
+  cleanupExpiredDocumentCache(now)
+
+  const cachedEntry = documentCache.get(url)
+  if (!cachedEntry) {
+    return undefined
+  }
+
+  if (now - cachedEntry.createdAt > DOCUMENT_CACHE_TTL_MS) {
+    documentCache.delete(url)
+    return undefined
+  }
+
+  // Refresh insertion order to keep the cache as LRU.
+  documentCache.delete(url)
+  documentCache.set(url, cachedEntry)
+  return cachedEntry.pending
+}
+
+function setCachedDocument(url: string, pending: Promise<string>, now = Date.now()) {
+  documentCache.set(url, {
+    pending,
+    createdAt: now,
+  })
+  enforceDocumentCacheLimit()
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -88,7 +141,7 @@ export function resolveInterfaceText(
   value?: string | null,
   fallback = "",
 ): string {
-  if (!value) {
+  if (value === null || value === undefined) {
     return fallback
   }
 
@@ -104,7 +157,7 @@ export function resolveInterfaceText(
   if (model) {
     for (const bundle of getLocaleCandidates(model, locale)) {
       const translated = getNestedTranslationValue(bundle, key)
-      if (translated) {
+      if (translated !== undefined) {
         return translated
       }
     }
@@ -137,6 +190,25 @@ export function resolveInterfaceAssetUrl(
   return buildInterfaceResourceUrl(resolvedValue)
 }
 
+export function invalidateInterfaceDocumentCache(value?: string | null) {
+  if (value === null || value === undefined) {
+    documentCache.clear()
+    return
+  }
+
+  const trimmedValue = value.trim()
+  if (!trimmedValue) {
+    return
+  }
+
+  if (isExternalUrl(trimmedValue)) {
+    documentCache.delete(trimmedValue)
+    return
+  }
+
+  documentCache.delete(buildInterfaceResourceUrl(trimmedValue))
+}
+
 export async function resolveInterfaceDocumentContent(
   model: InterfaceModel | null | undefined,
   locale: string,
@@ -157,7 +229,7 @@ export async function resolveInterfaceDocumentContent(
   }
 
   const url = buildInterfaceResourceUrl(trimmedValue)
-  let pending = documentCache.get(url)
+  let pending = getValidCachedDocument(url)
   if (!pending) {
     pending = fetch(url).then(async (response) => {
       if (!response.ok) {
@@ -165,7 +237,7 @@ export async function resolveInterfaceDocumentContent(
       }
       return response.text()
     })
-    documentCache.set(url, pending)
+    setCachedDocument(url, pending)
   }
 
   try {

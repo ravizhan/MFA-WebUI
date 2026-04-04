@@ -68,6 +68,7 @@ import {
   isGamepadDevice,
   isWin32Device,
 } from "@/utils/panel/device"
+import { MOBILE_BREAKPOINT, useViewport } from "@/utils/viewport/useViewport"
 
 const message = useMessage()
 const dialog = useDialog()
@@ -80,8 +81,9 @@ if (typeof window !== "undefined") {
   window.$message = message
 }
 
-const scrollShow = ref(window.innerWidth > 768)
-const isMobileView = ref(window.innerWidth < 768)
+const { width: viewportWidth } = useViewport()
+const scrollShow = computed(() => viewportWidth.value > MOBILE_BREAKPOINT)
+const isMobileView = computed(() => viewportWidth.value < MOBILE_BREAKPOINT)
 const selectedController = ref<string | null>(null)
 const selectedDeviceKey = ref<string | null>(null)
 const availableDevices = ref<ConnectableDevice[]>([])
@@ -187,11 +189,6 @@ function saveTaskConfig() {
     configStore.reconcilePresetState()
     configStore.debouncedSave()
   }
-}
-
-function handleWindowResize() {
-  scrollShow.value = window.innerWidth > 768
-  isMobileView.value = window.innerWidth < 768
 }
 
 watch(
@@ -469,8 +466,6 @@ watch(
 )
 
 onMounted(async () => {
-  window.addEventListener("resize", handleWindowResize)
-  handleWindowResize()
   await syncDeviceRuntimeState()
   if (!settingsStore.initialized) {
     await settingsStore.fetchSettings()
@@ -488,7 +483,6 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  window.removeEventListener("resize", handleWindowResize)
   if (deviceStatePollTimer !== null) {
     window.clearInterval(deviceStatePollTimer)
     deviceStatePollTimer = null

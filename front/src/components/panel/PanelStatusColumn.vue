@@ -34,7 +34,13 @@
       </n-tab-pane>
       <n-tab-pane name="log" :tab="t('panel.log')">
         <n-card hoverable>
-          <n-button id="btn" block tertiary type="info" :data-clipboard-text="log">
+          <n-button
+            class="panel-log-copy-btn"
+            block
+            tertiary
+            type="info"
+            :data-clipboard-text="log"
+          >
             {{ t("common.copy") }}
           </n-button>
           <n-log class="log" ref="logInstRef" :log="log" trim :rows="9" />
@@ -77,7 +83,7 @@
 
     <div class="col-name">{{ t("panel.log") }}</div>
     <n-card hoverable>
-      <n-button id="btn" block tertiary type="info" :data-clipboard-text="log">
+      <n-button class="panel-log-copy-btn" block tertiary type="info" :data-clipboard-text="log">
         {{ t("common.copy") }}
       </n-button>
       <n-log class="log" ref="logInstRef" :log="log" trim :rows="11" />
@@ -93,6 +99,7 @@ import { useMessage } from "naive-ui"
 import { nextTick, onMounted, onUnmounted, ref, watch, watchEffect } from "vue"
 import { useI18n } from "vue-i18n"
 import { useIndexStore } from "@/stores"
+import { useViewport } from "@/utils/viewport/useViewport"
 
 const { t } = useI18n()
 const message = useMessage()
@@ -103,8 +110,8 @@ const fps = ref(30)
 const streamUrl = ref("")
 const streamContainer = ref<HTMLElement | null>(null)
 const logInstRef = ref<LogInst | null>(null)
-const mobileView = ref(window.innerWidth < 768)
-const btnCopy = new Clipboard("#btn")
+const { isMobile: mobileView } = useViewport()
+let clipboard: Clipboard | null = null
 
 const fpsOptions = [
   { label: "15 FPS", value: 15 },
@@ -112,16 +119,24 @@ const fpsOptions = [
   { label: "60 FPS", value: 60 },
 ]
 
-btnCopy.on("success", () => {
+function handleCopySuccess() {
   message.success(t("panel.copySuccess"))
-})
+}
 
-function updateResponsiveState() {
-  mobileView.value = window.innerWidth < 768
+function setupClipboard() {
+  if (clipboard) {
+    clipboard.off("success", handleCopySuccess)
+    clipboard.destroy()
+  }
+  clipboard = new Clipboard(".panel-log-copy-btn")
+  clipboard.on("success", handleCopySuccess)
 }
 
 onMounted(() => {
-  window.addEventListener("resize", updateResponsiveState)
+  void nextTick().then(() => {
+    setupClipboard()
+  })
+
   watchEffect(() => {
     if (log.value) {
       nextTick(() => {
@@ -155,7 +170,11 @@ watch(connected, (newValue) => {
 })
 
 onUnmounted(() => {
-  window.removeEventListener("resize", updateResponsiveState)
+  if (clipboard) {
+    clipboard.off("success", handleCopySuccess)
+    clipboard.destroy()
+    clipboard = null
+  }
   handleStopStream()
 })
 </script>

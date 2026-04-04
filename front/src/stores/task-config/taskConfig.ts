@@ -28,7 +28,25 @@ function areOptionValuesEqual(
     if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) {
       return false
     }
-    return left.every((value, index) => value === right[index])
+
+    const counts = new Map<string, number>()
+    for (const value of left) {
+      counts.set(value, (counts.get(value) || 0) + 1)
+    }
+
+    for (const value of right) {
+      const count = counts.get(value)
+      if (!count) {
+        return false
+      }
+      if (count === 1) {
+        counts.delete(value)
+      } else {
+        counts.set(value, count - 1)
+      }
+    }
+
+    return counts.size === 0
   }
   return left === right
 }
