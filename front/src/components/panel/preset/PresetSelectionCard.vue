@@ -115,7 +115,7 @@ import { useIndexStore, useInterfaceStore, useTaskConfigStore } from "@/stores"
 import { resolveInterfaceDocumentContent, resolveInterfaceText } from "@/utils/interface/content"
 import { useViewport } from "@/utils/viewport/useViewport"
 
-const customPresetValue = "__custom__"
+const customPresetValue = "__mwu_reserved_custom_preset__"
 const presetCollapseName = "preset"
 
 const { isMobile: compactView } = useViewport()
