@@ -186,7 +186,6 @@ function handleConfigTask(taskId: string) {
 
 function saveTaskConfig() {
   if (configStore.configLoaded) {
-    configStore.reconcilePresetState()
     configStore.debouncedSave()
   }
 }
@@ -204,7 +203,6 @@ watch(
 watch(() => configStore.taskList, saveTaskConfig, { deep: true })
 watch(() => configStore.options, saveTaskConfig, { deep: true })
 watch(() => configStore.selectedPresetName, saveTaskConfig)
-watch(() => configStore.presetDirty, saveTaskConfig)
 
 async function persistLastConnectedDevice(deviceInfo: ConnectableDevice, controllerName: string) {
   let storedDevice: PanelLastConnectedDevice

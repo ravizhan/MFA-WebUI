@@ -32,7 +32,7 @@ from models.scheduler import (
     TaskExecutionPayload,
 )
 from models.settings import SettingsModel
-from models.task_config import TaskConfigModel
+from models.task_config import TaskConfigModel, normalize_task_config
 from scheduler_manager import SchedulerManager
 from services.update_service import (
     check_github_update,
@@ -136,6 +136,28 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 app.mount("/assets", StaticFiles(directory="page/assets"))
 app.mount("/resource", StaticFiles(directory="resource"))
+
+
+def _load_normalized_task_config() -> tuple[TaskConfigModel, bool]:
+    config_path = "config/task_config.json"
+    config_exists = os.path.exists(config_path)
+
+    if config_exists:
+        with open(config_path, "r", encoding="utf-8") as f:
+            config_data = json.load(f)
+    else:
+        config_data = TaskConfigModel().model_dump()
+
+    task_config = TaskConfigModel(**config_data)
+    normalized_config = normalize_task_config(task_config, interface)
+    normalized_data = normalized_config.model_dump()
+
+    should_write_back = (not config_exists) or config_data != normalized_data
+    if should_write_back:
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(normalized_data, f, indent=4, ensure_ascii=False)
+
+    return normalized_config, should_write_back
 
 
 @app.middleware("http")
@@ -306,12 +328,8 @@ def set_settings(settings: SettingsModel):
 @app.get("/api/task-config")
 def get_task_config():
     try:
-        with open("config/task_config.json", "r", encoding="utf-8") as f:
-            config_data = json.load(f)
-        task_config = TaskConfigModel(**config_data)
+        task_config, _ = _load_normalized_task_config()
         return {"status": "success", "config": task_config.model_dump()}
-    except FileNotFoundError:
-        return {"status": "success", "config": TaskConfigModel().model_dump()}
     except Exception as e:
         app_state.send_log(f"获取任务配置失败: {e}")
         return {"status": "failed", "message": str(e)}
@@ -320,8 +338,9 @@ def get_task_config():
 @app.post("/api/task-config")
 def save_task_config(config: TaskConfigModel):
     try:
+        normalized_config = normalize_task_config(config, interface)
         with open("config/task_config.json", "w", encoding="utf-8") as f:
-            json.dump(config.model_dump(), f, indent=4, ensure_ascii=False)
+            json.dump(normalized_config.model_dump(), f, indent=4, ensure_ascii=False)
         return {"status": "success"}
     except Exception as e:
         app_state.send_log(f"保存任务配置失败: {e}")

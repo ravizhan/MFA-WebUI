@@ -1,5 +1,6 @@
-import type { ComputedRef } from "vue"
 import type { TaskOptionValue } from "@/types/scheduler/model"
+
+export const CUSTOM_PRESET_NAME = "__mwu_reserved_custom_preset__"
 
 export interface TaskListItem {
   id: string
@@ -8,35 +9,13 @@ export interface TaskListItem {
   checked?: boolean
 }
 
-export interface TaskConfig {
-  taskList: string[]
-  taskChecked?: Record<string, boolean>
-  taskOptions: Record<string, TaskOptionValue>
-  selectedPreset?: string | null
-  presetDirty?: boolean
-}
-
-export interface TaskConfigState {
-  availableTasks: TaskListItem[]
-  selectedTasks: string[]
-  currentConfigTaskId: string | null
+export interface TaskPresetSnapshot {
+  taskOrder: string[]
+  taskChecked: Record<string, boolean>
   taskOptions: Record<string, TaskOptionValue>
 }
 
-export interface TaskConfigActions {
-  toggleTask: (taskId: string, checked: boolean) => void
-  setCurrentConfigTask: (taskId: string | null) => void
-  updateTaskOption: (key: string, value: TaskOptionValue) => void
-  updateTaskOptions: (options: Record<string, TaskOptionValue>) => void
-  getSelectedTasks: () => string[]
-  getTaskConfig: () => TaskConfig
-  initFromConfig: (config: Partial<TaskConfig>) => void
-  reset: () => void
-}
-
-export interface UseTaskConfigReturn {
-  state: TaskConfigState
-  actions: TaskConfigActions
-  currentTaskOptions: ComputedRef<string[]>
-  currentTaskName: ComputedRef<string>
+export interface PersistedTaskConfig {
+  selectedPreset: string
+  presets: Record<string, TaskPresetSnapshot>
 }

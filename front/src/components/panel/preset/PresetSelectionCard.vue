@@ -19,10 +19,6 @@
           />
         </div>
 
-        <n-alert v-if="configStore.selectedPresetName && configStore.presetDirty" type="warning">
-          {{ t("panel.preset.modified") }}
-        </n-alert>
-
         <template v-if="activePreset">
           <MarkdownViewer
             :source="descriptionContent"
@@ -68,7 +64,7 @@
                   :value="currentPresetValue"
                   @update:value="handlePresetChange"
                 >
-                  <n-tab-pane :name="customPresetValue">
+                  <n-tab-pane :name="CUSTOM_PRESET_NAME">
                     <template #tab>{{ t("panel.preset.custom") }}</template>
                   </n-tab-pane>
                   <n-tab-pane v-for="preset in presets" :key="preset.name" :name="preset.name">
@@ -112,10 +108,10 @@ import { computed, nextTick, onUnmounted, ref, watch } from "vue"
 import { useI18n } from "vue-i18n"
 import MarkdownViewer from "@/components/panel/common/MarkdownViewer.vue"
 import { useIndexStore, useInterfaceStore, useTaskConfigStore } from "@/stores"
+import { CUSTOM_PRESET_NAME } from "@/types/task-config/model"
 import { resolveInterfaceDocumentContent, resolveInterfaceText } from "@/utils/interface/content"
 import { useViewport } from "@/utils/viewport/useViewport"
 
-const customPresetValue = "__mwu_reserved_custom_preset__"
 const presetCollapseName = "preset"
 
 const { isMobile: compactView } = useViewport()
@@ -131,9 +127,9 @@ const indexStore = useIndexStore()
 let desktopTabsScrollEl: HTMLElement | null = null
 
 const presets = computed(() => interfaceStore.getPresetList)
-const currentPresetValue = computed(() => configStore.selectedPresetName || customPresetValue)
+const currentPresetValue = computed(() => configStore.selectedPresetName)
 const activePreset = computed(() =>
-  configStore.selectedPresetName
+  configStore.selectedPresetName !== CUSTOM_PRESET_NAME
     ? interfaceStore.getPresetByName(configStore.selectedPresetName)
     : null,
 )
@@ -145,7 +141,7 @@ const activePresetLabel = computed(() =>
 const presetOptions = computed(() => [
   {
     label: t("panel.preset.custom"),
-    value: customPresetValue,
+    value: CUSTOM_PRESET_NAME,
   },
   ...presets.value.map((preset) => ({
     label: resolvePresetLabel(preset.label, preset.name),
@@ -172,12 +168,7 @@ function selectFirstRelevantTask() {
 }
 
 function handlePresetChange(value: string) {
-  if (value === customPresetValue) {
-    configStore.clearPreset()
-    return
-  }
-
-  if (configStore.applyPreset(value)) {
+  if (configStore.selectPreset(value)) {
     selectFirstRelevantTask()
   }
 }
