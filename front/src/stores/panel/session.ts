@@ -5,10 +5,23 @@ export const useIndexStore = defineStore("index", {
     SelectedTaskID: "",
     RunningLog: "",
     Connected: false,
+    TaskSettingsDrawerVisible: false,
   }),
   actions: {
     SelectTask(id: string) {
       this.SelectedTaskID = id
+    },
+    openTaskSettingsDrawer(taskId?: string) {
+      if (taskId) {
+        this.SelectedTaskID = taskId
+      }
+      this.TaskSettingsDrawerVisible = true
+    },
+    closeTaskSettingsDrawer() {
+      this.TaskSettingsDrawerVisible = false
+    },
+    setTaskSettingsDrawerVisible(visible: boolean) {
+      this.TaskSettingsDrawerVisible = visible
     },
     UpdateLog(log: string) {
       this.RunningLog += log + "\n"

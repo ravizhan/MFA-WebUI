@@ -10,7 +10,7 @@
           >
             <n-checkbox
               size="large"
-              :label="item.name"
+              :label="resolveTaskLabel(item.id, item.name)"
               :checked="isTaskSelected(item.id)"
               @update:checked="(v: boolean) => handleToggle(item.id, v)"
             />
@@ -34,7 +34,7 @@
         >
           <n-checkbox
             size="large"
-            :label="item.name"
+            :label="resolveTaskLabel(item.id, item.name)"
             :checked="isTaskSelected(item.id)"
             @update:checked="(v: boolean) => handleToggle(item.id, v)"
           />
@@ -54,14 +54,14 @@
 <script setup lang="ts">
 import { computed } from "vue"
 import { VueDraggable } from "vue-draggable-plus"
+import { useI18n } from "vue-i18n"
+import { useInterfaceStore } from "@/stores"
 import type { TaskListItem } from "@/types/task-config/model"
+import { resolveInterfaceText } from "@/utils/interface/content"
 
 interface Props {
-  /** 所有可用任务 */
   tasks: TaskListItem[]
-  /** 选中的任务ID列表 */
   selectedTasks: string[]
-  /** 是否显示滚动条 */
   scrollable?: boolean
 }
 
@@ -76,19 +76,23 @@ const props = withDefaults(defineProps<Props>(), {
 })
 
 const emit = defineEmits<Emits>()
+const { locale } = useI18n()
+const interfaceStore = useInterfaceStore()
 
-// 本地任务列表数据（用于拖拽）
 const taskListData = computed({
   get: () => props.tasks,
   set: (value: TaskListItem[]) => emit("update:tasks", value),
 })
 
-// 判断任务是否选中
+function resolveTaskLabel(taskId: string, fallback: string) {
+  const task = interfaceStore.getTaskByEntry(taskId)
+  return resolveInterfaceText(interfaceStore.interface, locale.value, task?.label, fallback)
+}
+
 function isTaskSelected(taskId: string): boolean {
   return props.selectedTasks.includes(taskId)
 }
 
-// 切换任务选中状态
 function handleToggle(taskId: string, checked: boolean) {
   let newSelected: string[]
   if (checked) {
@@ -99,7 +103,6 @@ function handleToggle(taskId: string, checked: boolean) {
   emit("update:selectedTasks", newSelected)
 }
 
-// 打开任务配置
 function handleConfig(taskId: string) {
   emit("config", taskId)
 }

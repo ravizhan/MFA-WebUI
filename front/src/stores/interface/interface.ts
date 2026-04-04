@@ -3,7 +3,7 @@ import {
   getInterface,
   rescanScanSelectOption as requestRescanScanSelectOption,
 } from "@/services/api"
-import type { InterfaceModel, Option } from "@/types/interface/model"
+import type { InterfaceModel, Option, Preset, Task } from "@/types/interface/model"
 import type { TaskListItem } from "@/types/task-config/model"
 
 export const useInterfaceStore = defineStore("interface", {
@@ -13,16 +13,13 @@ export const useInterfaceStore = defineStore("interface", {
   getters: {
     getTaskList: (state) => {
       if (!state.interface?.task) return []
-      const taskList: TaskListItem[] = []
-      for (const item of state.interface.task) {
-        taskList.push({
-          id: item.entry,
-          name: item.name,
-          order: state.interface.task.indexOf(item),
-        })
-      }
-      return taskList
+      return state.interface.task.map((item, index) => ({
+        id: item.entry,
+        name: item.name,
+        order: index,
+      })) as TaskListItem[]
     },
+    getPresetList: (state): Preset[] => state.interface?.preset || [],
   },
   actions: {
     async setInterface() {
@@ -45,6 +42,18 @@ export const useInterfaceStore = defineStore("interface", {
       return true
     },
 
+    getTaskByEntry(entry: string): Task | null {
+      return this.interface?.task?.find((task) => task.entry === entry) || null
+    },
+
+    getTaskByName(name: string): Task | null {
+      return this.interface?.task?.find((task) => task.name === name) || null
+    },
+
+    getPresetByName(name: string): Preset | null {
+      return this.interface?.preset?.find((preset) => preset.name === name) || null
+    },
+
     getOptionList(entry: string): Record<string, Option> {
       const result: Record<string, Option> = {}
       if (!this.interface?.option) return result
@@ -53,27 +62,21 @@ export const useInterfaceStore = defineStore("interface", {
         for (const optionName of optionNames) {
           if (result[optionName]) continue
           const optionValue = this.interface.option?.[optionName]
-          if (optionValue !== undefined) {
-            result[optionName] = optionValue
-            if (
-              optionValue.type === "switch" ||
-              optionValue.type === "select" ||
-              optionValue.type === "scan_select"
-            ) {
-              for (const caseItem of optionValue.cases) {
-                if (caseItem.option) {
-                  collectOptions(caseItem.option)
-                }
-              }
+          if (optionValue === undefined) {
+            continue
+          }
+          result[optionName] = optionValue
+          for (const caseItem of optionValue.cases || []) {
+            if (caseItem.option) {
+              collectOptions(caseItem.option)
             }
           }
         }
       }
 
-      for (const task of this.interface?.task || []) {
-        if (task.entry === entry && task.option) {
-          collectOptions(task.option)
-        }
+      const task = this.getTaskByEntry(entry)
+      if (task?.option) {
+        collectOptions(task.option)
       }
       return result
     },

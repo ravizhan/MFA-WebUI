@@ -9,13 +9,25 @@
       @update:selected-tasks="(value) => emit('update:selected-tasks', value)"
       @config="(taskId) => emit('config', taskId)"
     />
-    <n-flex class="form-btn" justify="center">
-      <n-button strong secondary type="info" size="large" @click="emit('start')">{{
-        t("panel.start")
-      }}</n-button>
-      <n-button strong secondary type="info" size="large" @click="emit('stop')">{{
-        t("panel.stop")
-      }}</n-button>
+    <n-flex class="form-btn" justify="center" :wrap="true" :size="[12, 12]">
+      <n-button
+        class="min-w-[9rem]"
+        strong
+        secondary
+        type="info"
+        size="large"
+        @click="emit('start')"
+        >{{ t("panel.start") }}</n-button
+      >
+      <n-button
+        class="min-w-[9rem]"
+        strong
+        secondary
+        type="info"
+        size="large"
+        @click="emit('stop')"
+        >{{ t("panel.stop") }}</n-button
+      >
     </n-flex>
     <n-flex class="form-btn" justify="center">
       <n-button quaternary type="warning" size="small" @click="emit('reset')">{{

@@ -23,6 +23,8 @@
     @confirm-resource="postResourceSelection"
   />
 
+  <PresetSelectionCard />
+
   <TaskSelectionCard
     :tasks="configStore.taskList"
     :selected-task-ids="selectedTaskIds"
@@ -41,6 +43,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue"
 import { useDialog, useMessage } from "naive-ui"
 import { useI18n } from "vue-i18n"
 import PanelConnectionTabs from "@/components/panel/PanelConnectionTabs.vue"
+import PresetSelectionCard from "@/components/panel/preset/PresetSelectionCard.vue"
 import TaskSelectionCard from "@/components/panel/task/TaskSelectionCard.vue"
 import {
   getDeviceState,
@@ -65,6 +68,7 @@ import {
   isGamepadDevice,
   isWin32Device,
 } from "@/utils/panel/device"
+import { MOBILE_BREAKPOINT, useViewport } from "@/utils/viewport/useViewport"
 
 const message = useMessage()
 const dialog = useDialog()
@@ -77,7 +81,9 @@ if (typeof window !== "undefined") {
   window.$message = message
 }
 
-const scrollShow = ref(window.innerWidth > 768)
+const { width: viewportWidth } = useViewport()
+const scrollShow = computed(() => viewportWidth.value > MOBILE_BREAKPOINT)
+const isMobileView = computed(() => viewportWidth.value < MOBILE_BREAKPOINT)
 const selectedController = ref<string | null>(null)
 const selectedDeviceKey = ref<string | null>(null)
 const availableDevices = ref<ConnectableDevice[]>([])
@@ -173,6 +179,9 @@ function handleSelectedTasksUpdate(selectedIds: string[]) {
 
 function handleConfigTask(taskId: string) {
   indexStore.SelectTask(taskId)
+  if (isMobileView.value) {
+    indexStore.openTaskSettingsDrawer(taskId)
+  }
 }
 
 function saveTaskConfig() {
@@ -193,6 +202,7 @@ watch(
 
 watch(() => configStore.taskList, saveTaskConfig, { deep: true })
 watch(() => configStore.options, saveTaskConfig, { deep: true })
+watch(() => configStore.selectedPresetName, saveTaskConfig)
 
 async function persistLastConnectedDevice(deviceInfo: ConnectableDevice, controllerName: string) {
   let storedDevice: PanelLastConnectedDevice

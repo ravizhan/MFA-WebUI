@@ -1,18 +1,132 @@
 import { defineStore } from "pinia"
-import { getTaskConfig, resetTaskConfig, saveTaskConfig, type TaskConfig } from "@/services/api"
+import { getTaskConfig, resetTaskConfig, saveTaskConfig } from "@/services/api"
 import { useInterfaceStore } from "@/stores"
-import type { Option } from "@/types/interface/model"
+import type { Option, PresetTaskOptionValue } from "@/types/interface/model"
 import type { TaskExecutionPayload, TaskOptionValue } from "@/types/scheduler/model"
-import type { TaskListItem } from "@/types/task-config/model"
+import {
+  CUSTOM_PRESET_NAME,
+  type PersistedTaskConfig,
+  type TaskListItem,
+  type TaskPresetSnapshot,
+} from "@/types/task-config/model"
 import {
   buildDefaultsFromOptionMap,
   normalizeOptionValueForBoundary,
 } from "@/utils/task-config/options"
 
+function cloneOptionMap(
+  optionMap: Record<string, TaskOptionValue> | null | undefined,
+): Record<string, TaskOptionValue> {
+  const clonedOptions: Record<string, TaskOptionValue> = {}
+  if (!optionMap) {
+    return clonedOptions
+  }
+
+  for (const [key, value] of Object.entries(optionMap)) {
+    clonedOptions[key] = Array.isArray(value) ? [...value] : value
+  }
+  return clonedOptions
+}
+
+function buildTaskCheckedMap(taskList: TaskListItem[]): Record<string, boolean> {
+  const taskChecked: Record<string, boolean> = {}
+  for (const task of taskList) {
+    taskChecked[task.id] = Boolean(task.checked)
+  }
+  return taskChecked
+}
+
+function buildTaskListFromOrder(
+  defaultTaskList: TaskListItem[],
+  taskOrder: string[] | null | undefined,
+  taskChecked: Record<string, boolean>,
+): TaskListItem[] {
+  if (!taskOrder?.length) {
+    return defaultTaskList.map((task) => ({
+      ...task,
+      checked: taskChecked[task.id] || false,
+    }))
+  }
+
+  const taskMap = new Map(defaultTaskList.map((task) => [task.id, task]))
+  const reorderedTasks: TaskListItem[] = []
+  const seenTaskIds = new Set<string>()
+
+  for (const id of taskOrder) {
+    const task = taskMap.get(id)
+    if (!task || seenTaskIds.has(id)) {
+      continue
+    }
+
+    reorderedTasks.push({
+      id: task.id,
+      name: task.name,
+      order: task.order,
+      checked: taskChecked[id] || false,
+    })
+    seenTaskIds.add(id)
+  }
+
+  for (const task of defaultTaskList) {
+    if (seenTaskIds.has(task.id)) {
+      continue
+    }
+
+    reorderedTasks.push({
+      id: task.id,
+      name: task.name,
+      order: task.order,
+      checked: taskChecked[task.id] || false,
+    })
+  }
+
+  return reorderedTasks
+}
+
+function applyPresetOptionValue(
+  optionName: string,
+  value: PresetTaskOptionValue,
+  optionMap: Record<string, Option>,
+  targetOptions: Record<string, TaskOptionValue>,
+) {
+  const option = optionMap[optionName]
+  if (!option) {
+    return
+  }
+
+  if (option.type === "input") {
+    if (typeof value !== "object" || Array.isArray(value) || value === null) {
+      return
+    }
+
+    const inputValues = value as Record<string, string>
+    for (const input of option.inputs) {
+      const inputValue = inputValues[input.name]
+      if (typeof inputValue === "string") {
+        targetOptions[`${optionName}_${input.name}`] = inputValue
+      }
+    }
+    return
+  }
+
+  if (option.type === "checkbox") {
+    if (Array.isArray(value)) {
+      targetOptions[optionName] = value.filter((item): item is string => typeof item === "string")
+    }
+    return
+  }
+
+  if (typeof value === "string") {
+    targetOptions[optionName] = value
+  }
+}
+
 export const useTaskConfigStore = defineStore("taskConfig", {
   state: () => ({
     options: {} as Record<string, TaskOptionValue>,
     taskList: [] as TaskListItem[],
+    selectedPresetName: CUSTOM_PRESET_NAME,
+    presetSnapshots: {} as Record<string, TaskPresetSnapshot>,
     configLoaded: false,
     saveTimer: null as ReturnType<typeof setTimeout> | null,
   }),
@@ -83,50 +197,184 @@ export const useTaskConfigStore = defineStore("taskConfig", {
       return interfaceStore.getTaskList.map((task) => ({ ...task, checked: false }))
     },
 
-    async loadConfig() {
-      const taskConfig = await getTaskConfig()
+    buildTaskListFromPersisted(
+      taskOrder: string[] | null | undefined,
+      taskChecked: Record<string, boolean> | null | undefined,
+    ): TaskListItem[] {
+      return buildTaskListFromOrder(this.buildDefaultTaskList(), taskOrder, taskChecked || {})
+    },
 
-      this.options = this.buildDefaultOptions()
-      if (taskConfig.taskOptions) {
-        Object.assign(this.options, taskConfig.taskOptions)
+    buildOptionsFromPersisted(
+      options: Record<string, TaskOptionValue> | null | undefined,
+    ): Record<string, TaskOptionValue> {
+      const mergedOptions = this.buildDefaultOptions()
+
+      if (!options) {
+        return mergedOptions
+      }
+
+      for (const [key, value] of Object.entries(options)) {
+        const normalizedValue = normalizeOptionValueForBoundary(
+          value as TaskOptionValue | null | undefined,
+        )
+        if (normalizedValue !== undefined && key in mergedOptions) {
+          mergedOptions[key] = normalizedValue
+        }
+      }
+
+      return mergedOptions
+    },
+
+    serializeCurrentSnapshot(): TaskPresetSnapshot {
+      const taskOrder = this.taskList.map((task) => task.id)
+      const taskChecked = buildTaskCheckedMap(this.taskList)
+      const taskOptions: Record<string, TaskOptionValue> = {}
+
+      for (const [key, value] of Object.entries(this.options)) {
+        const normalizedValue = normalizeOptionValueForBoundary(
+          value as TaskOptionValue | null | undefined,
+        )
+        if (normalizedValue !== undefined) {
+          taskOptions[key] = normalizedValue
+        }
+      }
+
+      return {
+        taskOrder,
+        taskChecked,
+        taskOptions,
+      }
+    },
+
+    hydrateSnapshot(snapshot: TaskPresetSnapshot) {
+      this.taskList = this.buildTaskListFromPersisted(snapshot.taskOrder, snapshot.taskChecked)
+      this.options = this.buildOptionsFromPersisted(snapshot.taskOptions)
+    },
+
+    normalizeSnapshot(snapshot?: TaskPresetSnapshot | null): TaskPresetSnapshot {
+      const taskList = this.buildTaskListFromPersisted(snapshot?.taskOrder, snapshot?.taskChecked)
+      const options = this.buildOptionsFromPersisted(snapshot?.taskOptions)
+
+      return {
+        taskOrder: taskList.map((task) => task.id),
+        taskChecked: buildTaskCheckedMap(taskList),
+        taskOptions: cloneOptionMap(options),
+      }
+    },
+
+    buildPresetSnapshot(presetName: string): TaskPresetSnapshot | null {
+      const interfaceStore = useInterfaceStore()
+      const preset = interfaceStore.getPresetByName(presetName)
+      if (!preset) {
+        return null
       }
 
       const defaultTaskList = this.buildDefaultTaskList()
-      this.taskList = defaultTaskList
+      const taskMap = new Map(defaultTaskList.map((task) => [task.id, task]))
+      const taskChecked = buildTaskCheckedMap(defaultTaskList)
+      const orderedTaskIds: string[] = []
+      const usedTaskIds = new Set<string>()
+      const optionMap = interfaceStore.interface?.option || {}
+      const taskOptions = this.buildDefaultOptions()
 
-      if (taskConfig.taskOrder?.length) {
-        const taskMap = new Map(defaultTaskList.map((task) => [task.id, task]))
-        const taskChecked = taskConfig.taskChecked || {}
-        const reorderedTasks: TaskListItem[] = []
-        const seenTaskIds = new Set<string>()
-
-        for (const id of taskConfig.taskOrder) {
-          const task = taskMap.get(id)
-          if (task) {
-            reorderedTasks.push({
-              id: task.id,
-              name: task.name,
-              order: task.order,
-              checked: taskChecked[id] || false,
-            })
-            seenTaskIds.add(id)
-          }
+      for (const presetTask of preset.task || []) {
+        const interfaceTask = interfaceStore.getTaskByName(presetTask.name)
+        if (!interfaceTask) {
+          continue
         }
 
-        for (const task of defaultTaskList) {
-          if (!seenTaskIds.has(task.id)) {
-            reorderedTasks.push({
-              id: task.id,
-              name: task.name,
-              order: task.order,
-              checked: taskChecked[task.id] || false,
-            })
-          }
+        const taskItem = taskMap.get(interfaceTask.entry)
+        if (!taskItem || usedTaskIds.has(taskItem.id)) {
+          continue
         }
 
-        this.taskList = reorderedTasks
+        orderedTaskIds.push(taskItem.id)
+        usedTaskIds.add(taskItem.id)
+        taskChecked[taskItem.id] = presetTask.enabled ?? true
+
+        for (const [optionName, optionValue] of Object.entries(presetTask.option || {})) {
+          applyPresetOptionValue(optionName, optionValue, optionMap, taskOptions)
+        }
       }
 
+      for (const task of defaultTaskList) {
+        if (!usedTaskIds.has(task.id)) {
+          orderedTaskIds.push(task.id)
+        }
+      }
+
+      return this.normalizeSnapshot({
+        taskOrder: orderedTaskIds,
+        taskChecked,
+        taskOptions,
+      })
+    },
+
+    seedPresetSnapshots(
+      persistedSnapshots: Record<string, TaskPresetSnapshot> = {},
+    ): Record<string, TaskPresetSnapshot> {
+      const interfaceStore = useInterfaceStore()
+      const presetSnapshots: Record<string, TaskPresetSnapshot> = {
+        [CUSTOM_PRESET_NAME]: this.normalizeSnapshot(persistedSnapshots[CUSTOM_PRESET_NAME]),
+      }
+
+      for (const preset of interfaceStore.getPresetList) {
+        presetSnapshots[preset.name] = this.normalizeSnapshot(
+          persistedSnapshots[preset.name] || this.buildPresetSnapshot(preset.name),
+        )
+      }
+
+      return presetSnapshots
+    },
+
+    syncCurrentPresetSnapshot() {
+      this.presetSnapshots[this.selectedPresetName] = this.serializeCurrentSnapshot()
+    },
+
+    selectPreset(presetName: string): boolean {
+      const targetPresetName = presetName || CUSTOM_PRESET_NAME
+      const targetSnapshot = this.presetSnapshots[targetPresetName]
+      if (!targetSnapshot) {
+        return false
+      }
+
+      if (targetPresetName === this.selectedPresetName) {
+        return true
+      }
+
+      this.syncCurrentPresetSnapshot()
+      this.selectedPresetName = targetPresetName
+      this.hydrateSnapshot(targetSnapshot)
+      return true
+    },
+
+    buildPersistedConfig(): PersistedTaskConfig {
+      this.syncCurrentPresetSnapshot()
+
+      const normalizedSnapshots = Object.fromEntries(
+        Object.entries(this.presetSnapshots).map(([presetName, snapshot]) => [
+          presetName,
+          this.normalizeSnapshot(snapshot),
+        ]),
+      )
+
+      return {
+        selectedPreset: this.selectedPresetName,
+        presets: normalizedSnapshots,
+      }
+    },
+
+    async loadConfig() {
+      const taskConfig = await getTaskConfig()
+      this.presetSnapshots = this.seedPresetSnapshots(taskConfig.presets)
+
+      const selectedPresetName =
+        taskConfig.selectedPreset && this.presetSnapshots[taskConfig.selectedPreset]
+          ? taskConfig.selectedPreset
+          : CUSTOM_PRESET_NAME
+
+      this.selectedPresetName = selectedPresetName
+      this.hydrateSnapshot(this.presetSnapshots[this.selectedPresetName]!)
       this.configLoaded = true
     },
 
@@ -140,34 +388,14 @@ export const useTaskConfigStore = defineStore("taskConfig", {
     },
 
     async saveConfig() {
-      const taskOrder = this.taskList.map((task) => task.id)
-      const taskChecked: Record<string, boolean> = {}
-      this.taskList.forEach((task) => {
-        taskChecked[task.id] = task.checked || false
-      })
-
-      const cleanedOptions: Record<string, TaskOptionValue> = {}
-      for (const [key, value] of Object.entries(this.options)) {
-        const normalizedValue = normalizeOptionValueForBoundary(
-          value as TaskOptionValue | null | undefined,
-        )
-        if (normalizedValue !== undefined) {
-          cleanedOptions[key] = normalizedValue
-        }
-      }
-
-      const config: TaskConfig = {
-        taskOrder,
-        taskChecked,
-        taskOptions: cleanedOptions,
-      }
-      await saveTaskConfig(config)
+      await saveTaskConfig(this.buildPersistedConfig())
     },
 
     async resetConfig() {
       await resetTaskConfig()
-      this.options = this.buildDefaultOptions()
-      this.taskList = this.buildDefaultTaskList()
+      this.presetSnapshots = this.seedPresetSnapshots()
+      this.selectedPresetName = CUSTOM_PRESET_NAME
+      this.hydrateSnapshot(this.presetSnapshots[CUSTOM_PRESET_NAME]!)
     },
   },
 })

@@ -24,6 +24,7 @@ from models.interface_loader import (
     InterfaceLoadError,
     load_interface_model,
     rescan_scan_select_option,
+    resolve_interface_relative_path,
 )
 from models.scheduler import (
     ScheduledTaskCreate,
@@ -31,7 +32,7 @@ from models.scheduler import (
     TaskExecutionPayload,
 )
 from models.settings import SettingsModel
-from models.task_config import TaskConfigModel
+from models.task_config import TaskConfigModel, normalize_task_config
 from scheduler_manager import SchedulerManager
 from services.update_service import (
     check_github_update,
@@ -41,8 +42,37 @@ from services.update_service import (
 )
 
 INTERFACE_PATH = Path("interface.json").resolve()
+
+
+def load_interface_translations() -> dict[str, dict]:
+    translations: dict[str, dict] = {}
+    for locale, relative_path in (interface.languages or {}).items():
+        if not isinstance(relative_path, str) or not relative_path.strip():
+            raise InterfaceLoadError(f"languages[{locale}] 必须是非空字符串")
+
+        resolved_path = resolve_interface_relative_path(
+            INTERFACE_PATH.parent,
+            relative_path,
+            field_name=f"languages[{locale}]",
+        )
+        try:
+            with resolved_path.open("r", encoding="utf-8") as file:
+                data = json.load(file)
+        except json.JSONDecodeError as exc:
+            message = getattr(exc, "message", str(exc))
+            raise InterfaceLoadError(
+                f"解析语言文件失败: {resolved_path}: {message}"
+            ) from exc
+
+        if not isinstance(data, dict):
+            raise InterfaceLoadError(f"语言文件必须是 JSON 对象: {resolved_path}")
+        translations[locale] = data
+    return translations
+
+
 try:
     interface = load_interface_model(INTERFACE_PATH)
+    interface_translations = load_interface_translations()
 except Exception as e:
     print(e)
     input("interface.json加载异常，请修正后重新启动程序，按任意键退出...")
@@ -108,6 +138,28 @@ app.mount("/assets", StaticFiles(directory="page/assets"))
 app.mount("/resource", StaticFiles(directory="resource"))
 
 
+def _load_normalized_task_config() -> tuple[TaskConfigModel, bool]:
+    config_path = "config/task_config.json"
+    config_exists = os.path.exists(config_path)
+
+    if config_exists:
+        with open(config_path, "r", encoding="utf-8") as f:
+            config_data = json.load(f)
+    else:
+        config_data = TaskConfigModel().model_dump()
+
+    task_config = TaskConfigModel(**config_data)
+    normalized_config = normalize_task_config(task_config, interface)
+    normalized_data = normalized_config.model_dump()
+
+    should_write_back = (not config_exists) or config_data != normalized_data
+    if should_write_back:
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(normalized_data, f, indent=4, ensure_ascii=False)
+
+    return normalized_config, should_write_back
+
+
 @app.middleware("http")
 async def spa_middleware(request: Request, call_next):
     response = await call_next(request)
@@ -128,7 +180,10 @@ async def serve_homepage():
 @app.get("/api/interface")
 def get_interface():
     with interface_lock:
-        return interface.model_dump(mode="json")
+        data = interface.model_dump(mode="json")
+        if interface_translations:
+            data["translations"] = interface_translations
+        return data
 
 
 @app.post("/api/interface/scan-select/rescan")
@@ -273,12 +328,8 @@ def set_settings(settings: SettingsModel):
 @app.get("/api/task-config")
 def get_task_config():
     try:
-        with open("config/task_config.json", "r", encoding="utf-8") as f:
-            config_data = json.load(f)
-        task_config = TaskConfigModel(**config_data)
+        task_config, _ = _load_normalized_task_config()
         return {"status": "success", "config": task_config.model_dump()}
-    except FileNotFoundError:
-        return {"status": "success", "config": TaskConfigModel().model_dump()}
     except Exception as e:
         app_state.send_log(f"获取任务配置失败: {e}")
         return {"status": "failed", "message": str(e)}
@@ -287,8 +338,9 @@ def get_task_config():
 @app.post("/api/task-config")
 def save_task_config(config: TaskConfigModel):
     try:
+        normalized_config = normalize_task_config(config, interface)
         with open("config/task_config.json", "w", encoding="utf-8") as f:
-            json.dump(config.model_dump(), f, indent=4, ensure_ascii=False)
+            json.dump(normalized_config.model_dump(), f, indent=4, ensure_ascii=False)
         return {"status": "success"}
     except Exception as e:
         app_state.send_log(f"保存任务配置失败: {e}")

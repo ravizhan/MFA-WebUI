@@ -1,15 +1,15 @@
 <template>
-  <n-card content-style="padding: 0;margin: 5px" hoverable>
+  <n-card content-style="padding: 0.75rem;" hoverable>
     <n-tabs type="segment" animated>
       <n-tab-pane name="device" :tab="t('panel.device')">
-        <n-flex class="pb-[12px]" :wrap="false">
+        <n-flex class="pb-[12px]" :wrap="true" :size="[12, 12]">
           <n-select
             :value="selectedController"
             :placeholder="t('panel.selectDeviceType')"
             :options="controllerOptions"
             :loading="loading"
             :disabled="deviceDisabled"
-            class="max-w-35%"
+            class="min-w-[8rem] flex-1"
             @update:value="handleControllerUpdate"
           />
           <n-input
@@ -17,7 +17,7 @@
             :value="playCoverAddress"
             :placeholder="t('panel.playcoverAddress')"
             :disabled="deviceDisabled"
-            class="max-w-45%"
+            class="min-w-[10rem] flex-1"
             @update:value="(value: string) => emit('update:playCoverAddress', value)"
           />
           <n-select
@@ -27,7 +27,7 @@
             :options="deviceOptions"
             :loading="loading"
             :disabled="!selectedController || selectedControllerDisabled || deviceDisabled"
-            class="max-w-45%"
+            class="min-w-[10rem] flex-1"
             @update:value="(value: string | null) => emit('update:selectedDeviceKey', value)"
             @click="emit('refresh-devices')"
           />
@@ -44,7 +44,7 @@
       </n-tab-pane>
 
       <n-tab-pane name="resource" :tab="t('panel.resource')">
-        <n-flex class="pb-[12px]">
+        <n-flex class="pb-[12px]" :wrap="true" :size="[12, 12]">
           <n-select
             :value="resource"
             :placeholder="t('panel.selectResource')"
@@ -52,7 +52,7 @@
             :loading="loading"
             remote
             :disabled="resourceDisabled"
-            class="max-w-80%"
+            class="min-w-[12rem] flex-1"
             @update:value="(value: string | null) => emit('update:resource', value)"
             @click="emit('fetch-resources')"
           />

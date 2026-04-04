@@ -329,3 +329,4 @@ test*.py
 todo.md
 version
 .aiignore
+.codex

@@ -179,6 +179,13 @@ def _contains_parent_segment(path_value: str) -> bool:
 
 def _validate_scan_dir(scan_dir: str, option_name: str) -> str:
     normalized_scan_dir = scan_dir.strip()
+    normalized_scan_dir_posix = normalized_scan_dir.replace("\\", "/")
+
+    if not normalized_scan_dir_posix.startswith("resource/"):
+        raise InterfaceLoadError(
+            f"scan_select 选项 {option_name} 的 scan_dir 必须以 resource/ 开头"
+        )
+
     scan_dir_path = Path(normalized_scan_dir)
     if scan_dir_path.is_absolute() or scan_dir_path.drive or scan_dir_path.root:
         raise InterfaceLoadError(
@@ -215,6 +222,38 @@ def _is_within_base_dir(path: Path, base_dir: Path) -> bool:
         return True
     except ValueError:
         return False
+
+
+def resolve_interface_relative_path(
+    base_dir: Path,
+    raw_path: str,
+    *,
+    field_name: str = "path",
+    allow_directories: bool = False,
+) -> Path:
+    normalized_path = raw_path.strip()
+    if not normalized_path:
+        raise InterfaceLoadError(f"{field_name} 不能为空")
+
+    candidate = Path(normalized_path)
+    if candidate.is_absolute() or candidate.drive or candidate.root:
+        raise InterfaceLoadError(f"{field_name} 不允许使用绝对路径: {raw_path}")
+    if _contains_parent_segment(normalized_path):
+        raise InterfaceLoadError(f"{field_name} 不允许包含父级目录跳转: {raw_path}")
+
+    resolved_path = (base_dir / normalized_path).resolve()
+    if not _is_within_base_dir(resolved_path, base_dir):
+        raise InterfaceLoadError(
+            f"{field_name} 越界，禁止访问 interface.json 目录之外的路径"
+        )
+    if not resolved_path.exists():
+        raise InterfaceLoadError(f"{field_name} 不存在: {raw_path}")
+    if allow_directories:
+        if not resolved_path.is_dir():
+            raise InterfaceLoadError(f"{field_name} 不是目录: {raw_path}")
+    elif not resolved_path.is_file():
+        raise InterfaceLoadError(f"{field_name} 不是文件: {raw_path}")
+    return resolved_path
 
 
 def _scan_scan_select_cases(
@@ -311,6 +350,112 @@ def rescan_scan_select_option(
     return scanned_cases
 
 
+def _collect_reachable_option_names(
+    option_names: list[str],
+    option_map: dict[str, Option],
+    collected: set[str],
+) -> None:
+    for option_name in option_names:
+        option = option_map.get(option_name)
+        if option is None:
+            raise InterfaceLoadError(f"任务引用了不存在的选项: {option_name}")
+        if option_name in collected:
+            continue
+        collected.add(option_name)
+        for case_item in option.cases or []:
+            if case_item.option:
+                _collect_reachable_option_names(case_item.option, option_map, collected)
+
+
+def _validate_preset_option_value(
+    preset_name: str,
+    task_name: str,
+    option_name: str,
+    option: Option,
+    value: Any,
+) -> None:
+    location = f"preset[{preset_name}].task[{task_name}].option[{option_name}]"
+    case_names = {case.name for case in option.cases or []}
+
+    if option.type in {"select", "switch", "scan_select"}:
+        if not isinstance(value, str):
+            raise InterfaceLoadError(f"{location} 必须是字符串")
+        if value not in case_names:
+            raise InterfaceLoadError(f"{location} 引用了不存在的 case: {value}")
+        return
+
+    if option.type == "checkbox":
+        if not isinstance(value, list) or not all(
+            isinstance(item, str) for item in value
+        ):
+            raise InterfaceLoadError(f"{location} 必须是字符串数组")
+        invalid_cases = [item for item in value if item not in case_names]
+        if invalid_cases:
+            raise InterfaceLoadError(
+                f"{location} 引用了不存在的 case: {', '.join(invalid_cases)}"
+            )
+        return
+
+    if option.type == "input":
+        if not isinstance(value, dict):
+            raise InterfaceLoadError(f"{location} 必须是对象")
+        input_names = {input_item.name for input_item in option.inputs or []}
+        for input_name, input_value in value.items():
+            if input_name not in input_names:
+                raise InterfaceLoadError(
+                    f"{location} 引用了不存在的输入项: {input_name}"
+                )
+            if not isinstance(input_value, str):
+                raise InterfaceLoadError(f"{location}.{input_name} 必须是字符串")
+
+
+def _validate_presets(interface_model: InterfaceModel) -> None:
+    presets = interface_model.preset or []
+    tasks = interface_model.task or []
+    option_map = interface_model.option or {}
+    task_name_map = {task.name: task for task in tasks}
+    reachable_options_by_task: dict[str, set[str]] = {}
+
+    for task in tasks:
+        collected: set[str] = set()
+        _collect_reachable_option_names(task.option or [], option_map, collected)
+        reachable_options_by_task[task.name] = collected
+
+    for preset in presets:
+        seen_task_names: set[str] = set()
+        for preset_task in preset.task or []:
+            if preset_task.name in seen_task_names:
+                raise InterfaceLoadError(
+                    f"preset[{preset.name}] 中存在重复任务: {preset_task.name}"
+                )
+            seen_task_names.add(preset_task.name)
+
+            task = task_name_map.get(preset_task.name)
+            if task is None:
+                raise InterfaceLoadError(
+                    f"preset[{preset.name}] 引用了不存在的任务: {preset_task.name}"
+                )
+
+            reachable_options = reachable_options_by_task.get(task.name, set())
+            for option_name, option_value in (preset_task.option or {}).items():
+                if option_name not in reachable_options:
+                    raise InterfaceLoadError(
+                        f"preset[{preset.name}] 的任务 {task.name} 引用了不属于该任务的选项: {option_name}"
+                    )
+                option = option_map.get(option_name)
+                if option is None:
+                    raise InterfaceLoadError(
+                        f"preset[{preset.name}] 引用了不存在的选项: {option_name}"
+                    )
+                _validate_preset_option_value(
+                    preset.name,
+                    task.name,
+                    option_name,
+                    option,
+                    option_value,
+                )
+
+
 def _merge_imports_into_target(
     target: dict[str, Any],
     import_paths: list[str],
@@ -356,6 +501,8 @@ def load_interface_model(interface_path: str | Path) -> InterfaceModel:
     _expand_scan_select_options(merged_data, root_path.parent)
 
     try:
-        return InterfaceModel.model_validate(merged_data)
+        interface_model = InterfaceModel.model_validate(merged_data)
+        _validate_presets(interface_model)
+        return interface_model
     except Exception as exc:
         raise InterfaceLoadError(f"校验 interface 配置失败: {exc}") from exc

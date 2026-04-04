@@ -204,6 +204,7 @@ export interface Preset {
 export interface InterfaceModel {
   interface_version: 2
   languages?: Record<string, string>
+  translations?: Record<string, Record<string, unknown>>
   name: string
   label?: string
   title?: string

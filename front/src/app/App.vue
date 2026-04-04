@@ -60,6 +60,7 @@ import UpdateDialog from "@/components/settings/dialogs/UpdateDialog.vue"
 import { lightThemeOverrides, darkThemeOverrides } from "@/app/theme"
 import { checkUpdateApi, type UpdateInfo } from "@/services/api"
 import { useInterfaceStore, useSettingsStore, useTaskConfigStore } from "@/stores"
+import { useViewport } from "@/utils/viewport/useViewport"
 
 function renderIcon(icon: string) {
   return () => h(NIcon, null, { default: () => h("div", { class: icon }) })
@@ -71,7 +72,7 @@ const configStore = useTaskConfigStore()
 const settingsStore = useSettingsStore()
 const name = computed(() => interfaceStore.interface?.name || "")
 const offset = ref(0)
-const screenWidth = ref(window.innerWidth)
+const { width: screenWidth } = useViewport()
 
 const naiveTheme = computed(() => (settingsStore.isDarkMode ? darkTheme : null))
 const themeOverrides = computed(() =>
@@ -104,10 +105,6 @@ function ensureMarkdownStylesheet(href: string) {
   }
 }
 
-const handleResize = () => {
-  screenWidth.value = window.innerWidth
-}
-
 const checkForUpdatesOnLoad = async () => {
   if (sessionStorage.getItem("mwu-update-checked")) {
     return
@@ -138,7 +135,6 @@ onMounted(async () => {
   }
 
   void checkForUpdatesOnLoad()
-  window.addEventListener("resize", handleResize)
 })
 
 watchEffect(() => {
