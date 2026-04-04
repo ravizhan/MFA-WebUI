@@ -1,3 +1,4 @@
+import json
 import httpx
 import os
 import sys
@@ -5,7 +6,7 @@ import uuid
 import datetime
 
 
-def get_latest_version(repo, current_version):
+def get_latest_version(repo):
     """获取上一个版本的 tag name"""
     try:
         # 尝试获取最新 release
@@ -20,12 +21,50 @@ def get_latest_version(repo, current_version):
     return None
 
 
+def read_streamed_content(response):
+    content_parts = []
+    usage = None
+
+    for line in response.iter_lines():
+        if not line:
+            continue
+
+        if isinstance(line, bytes):
+            line = line.decode("utf-8")
+
+        if not line.startswith("data:"):
+            continue
+
+        payload_text = line.removeprefix("data:").strip()
+        if payload_text == "[DONE]":
+            break
+
+        try:
+            payload = json.loads(payload_text)
+        except json.JSONDecodeError:
+            continue
+
+        choices = payload.get("choices", [])
+        if choices:
+            delta = choices[0].get("delta", {})
+            content = delta.get("content")
+            if content:
+                content_parts.append(content)
+
+        if payload.get("usage"):
+            usage = payload["usage"]
+
+    return "".join(content_parts), usage
+
+
 def main():
     repo = "ravizhan/MWU"
-    current_version = os.getenv("GITHUB_REF_NAME")
-    api_key = os.getenv("API_KEY")
+    # current_version = os.getenv("GITHUB_REF_NAME")
+    current_version = "897c164"  # 本地测试使用
+    # api_key = os.getenv("API_KEY")
+    api_key = "sk-jhpemupfficcwfqevzmwtgbhtezidhtaprbgrwfrlxeghxeb"  # 本地测试使用
 
-    latest_version = get_latest_version(repo, current_version)
+    latest_version = get_latest_version(repo)
 
     patch_url = (
         f"https://github.com/{repo}/compare/{latest_version}...{current_version}.patch"
@@ -75,7 +114,8 @@ def main():
 """
 
     data = {
-        "model": "deepseek-ai/DeepSeek-V3",
+        "model": "deepseek-ai/DeepSeek-V3.2",
+        "stream": True,
         "messages": [
             {"role": "system", "content": prompt},
             {"role": "user", "content": f"以下是对比补丁内容：\n\n{patch}"},
@@ -84,19 +124,22 @@ def main():
     }
 
     try:
-        resp = httpx.post(
+        with httpx.stream(
+            "POST",
             "https://api.siliconflow.cn/v1/chat/completions",
             headers={"Authorization": f"Bearer {api_key}"},
             json=data,
             timeout=180,
-        )
-        resp.raise_for_status()
-        result = resp.json()["choices"][0]["message"]["content"]
-        print(f"Token 使用情况: {resp.json().get('usage', {})}", file=sys.stderr)
+        ) as resp:
+            resp.raise_for_status()
+            result, usage = read_streamed_content(resp)
+
+        print(f"Token 使用情况: {usage or {}}", file=sys.stderr)
 
         release_notes = f"## 更新日志（{datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).date().strftime('%Y-%m-%d')}）\n\n{result}"
 
-        output_file = os.getenv("GITHUB_OUTPUT")
+        # output_file = os.getenv("GITHUB_OUTPUT")
+        output_file = "release_notes_output.txt"  # 本地测试使用
         delimiter = f"EOF_{uuid.uuid4().hex}"
         with open(output_file, "a", encoding="utf-8") as f:
             f.write(f"notes<<{delimiter}\n")
