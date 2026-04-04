@@ -13,7 +13,7 @@ import { useIndexStore, useInterfaceStore } from "@/stores"
 import type { Task } from "@/types/interface/model"
 import { resolveInterfaceDocumentContent } from "@/utils/interface/content"
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const interfaceStore = useInterfaceStore()
 const indexStore = useIndexStore()
 const documentContent = ref("")
@@ -42,12 +42,12 @@ function getTaskDocumentSource(task: Task | null): string {
 }
 
 watch(
-  [selectedTaskId, () => locale.value, () => interfaceStore.interface],
+  [selectedTaskId, () => interfaceStore.interface],
   async () => {
     const task = interfaceStore.getTaskByEntry(selectedTaskId.value)
     documentContent.value = await resolveInterfaceDocumentContent(
       interfaceStore.interface,
-      locale.value,
+      "",
       getTaskDocumentSource(task),
     )
   },

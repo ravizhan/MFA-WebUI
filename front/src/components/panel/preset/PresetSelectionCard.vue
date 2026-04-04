@@ -253,14 +253,10 @@ function scrollTabs(direction: -1 | 1) {
 }
 
 watch(
-  [activePreset, () => locale.value],
+  [activePreset, () => interfaceStore.interface],
   async ([preset]) => {
     descriptionContent.value = preset
-      ? await resolveInterfaceDocumentContent(
-          interfaceStore.interface,
-          locale.value,
-          preset.description,
-        )
+      ? await resolveInterfaceDocumentContent(interfaceStore.interface, "", preset.description)
       : ""
   },
   { immediate: true },
