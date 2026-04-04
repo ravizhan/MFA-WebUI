@@ -133,10 +133,10 @@ export function isExternalUrl(value: string): boolean {
 
 export function buildResourceUrl(path: string): string {
   const normalizedPath = path.trim().replace(/\\/g, "/").replace(/^\.\//, "")
-  if (normalizedPath.startsWith("/resource")) {
+  if (normalizedPath === "/resource" || normalizedPath.startsWith("/resource/")) {
     return normalizedPath
   }
-  if (normalizedPath.startsWith("resource")) {
+  if (normalizedPath === "resource" || normalizedPath.startsWith("resource/")) {
     return `/${normalizedPath}`
   }
   return normalizedPath
