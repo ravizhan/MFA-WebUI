@@ -59,10 +59,8 @@ def read_streamed_content(response):
 
 def main():
     repo = "ravizhan/MWU"
-    # current_version = os.getenv("GITHUB_REF_NAME")
-    current_version = "897c164"  # 本地测试使用
-    # api_key = os.getenv("API_KEY")
-    api_key = "sk-jhpemupfficcwfqevzmwtgbhtezidhtaprbgrwfrlxeghxeb"  # 本地测试使用
+    current_version = os.getenv("GITHUB_REF_NAME")
+    api_key = os.getenv("API_KEY")
 
     latest_version = get_latest_version(repo)
 
@@ -138,8 +136,7 @@ def main():
 
         release_notes = f"## 更新日志（{datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).date().strftime('%Y-%m-%d')}）\n\n{result}"
 
-        # output_file = os.getenv("GITHUB_OUTPUT")
-        output_file = "release_notes_output.txt"  # 本地测试使用
+        output_file = os.getenv("GITHUB_OUTPUT")
         delimiter = f"EOF_{uuid.uuid4().hex}"
         with open(output_file, "a", encoding="utf-8") as f:
             f.write(f"notes<<{delimiter}\n")
