@@ -462,9 +462,14 @@ async def perform_update():
         }
 
         try:
-            proxy = (
+            raw_proxy = (
                 (app_state.settings or SettingsModel()).update.proxy
                 if download_source != "mirrorchyan"
+                else None
+            )
+            proxy = (
+                raw_proxy.strip()
+                if isinstance(raw_proxy, str) and raw_proxy.strip()
                 else None
             )
             await download_file(download_url, update_package_path, proxy)
