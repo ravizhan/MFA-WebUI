@@ -90,22 +90,31 @@ def check_github_update(
     latest_version = response["tag_name"]
 
     plat, arch = get_platform_info()
+    platform_arch = f"{plat}-{arch}"
+    matching_assets = [
+        asset for asset in response.get("assets", []) if platform_arch in asset["name"]
+    ]
 
-    for asset in response.get("assets", []):
-        if f"{plat}-{arch}" in asset["name"]:
-            download_url = asset["browser_download_url"]
-            file_hash = asset.get("digest", "").replace("sha256:", "").strip()
-            return {
-                "latest_version": latest_version,
-                "current_version": current_version,
-                "is_update_available": latest_version != current_version,
-                "release_notes": response.get("body", ""),
-                "download_url": download_url,
-                "file_hash": file_hash,
-                "file_name": asset["name"],
-                "download_source": "github",
-            }
-    return None
+    if not matching_assets:
+        return None
+
+    selected_asset = next(
+        (asset for asset in matching_assets if "mwu" in asset["name"].lower()),
+        matching_assets[0],
+    )
+
+    download_url = selected_asset["browser_download_url"]
+    file_hash = selected_asset.get("digest", "").replace("sha256:", "").strip()
+    return {
+        "latest_version": latest_version,
+        "current_version": current_version,
+        "is_update_available": latest_version != current_version,
+        "release_notes": response.get("body", ""),
+        "download_url": download_url,
+        "file_hash": file_hash,
+        "file_name": selected_asset["name"],
+        "download_source": "github",
+    }
 
 
 async def download_file(url: str, dest: str, proxy: str | None = None):
