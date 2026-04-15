@@ -155,7 +155,7 @@ jobs:
 
       - name: Compress Final Artifact
         run: |
-          7z a -t7z -mx=9 -mmt -ms -r ${{ env.repo_name }}-${{ matrix.platform }}-${{ matrix.arch }}-${{ env.tag }}.7z "./build/*"
+          7z a -t7z -mx=9 -myx=9 -mmt -ms=e -mqs=on -mf=BCJ2 -r ${{ env.repo_name }}-${{ matrix.platform }}-${{ matrix.arch }}-${{ env.tag }}.7z "./build/*"
 
       - name: Upload Artifacts
         uses: actions/upload-artifact@v7
