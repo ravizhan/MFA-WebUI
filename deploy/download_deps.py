@@ -44,7 +44,6 @@ def main():
             "packaging",
             "pip",
             "pylint",
-            "numpy",
             "maafw",
             "maaagentbinary",
             "pillow",

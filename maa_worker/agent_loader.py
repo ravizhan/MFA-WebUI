@@ -1,4 +1,5 @@
 import importlib.abc
+import importlib.machinery
 import importlib.util
 import os
 import re
@@ -11,6 +12,192 @@ from pathlib import Path
 from typing import Any, Callable
 
 from maa.resource import Resource
+
+
+class _DepsFirstFinder(importlib.abc.MetaPathFinder):
+    """让 deps 目录中的顶级包优先于其他导入器解析。"""
+
+    def __init__(self, deps_path: Path):
+        self.deps_path = deps_path.resolve()
+        self.top_level_modules: set[str] = set()
+        self.refresh()
+
+    def refresh(self) -> None:
+        modules: set[str] = set()
+        extension_suffixes = tuple(importlib.machinery.EXTENSION_SUFFIXES)
+
+        if self.deps_path.is_dir():
+            for child in self.deps_path.iterdir():
+                name = child.name
+
+                if child.is_dir():
+                    if name.isidentifier():
+                        modules.add(name)
+                    continue
+
+                if name.endswith(".py"):
+                    module_name = Path(name).stem
+                elif any(name.endswith(suffix) for suffix in extension_suffixes):
+                    module_name = name.split(".", 1)[0]
+                else:
+                    continue
+
+                if module_name.isidentifier():
+                    modules.add(module_name)
+
+        self.top_level_modules = modules
+
+    def find_spec(self, fullname: str, path=None, target=None):
+        top_level = fullname.partition(".")[0]
+        if top_level not in self.top_level_modules:
+            return None
+
+        search_path = path
+        spec = importlib.machinery.PathFinder.find_spec(fullname, search_path, target)
+        if spec is None:
+            return None
+
+        if not self._is_spec_from_deps(spec):
+            return None
+
+        return spec
+
+    def _is_spec_from_deps(self, spec) -> bool:
+        origin = spec.origin
+        if origin and origin not in {"built-in", "frozen", "namespace"}:
+            return self._is_relative_to_deps(origin)
+
+        locations = spec.submodule_search_locations or []
+        return any(self._is_relative_to_deps(location) for location in locations)
+
+    def _is_relative_to_deps(self, path_value: str) -> bool:
+        try:
+            return Path(path_value).resolve().is_relative_to(self.deps_path)
+        except Exception:
+            return False
+
+
+_deps_first_finder: _DepsFirstFinder | None = None
+
+
+def _resolve_runtime_root() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent.parent
+
+
+def _resolve_runtime_path(path_value: str, runtime_root: Path) -> Path:
+    normalized = path_value.replace("{PROJECT_DIR}", str(runtime_root))
+    candidate = Path(normalized)
+    if not candidate.is_absolute():
+        candidate = runtime_root / candidate
+    return candidate.resolve()
+
+
+def _resolve_agent_index_path(agent_config: Any, runtime_root: Path) -> Path:
+    for arg in agent_config.child_args or []:
+        if isinstance(arg, str) and arg.endswith(".py"):
+            return _resolve_runtime_path(arg, runtime_root).parent
+    raise AssertionError("Agent解析错误，无法找到Agent文件夹")
+
+
+def _ensure_sys_path_priority(path: Path, index: int) -> None:
+    path_str = str(path)
+    while path_str in sys.path:
+        sys.path.remove(path_str)
+    sys.path.insert(index, path_str)
+
+
+def _ensure_deps_first_finder(
+    deps_path: Path,
+) -> None:
+    global _deps_first_finder
+
+    deps_path = deps_path.resolve()
+
+    if _deps_first_finder is not None and _deps_first_finder.deps_path != deps_path:
+        if _deps_first_finder in sys.meta_path:
+            sys.meta_path.remove(_deps_first_finder)
+        _deps_first_finder = None
+
+    if _deps_first_finder is None:
+        _deps_first_finder = _DepsFirstFinder(deps_path)
+    else:
+        _deps_first_finder.refresh()
+
+    if _deps_first_finder in sys.meta_path:
+        sys.meta_path.remove(_deps_first_finder)
+    sys.meta_path.insert(0, _deps_first_finder)
+
+
+def _disable_deps_first_finder() -> None:
+    global _deps_first_finder
+
+    if _deps_first_finder is not None and _deps_first_finder in sys.meta_path:
+        sys.meta_path.remove(_deps_first_finder)
+    _deps_first_finder = None
+
+
+def _module_comes_from_path(module: types.ModuleType, base_path: Path) -> bool:
+    spec = getattr(module, "__spec__", None)
+    origin = getattr(spec, "origin", None)
+    if origin and origin not in {"built-in", "frozen", "namespace"}:
+        try:
+            if Path(origin).resolve().is_relative_to(base_path):
+                return True
+        except Exception:
+            pass
+
+    module_file = getattr(module, "__file__", None)
+    if module_file:
+        try:
+            if Path(module_file).resolve().is_relative_to(base_path):
+                return True
+        except Exception:
+            pass
+
+    module_paths = getattr(module, "__path__", None) or []
+    for location in module_paths:
+        try:
+            if Path(location).resolve().is_relative_to(base_path):
+                return True
+        except Exception:
+            continue
+
+    return False
+
+
+def _evict_conflicting_deps_modules(
+    deps_path: Path,
+    protected_top_levels: set[str] | None = None,
+) -> None:
+    protected = protected_top_levels or set()
+    top_level_modules = (
+        _deps_first_finder.top_level_modules if _deps_first_finder else set()
+    )
+
+    modules_to_evict: set[str] = set()
+    conflicting_top_levels: list[str] = []
+
+    for top_level in sorted(top_level_modules):
+        if top_level in protected:
+            continue
+
+        module = sys.modules.get(top_level)
+        if module is None:
+            continue
+
+        if _module_comes_from_path(module, deps_path):
+            continue
+
+        conflicting_top_levels.append(top_level)
+        prefix = f"{top_level}."
+        for module_name in tuple(sys.modules):
+            if module_name == top_level or module_name.startswith(prefix):
+                modules_to_evict.add(module_name)
+
+    for module_name in modules_to_evict:
+        sys.modules.pop(module_name, None)
 
 
 def _cleanup_agent_processes(
@@ -138,20 +325,18 @@ def run_black_magic(agent_config: Any, resource: Resource):
     将Agent转换为custom的黑魔法
     动态加载并注册自定义 Action 和 Recognition
     """
-    agent_index_path = next(
-        (
-            Path(arg.replace("{PROJECT_DIR}", "./")).resolve().parent
-            for arg in (agent_config.child_args or [])
-            if arg.endswith(".py")
-        ),
-        None,
-    )
-    assert agent_index_path is not None, "Agent解析错误，无法找到Agent文件夹"
+    runtime_root = _resolve_runtime_root()
+    agent_index_path = _resolve_agent_index_path(agent_config, runtime_root)
+    deps_path = runtime_root / "deps"
 
-    # 将agent目录添加到sys.path的开头，确保优先级最高
-    if str(agent_index_path) not in sys.path:
-        sys.path.insert(0, str(agent_index_path))
-        sys.path.insert(1, str(Path("./deps").resolve()))
+    if deps_path.is_dir():
+        _ensure_deps_first_finder(deps_path)
+        _ensure_sys_path_priority(agent_index_path, 0)
+        _ensure_sys_path_priority(deps_path, 1)
+        _evict_conflicting_deps_modules(deps_path, protected_top_levels={"maa"})
+    else:
+        _disable_deps_first_finder()
+        _ensure_sys_path_priority(agent_index_path, 0)
 
     # 扫描所有 .py 文件建立映射
     module_map = {}  # module_name -> {path, is_pkg}
@@ -315,7 +500,7 @@ def load_agents(
             try:
                 if pi_env:
                     os.environ.update(pi_env)
-                run_black_magic(agent_config, resource)
+                run_black_magic(agent_config, resource, send_log)
             except Exception as e:
                 send_log("黑魔法爆炸了！")
                 send_log(f"自定义Agent加载失败: {e}")
