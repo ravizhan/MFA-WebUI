@@ -1,6 +1,8 @@
 import type { InterfaceModel } from "@/types/interface/model"
+import { showGlobalMessage } from "@/services/feedback/message"
 
 const textFilePattern = /^(?:\.\/)?(?:[^/]+[/])*[^/]+\.(?:md|markdown|txt|html?)$/i
+const invalidPathNotified = new Set<string>()
 
 export function isExternalUrl(value: string): boolean {
   return /^(?:https?:)?\/\//i.test(value) || /^(?:data|blob):/i.test(value)
@@ -9,21 +11,32 @@ export function isExternalUrl(value: string): boolean {
 function normalizeRootRelativePath(path: string): string | undefined {
   const normalizedPath = path.trim().replace(/\\/g, "/")
   if (!normalizedPath) {
+    notifyInvalidPath(path, "路径不能为空")
     return undefined
   }
 
   const parts = normalizedPath.split("/")
   if (parts.some((part) => part.length === 0 || part === "." || part === "..")) {
+    notifyInvalidPath(path, "禁止使用 . 或 .. 路径段")
     return undefined
   }
 
   return parts.join("/")
 }
 
-export function buildResourceUrl(path: string): string {
+function notifyInvalidPath(path: string, reason: string): void {
+  const key = `${path}::${reason}`
+  if (invalidPathNotified.has(key)) {
+    return
+  }
+  invalidPathNotified.add(key)
+  showGlobalMessage("error", `资源路径不合法: ${path || "(空)"}，${reason}`)
+}
+
+export function buildResourceUrl(path: string): string | undefined {
   const normalizedPath = normalizeRootRelativePath(path)
   if (!normalizedPath) {
-    return ""
+    return undefined
   }
 
   if (normalizedPath === "resource" || normalizedPath.startsWith("resource/")) {
@@ -63,7 +76,7 @@ export function resolveInterfaceAssetUrl(
     return resolvedValue
   }
   const url = buildResourceUrl(resolvedValue)
-  return url || undefined
+  return url
 }
 
 export async function resolveInterfaceDocumentContent(

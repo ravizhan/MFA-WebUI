@@ -12,7 +12,7 @@ from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -196,7 +196,12 @@ def get_file(path: str):
             field_name="path",
         )
     except InterfaceLoadError as exc:
-        return {"status": "failed", "message": str(exc)}
+        message = str(exc)
+        status_code = 404 if ("不存在" in message or "不是文件" in message) else 400
+        return JSONResponse(
+            status_code=status_code,
+            content={"status": "failed", "message": message},
+        )
     return FileResponse(resolved_path)
 
 
