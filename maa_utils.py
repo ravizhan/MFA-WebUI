@@ -32,7 +32,7 @@ class MaaWorker:
         interface: InterfaceModel,
         app_root_dir: Path,
     ):
-        Toolkit.init_option("./")
+        Toolkit.init_option(str(app_root_dir))
 
         self.interface = interface
         self.message_conn = message_conn
