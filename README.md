@@ -59,22 +59,25 @@ _✨ 基于 **[Vue](https://github.com/vuejs/vue)** 和 **[FastAPI](https://gith
 | 可执行文件名 | MWU               | 暂不可修改                                                   |
 | LOGO         |                         | 暂不可修改                                                   |
 
-### 📦 额外拓展功能
+### 📁 路径规范
 
-#### 📁 路径规范（重要）
+所有路径统一按软件根目录解析，软件根目录定义为 `mwu.exe` 所在目录。
 
-为简化路径处理，所有在 `interface.json` 与其导入片段中出现的资源文件路径，统一使用 `resource/...` 形式：
-
-- `resource[].path` 中的每一项必须以 `resource/` 开头
-- `import` 中的每一项必须以 `resource/` 开头
-- 任务与 pipeline 相关文档路径（如 `description` / `doc` / `desc` 中填写的 Markdown/文本文件路径）必须以 `resource/` 开头
+- 路径必须是根目录相对路径
+- 禁止使用 `./` 或 `../`
+- 禁止越界访问软件根目录之外的文件
 
 示例：
 
 - 正确：`resource/tasks/preset/Daily.json`
-- 正确：`resource/announcement/1.简介.md`
+- 正确：`config/maa_option.json`
+- 正确：`tasks/登录.json`
 - 错误：`./resource/tasks/preset/Daily.json`
-- 错误：`tasks/preset/Daily.json`
+- 错误：`../resource/Daily.json`
+- 错误：`../../../../resource/Daily.json`
+
+
+### 📦 额外拓展功能
 
 #### scan_select 选项类型
 
@@ -87,7 +90,7 @@ _✨ 基于 **[Vue](https://github.com/vuejs/vue)** 和 **[FastAPI](https://gith
 | `type` | `"scan_select"` | 是 | 选项类型 |
 | `label` | `string` | 否 | 前端显示名称 |
 | `description` | `string` | 否 | 描述信息 |
-| `scan_dir` | `string` | 是 | 扫描目录。必须以 `resource/` 开头，路径基于 interface.json 所在目录解析，并做越界限制（不允许跳出该目录） |
+| `scan_dir` | `string` | 是 | 扫描目录，路径基于软件根目录解析 |
 | `scan_filter` | `string` | 是 | `glob pattern`，用于筛选文件，如 `**/*.json` |
 | `pipeline_override` | `object` | 是 | 任务执行时使用的覆盖配置，必须在任意层级的 `attach` 中至少包含一次当前选项名键（如 `attach.bbc_team_config`） |
 | `cases` | `OptionCase[]` | 否（配置阶段应省略或空数组） | 加载时自动生成，`name`/`label` 均为相对 `scan_dir` 的路径+文件名 |
