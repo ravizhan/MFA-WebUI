@@ -166,54 +166,52 @@ def _merge_fragment_sections(
         target["preset"].extend(copy.deepcopy(presets))
 
 
+def _normalize_root_relative_path(raw_path: str, *, field_name: str) -> str:
+    normalized_path = raw_path.strip().replace("\\", "/")
+    if not normalized_path:
+        raise InterfaceLoadError(f"{field_name} 不能为空")
+
+    candidate = Path(normalized_path)
+    if candidate.is_absolute() or candidate.drive or candidate.root:
+        raise InterfaceLoadError(f"{field_name} 不允许使用绝对路径: {raw_path}")
+
+    if normalized_path in {".", ".."}:
+        raise InterfaceLoadError(f"{field_name} 不允许包含 . 或 .. 路径段: {raw_path}")
+
+    parts = normalized_path.split("/")
+    if any(part in {"", ".", ".."} for part in parts):
+        raise InterfaceLoadError(f"{field_name} 不允许包含 . 或 .. 路径段: {raw_path}")
+
+    return "/".join(parts)
+
+
 def _resolve_import_path(import_path: str, base_dir: Path) -> Path:
-    path = Path(import_path)
-    if not path.is_absolute():
-        path = base_dir / path
-    return path.resolve()
-
-
-def _contains_parent_segment(path_value: str) -> bool:
-    return any(part == ".." for part in Path(path_value).parts)
+    normalized_import_path = _normalize_root_relative_path(
+        import_path,
+        field_name="import",
+    )
+    resolved_path = (base_dir / normalized_import_path).resolve()
+    try:
+        resolved_path.relative_to(base_dir)
+    except ValueError as exc:
+        raise InterfaceLoadError(
+            f"import 越界，禁止访问软件根目录之外的路径: {import_path}"
+        ) from exc
+    return resolved_path
 
 
 def _validate_scan_dir(scan_dir: str, option_name: str) -> str:
-    normalized_scan_dir = scan_dir.strip()
-    normalized_scan_dir_posix = normalized_scan_dir.replace("\\", "/")
-
-    if not normalized_scan_dir_posix.startswith("resource/"):
-        raise InterfaceLoadError(
-            f"scan_select 选项 {option_name} 的 scan_dir 必须以 resource/ 开头"
-        )
-
-    scan_dir_path = Path(normalized_scan_dir)
-    if scan_dir_path.is_absolute() or scan_dir_path.drive or scan_dir_path.root:
-        raise InterfaceLoadError(
-            f"scan_select 选项 {option_name} 的 scan_dir 不允许使用绝对路径"
-        )
-    if _contains_parent_segment(normalized_scan_dir):
-        raise InterfaceLoadError(
-            f"scan_select 选项 {option_name} 的 scan_dir 不允许包含父级目录跳转"
-        )
-    return normalized_scan_dir
+    return _normalize_root_relative_path(
+        scan_dir,
+        field_name=f"scan_select 选项 {option_name} 的 scan_dir",
+    )
 
 
 def _validate_scan_filter(scan_filter: str, option_name: str) -> str:
-    normalized_scan_filter = scan_filter.strip()
-    scan_filter_path = Path(normalized_scan_filter)
-    if (
-        scan_filter_path.is_absolute()
-        or scan_filter_path.drive
-        or scan_filter_path.root
-    ):
-        raise InterfaceLoadError(
-            f"scan_select 选项 {option_name} 的 scan_filter 不允许使用绝对路径"
-        )
-    if _contains_parent_segment(normalized_scan_filter):
-        raise InterfaceLoadError(
-            f"scan_select 选项 {option_name} 的 scan_filter 不允许包含父级目录跳转"
-        )
-    return normalized_scan_filter
+    return _normalize_root_relative_path(
+        scan_filter,
+        field_name=f"scan_select 选项 {option_name} 的 scan_filter",
+    )
 
 
 def _is_within_base_dir(path: Path, base_dir: Path) -> bool:
@@ -231,21 +229,11 @@ def resolve_interface_relative_path(
     field_name: str = "path",
     allow_directories: bool = False,
 ) -> Path:
-    normalized_path = raw_path.strip()
-    if not normalized_path:
-        raise InterfaceLoadError(f"{field_name} 不能为空")
-
-    candidate = Path(normalized_path)
-    if candidate.is_absolute() or candidate.drive or candidate.root:
-        raise InterfaceLoadError(f"{field_name} 不允许使用绝对路径: {raw_path}")
-    if _contains_parent_segment(normalized_path):
-        raise InterfaceLoadError(f"{field_name} 不允许包含父级目录跳转: {raw_path}")
+    normalized_path = _normalize_root_relative_path(raw_path, field_name=field_name)
 
     resolved_path = (base_dir / normalized_path).resolve()
     if not _is_within_base_dir(resolved_path, base_dir):
-        raise InterfaceLoadError(
-            f"{field_name} 越界，禁止访问 interface.json 目录之外的路径"
-        )
+        raise InterfaceLoadError(f"{field_name} 越界，禁止访问软件根目录之外的路径")
     if not resolved_path.exists():
         raise InterfaceLoadError(f"{field_name} 不存在: {raw_path}")
     if allow_directories:
@@ -290,7 +278,7 @@ def _scan_scan_select_cases(
     resolved_scan_dir = (base_dir / normalized_scan_dir).resolve()
     if not _is_within_base_dir(resolved_scan_dir, base_dir):
         raise InterfaceLoadError(
-            f"scan_select 选项 {option_name} 的 scan_dir 越界，禁止访问 interface.json 目录之外的路径"
+            f"scan_select 选项 {option_name} 的 scan_dir 越界，禁止访问软件根目录之外的路径"
         )
     if not resolved_scan_dir.exists() or not resolved_scan_dir.is_dir():
         raise InterfaceLoadError(
@@ -476,15 +464,19 @@ def _merge_imports_into_target(
         _merge_imports_into_target(
             target,
             child_imports,
-            resolved_path.parent,
+            base_dir,
             state,
             [*stack, resolved_path],
         )
         _merge_fragment_sections(target, fragment, resolved_path, state)
 
 
-def load_interface_model(interface_path: str | Path) -> InterfaceModel:
-    root_path = Path(interface_path).resolve()
+def load_interface_model(base_dir: str | Path) -> InterfaceModel:
+    resolved_base_dir = Path(base_dir).resolve()
+    root_path = (resolved_base_dir / "interface.json").resolve()
+    if not _is_within_base_dir(root_path, resolved_base_dir):
+        raise InterfaceLoadError("interface.json 不在软件根目录内")
+
     root_data = _read_json_dict(root_path)
     merged_data = copy.deepcopy(root_data)
     merge_state = _MergeState()
@@ -494,11 +486,11 @@ def load_interface_model(interface_path: str | Path) -> InterfaceModel:
     _merge_imports_into_target(
         merged_data,
         root_imports,
-        root_path.parent,
+        resolved_base_dir,
         merge_state,
         [root_path],
     )
-    _expand_scan_select_options(merged_data, root_path.parent)
+    _expand_scan_select_options(merged_data, resolved_base_dir)
 
     try:
         interface_model = InterfaceModel.model_validate(merged_data)

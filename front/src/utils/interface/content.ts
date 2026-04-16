@@ -6,15 +6,31 @@ export function isExternalUrl(value: string): boolean {
   return /^(?:https?:)?\/\//i.test(value) || /^(?:data|blob):/i.test(value)
 }
 
-export function buildResourceUrl(path: string): string {
-  const normalizedPath = path.trim().replace(/\\/g, "/").replace(/^\.\//, "")
-  if (normalizedPath === "/resource" || normalizedPath.startsWith("/resource/")) {
-    return normalizedPath
+function normalizeRootRelativePath(path: string): string | undefined {
+  const normalizedPath = path.trim().replace(/\\/g, "/")
+  if (!normalizedPath) {
+    return undefined
   }
+
+  const parts = normalizedPath.split("/")
+  if (parts.some((part) => part.length === 0 || part === "." || part === "..")) {
+    return undefined
+  }
+
+  return parts.join("/")
+}
+
+export function buildResourceUrl(path: string): string {
+  const normalizedPath = normalizeRootRelativePath(path)
+  if (!normalizedPath) {
+    return ""
+  }
+
   if (normalizedPath === "resource" || normalizedPath.startsWith("resource/")) {
     return `/${normalizedPath}`
   }
-  return normalizedPath
+
+  return `/api/file?path=${encodeURIComponent(normalizedPath)}`
 }
 
 export function resolveInterfaceText(
@@ -46,7 +62,8 @@ export function resolveInterfaceAssetUrl(
   if (isExternalUrl(resolvedValue)) {
     return resolvedValue
   }
-  return buildResourceUrl(resolvedValue)
+  const url = buildResourceUrl(resolvedValue)
+  return url || undefined
 }
 
 export async function resolveInterfaceDocumentContent(
@@ -69,6 +86,9 @@ export async function resolveInterfaceDocumentContent(
   }
 
   const url = buildResourceUrl(trimmedValue)
+  if (!url) {
+    return resolvedValue
+  }
 
   try {
     const response = await fetch(url)

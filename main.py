@@ -41,7 +41,18 @@ from services.update_service import (
     get_platform_info,
 )
 
-INTERFACE_PATH = Path("interface.json").resolve()
+
+def _resolve_app_root_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+
+APP_ROOT_DIR = _resolve_app_root_dir()
+CONFIG_DIR = APP_ROOT_DIR / "config"
+SETTINGS_FILE = CONFIG_DIR / "settings.json"
+TASK_CONFIG_FILE = CONFIG_DIR / "task_config.json"
+INDEX_FILE = APP_ROOT_DIR / "page/index.html"
 
 
 def load_interface_translations() -> dict[str, dict]:
@@ -51,7 +62,7 @@ def load_interface_translations() -> dict[str, dict]:
             raise InterfaceLoadError(f"languages[{locale}] 必须是非空字符串")
 
         resolved_path = resolve_interface_relative_path(
-            INTERFACE_PATH.parent,
+            APP_ROOT_DIR,
             relative_path,
             field_name=f"languages[{locale}]",
         )
@@ -71,7 +82,7 @@ def load_interface_translations() -> dict[str, dict]:
 
 
 try:
-    interface = load_interface_model(INTERFACE_PATH)
+    interface = load_interface_model(APP_ROOT_DIR)
     interface_translations = load_interface_translations()
 except Exception as e:
     print(e)
@@ -85,11 +96,11 @@ class ScanSelectRescanRequest(BaseModel):
     option_name: str
 
 
-if not os.path.exists("config"):
-    os.makedirs("config")
-    with open("config/settings.json", "w", encoding="utf-8") as f:
+if not CONFIG_DIR.exists():
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    with SETTINGS_FILE.open("w", encoding="utf-8") as f:
         json.dump(SettingsModel().model_dump(), f, indent=4, ensure_ascii=False)
-    with open("config/task_config.json", "w", encoding="utf-8") as f:
+    with TASK_CONFIG_FILE.open("w", encoding="utf-8") as f:
         json.dump(TaskConfigModel().model_dump(), f, indent=4, ensure_ascii=False)
 
 
@@ -109,9 +120,9 @@ async def log_monitor():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app_state.is_shutting_down = False
-    app_state.worker = MaaWorker(app_state.message_conn, interface)
+    app_state.worker = MaaWorker(app_state.message_conn, interface, APP_ROOT_DIR)
     app_state.broadcaster = LogBroadcaster()
-    with open("config/settings.json", "r", encoding="utf-8") as f:
+    with SETTINGS_FILE.open("r", encoding="utf-8") as f:
         config_data = json.load(f)
     app_state.settings = SettingsModel(**config_data)
     # 初始化调度器
@@ -134,16 +145,15 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
-app.mount("/assets", StaticFiles(directory="page/assets"))
-app.mount("/resource", StaticFiles(directory="resource"))
+app.mount("/assets", StaticFiles(directory=str(APP_ROOT_DIR / "page/assets")))
+app.mount("/resource", StaticFiles(directory=str(APP_ROOT_DIR / "resource")))
 
 
 def _load_normalized_task_config() -> tuple[TaskConfigModel, bool]:
-    config_path = "config/task_config.json"
-    config_exists = os.path.exists(config_path)
+    config_exists = TASK_CONFIG_FILE.exists()
 
     if config_exists:
-        with open(config_path, "r", encoding="utf-8") as f:
+        with TASK_CONFIG_FILE.open("r", encoding="utf-8") as f:
             config_data = json.load(f)
     else:
         config_data = TaskConfigModel().model_dump()
@@ -154,7 +164,7 @@ def _load_normalized_task_config() -> tuple[TaskConfigModel, bool]:
 
     should_write_back = (not config_exists) or config_data != normalized_data
     if should_write_back:
-        with open(config_path, "w", encoding="utf-8") as f:
+        with TASK_CONFIG_FILE.open("w", encoding="utf-8") as f:
             json.dump(normalized_data, f, indent=4, ensure_ascii=False)
 
     return normalized_config, should_write_back
@@ -168,13 +178,26 @@ async def spa_middleware(request: Request, call_next):
         or request.url.path.startswith("/assets/")
         or request.url.path.startswith("/resource/")
     ):
-        return FileResponse("page/index.html")
+        return FileResponse(INDEX_FILE)
     return response
 
 
 @app.get("/")
 async def serve_homepage():
-    return FileResponse("page/index.html")
+    return FileResponse(INDEX_FILE)
+
+
+@app.get("/api/file")
+def get_file(path: str):
+    try:
+        resolved_path = resolve_interface_relative_path(
+            APP_ROOT_DIR,
+            path,
+            field_name="path",
+        )
+    except InterfaceLoadError as exc:
+        return {"status": "failed", "message": str(exc)}
+    return FileResponse(resolved_path)
 
 
 @app.get("/api/interface")
@@ -194,9 +217,7 @@ def rescan_scan_select(payload: ScanSelectRescanRequest):
 
     try:
         with interface_lock:
-            cases = rescan_scan_select_option(
-                interface, option_name, INTERFACE_PATH.parent
-            )
+            cases = rescan_scan_select_option(interface, option_name, APP_ROOT_DIR)
     except InterfaceLoadError as exc:
         return {"status": "failed", "message": str(exc)}
     except Exception as exc:
@@ -311,7 +332,7 @@ async def set_resource(name: str):
 
 @app.get("/api/settings")
 def get_settings():
-    with open("config/settings.json", "r", encoding="utf-8") as f:
+    with SETTINGS_FILE.open("r", encoding="utf-8") as f:
         config_data = json.load(f)
     app_state.settings = SettingsModel(**config_data)
     return {"status": "success", "settings": app_state.settings.model_dump()}
@@ -319,7 +340,7 @@ def get_settings():
 
 @app.post("/api/settings")
 def set_settings(settings: SettingsModel):
-    with open("config/settings.json", "w", encoding="utf-8") as f:
+    with SETTINGS_FILE.open("w", encoding="utf-8") as f:
         json.dump(settings.model_dump(), f, indent=4, ensure_ascii=False)
     app_state.settings = settings
     return {"status": "success"}
@@ -339,7 +360,7 @@ def get_task_config():
 def save_task_config(config: TaskConfigModel):
     try:
         normalized_config = normalize_task_config(config, interface)
-        with open("config/task_config.json", "w", encoding="utf-8") as f:
+        with TASK_CONFIG_FILE.open("w", encoding="utf-8") as f:
             json.dump(normalized_config.model_dump(), f, indent=4, ensure_ascii=False)
         return {"status": "success"}
     except Exception as e:
@@ -350,9 +371,8 @@ def save_task_config(config: TaskConfigModel):
 @app.delete("/api/task-config")
 def reset_task_config():
     try:
-        config_path = "config/task_config.json"
-        if os.path.exists(config_path):
-            os.remove(config_path)
+        if TASK_CONFIG_FILE.exists():
+            TASK_CONFIG_FILE.unlink()
         return {"status": "success"}
     except Exception as e:
         app_state.send_log(f"重置任务配置失败: {e}")
