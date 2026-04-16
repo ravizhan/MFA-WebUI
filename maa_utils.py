@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import io
 from pathlib import Path
 from queue import SimpleQueue
@@ -70,7 +68,8 @@ class MaaWorker:
         return None
 
     def shutdown(self):
-        self.agent_state.agent_client.disconnect()
+        if self.agent_state.agent_client is not None:
+            self.agent_state.agent_client.disconnect()
         for process in self.agent_state.processes:
             process.terminate()
         self.http_client.close()

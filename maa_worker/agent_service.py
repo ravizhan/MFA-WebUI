@@ -1,8 +1,6 @@
 from importlib import metadata
 from typing import TYPE_CHECKING, Any
 
-from maa.agent_client import AgentClient
-
 import json_utils as json
 from maa_worker.agent_loader import load_agents
 
@@ -127,18 +125,9 @@ class AgentService:
         }
 
     def load(self, pi_env: dict[str, str] | None = None):
-        self.worker.agent_state.agent_client = AgentClient()
-        self.worker.agent_state.agent_client.bind(self.worker.resource)
-        self.worker.agent_state.agent_client.register_sink(
-            self.worker.resource,
-            self.worker.device_state.controller,
-            self.worker.tasker,
-        )
         processes = load_agents(
             self._get_agent_configs(),
-            self.worker.resource,
-            self.worker.events.send_log,
-            self.worker.agent_state.agent_client,
+            self.worker,
             pi_env=pi_env,
         )
         self.worker.agent_state.processes = processes

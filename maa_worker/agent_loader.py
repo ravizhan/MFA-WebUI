@@ -9,7 +9,11 @@ import traceback
 import types
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from maa_utils import MaaWorker
+
 
 from maa.resource import Resource
 from maa.agent_client import AgentClient
@@ -485,9 +489,7 @@ def run_black_magic(agent_config: Any, resource: Resource):
 
 def load_agents(
     agent_configs: list[Any],
-    resource: Resource,
-    send_log: Callable[[str], None],
-    agent_client: AgentClient,
+    maa_worker: "MaaWorker",
     pi_env: dict[str, str] | None = None,
 ) -> list[subprocess.Popen]:
     agent_processes: list[subprocess.Popen] = []
@@ -501,13 +503,20 @@ def load_agents(
             try:
                 if pi_env:
                     os.environ.update(pi_env)
-                run_black_magic(agent_config, resource)
+                run_black_magic(agent_config, maa_worker.resource)
             except Exception as e:
-                send_log("黑魔法爆炸了！")
-                send_log(f"自定义Agent加载失败: {e}")
+                maa_worker.events.send_log("黑魔法爆炸了！")
+                maa_worker.events.send_log(f"自定义Agent加载失败: {e}")
                 errors.append(f"自定义Agent加载失败: {e}")
                 traceback.print_exc()
         else:
+            agent_client = AgentClient()
+            agent_client.bind(maa_worker.resource)
+            agent_client.register_sink(
+                maa_worker.resource,
+                maa_worker.device_state.controller,
+                maa_worker.tasker,
+            )
             socket_id = agent_client.identifier
             command = [agent_config.child_exec]
             if agent_config.child_args:
@@ -521,13 +530,14 @@ def load_agents(
                 if not agent_client.connect():
                     raise RuntimeError("Agent连接失败")
                 agent_processes.append(agent_process)
+                maa_worker.agent_state.agent_client = agent_client
             except Exception as e:
-                send_log(f"Agent进程启动失败: {e}")
+                maa_worker.events.send_log(f"Agent进程启动失败: {e}")
                 errors.append(f"Agent进程启动失败: {e}")
                 traceback.print_exc()
 
     if errors:
-        _cleanup_agent_processes(agent_processes, send_log)
+        _cleanup_agent_processes(agent_processes, maa_worker.events.send_log)
         raise RuntimeError("；".join(errors))
 
     return agent_processes

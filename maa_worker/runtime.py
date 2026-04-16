@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import subprocess
 import threading
 from dataclasses import dataclass, field
@@ -45,4 +43,4 @@ class AgentRuntimeState:
     start_error: str | None = None
     pi_env: dict[str, str] | None = None
     processes: list[subprocess.Popen] = field(default_factory=list)
-    agent_client: AgentClient = None
+    agent_client: "AgentClient" = None
