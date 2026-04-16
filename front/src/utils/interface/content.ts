@@ -3,6 +3,7 @@ import { showGlobalMessage } from "@/services/feedback/message"
 
 const textFilePattern = /^(?:\.\/)?(?:[^/]+[/])*[^/]+\.(?:md|markdown|txt|html?)$/i
 const invalidPathNotified = new Set<string>()
+const windowsDrivePattern = /^[A-Za-z]:/
 
 export function isExternalUrl(value: string): boolean {
   return /^(?:https?:)?\/\//i.test(value) || /^(?:data|blob):/i.test(value)
@@ -12,6 +13,26 @@ function normalizeRootRelativePath(path: string): string | undefined {
   const normalizedPath = path.trim().replace(/\\/g, "/")
   if (!normalizedPath) {
     notifyInvalidPath(path, "路径不能为空")
+    return undefined
+  }
+
+  if (normalizedPath.startsWith("//")) {
+    notifyInvalidPath(path, "不允许使用 UNC 或双斜杠开头路径")
+    return undefined
+  }
+
+  if (normalizedPath.startsWith("/")) {
+    notifyInvalidPath(path, "不允许使用绝对路径")
+    return undefined
+  }
+
+  if (windowsDrivePattern.test(normalizedPath)) {
+    notifyInvalidPath(path, "不允许使用 Windows 盘符路径")
+    return undefined
+  }
+
+  if (normalizedPath.includes(":")) {
+    notifyInvalidPath(path, "不允许包含冒号(:)")
     return undefined
   }
 

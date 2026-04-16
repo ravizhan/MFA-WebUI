@@ -169,18 +169,18 @@ def _merge_fragment_sections(
 def _normalize_root_relative_path(raw_path: str, *, field_name: str) -> str:
     normalized_path = raw_path.strip().replace("\\", "/")
     if not normalized_path:
-        raise InterfaceLoadError(f"{field_name} 不能为空")
+        raise ValueError(f"{field_name} 不能为空")
 
     candidate = Path(normalized_path)
     if candidate.is_absolute() or candidate.drive or candidate.root:
-        raise InterfaceLoadError(f"{field_name} 不允许使用绝对路径: {raw_path}")
+        raise ValueError(f"{field_name} 不允许使用绝对路径: {raw_path}")
 
     if normalized_path in {".", ".."}:
-        raise InterfaceLoadError(f"{field_name} 不允许包含 . 或 .. 路径段: {raw_path}")
+        raise ValueError(f"{field_name} 不允许包含 . 或 .. 路径段: {raw_path}")
 
     parts = normalized_path.split("/")
     if any(part in {"", ".", ".."} for part in parts):
-        raise InterfaceLoadError(f"{field_name} 不允许包含 . 或 .. 路径段: {raw_path}")
+        raise ValueError(f"{field_name} 不允许包含 . 或 .. 路径段: {raw_path}")
 
     return "/".join(parts)
 
@@ -194,7 +194,7 @@ def _resolve_import_path(import_path: str, base_dir: Path) -> Path:
     try:
         resolved_path.relative_to(base_dir)
     except ValueError as exc:
-        raise InterfaceLoadError(
+        raise ValueError(
             f"import 越界，禁止访问软件根目录之外的路径: {import_path}"
         ) from exc
     return resolved_path
@@ -233,14 +233,14 @@ def resolve_interface_relative_path(
 
     resolved_path = (base_dir / normalized_path).resolve()
     if not _is_within_base_dir(resolved_path, base_dir):
-        raise InterfaceLoadError(f"{field_name} 越界，禁止访问软件根目录之外的路径")
+        raise ValueError(f"{field_name} 越界，禁止访问软件根目录之外的路径: {raw_path}")
     if not resolved_path.exists():
-        raise InterfaceLoadError(f"{field_name} 不存在: {raw_path}")
+        raise ValueError(f"{field_name} 不存在: {raw_path}")
     if allow_directories:
         if not resolved_path.is_dir():
-            raise InterfaceLoadError(f"{field_name} 不是目录: {raw_path}")
+            raise ValueError(f"{field_name} 不是目录: {raw_path}")
     elif not resolved_path.is_file():
-        raise InterfaceLoadError(f"{field_name} 不是文件: {raw_path}")
+        raise ValueError(f"{field_name} 不是文件: {raw_path}")
     return resolved_path
 
 

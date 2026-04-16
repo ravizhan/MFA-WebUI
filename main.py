@@ -195,7 +195,7 @@ def get_file(path: str):
             path,
             field_name="path",
         )
-    except InterfaceLoadError as exc:
+    except ValueError as exc:
         message = str(exc)
         status_code = 404 if ("不存在" in message or "不是文件" in message) else 400
         return JSONResponse(
