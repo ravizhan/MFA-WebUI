@@ -49,6 +49,8 @@ _✨ 基于 **[Vue](https://github.com/vuejs/vue)** 和 **[FastAPI](https://gith
 
 如果您选择低代码或低代码+Agent方案，只需按照指引使用 [MaaFramework 项目模板](https://github.com/MaaXYZ/MaaPracticeBoilerplate) 创建项目，然后将其中的 `.github/workflows/install.yml` 替换为本项目的 [deploy/install.yaml](https://github.com/ravizhan/MWU/blob/main/deploy/install.yml) 即可。
 
+如果您需要使用Agent功能，请务必阅读 [Agent 相关说明](https://github.com/ravizhan/MWU#-Agent相关说明)
+
 如果您选择全代码开发集成，并且也想使用本项目的UI，请继续阅读 [项目架构与开发](https://github.com/ravizhan/MWU#%EF%B8%8F-%E9%A1%B9%E7%9B%AE%E6%9E%B6%E6%9E%84%E4%B8%8E%E5%BC%80%E5%8F%91)
 
 ### ⚙️ 配置清单
@@ -75,6 +77,30 @@ _✨ 基于 **[Vue](https://github.com/vuejs/vue)** 和 **[FastAPI](https://gith
 - 错误：`./resource/tasks/preset/Daily.json`
 - 错误：`../resource/Daily.json`
 - 错误：`../../../../resource/Daily.json`
+
+### 📦 Agent 相关说明
+
+> 若您需要使用 Agent 功能，请务必阅读本章节。
+
+本项目提供了两种 Agent 运行模式。系统会根据 `interface.json` 中 `agent.child_exec` 的内容自动切换：若包含 `python` 字样则启用**动态加载（黑魔法）**，否则使用**外挂进程**模式。
+
+#### 1. 动态加载（黑魔法）
+
+通过动态解析技术将 Agent 脚本直接转换为 MaaFramework 的 `custom` 插件，支持动态加载并注册自定义的 Action 和 Recognition。技术详情请参考 [maa_worker/agent_loader.py](https://github.com/ravizhan/MWU/blob/main/maa_worker/agent_loader.py)。
+
+- **依赖说明**：Agent 脚本可直接使用 MWU 内置的依赖库（详见 `pyproject.toml`）。由于 Nuitka 编译特性，部分内置库可能不完整。
+- **扩展依赖**：若需使用第三方库，请在根目录下创建 `requirements.txt`。在 GitHub Action 发版时，系统会自动下载依赖至 `deps` 文件夹并完成打包。
+- **优缺点**：
+  - ✅ **优点**：无需携带独立的 Python 运行环境，大幅压缩发布包体积，集成度高。
+  - ❌ **缺点**：受限于动态加载机制，可能会遇到极少数难以预见的兼容性或稳定性问题。
+
+#### 2. 外挂进程
+
+传统的运行方式。MWU 会通过 `subprocess`，根据 `child_exec` 和 `child_arg` 的配置启动一个独立的子进程作为 Agent Server。
+
+- **使用建议**：如果您的 Agent Server 基于 Python 编写且不希望使用“黑魔法”模式，请确保 `agent.child_exec` 中**不包含** `python` 字样，并需自行调整 CI 流程以在压缩包内准备独立的 Python 环境。
+
+> **推荐建议**：优先使用**动态加载（黑魔法）**模式。若遇到无法解决的兼容性问题，请尝试切换为**外挂进程**模式并向本项目提交 Issue。
 
 
 ### 📦 额外拓展功能
