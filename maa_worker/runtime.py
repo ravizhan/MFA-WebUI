@@ -5,6 +5,7 @@ import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from maa.agent_client import AgentClient
 
 
 @dataclass
@@ -43,5 +44,5 @@ class AgentRuntimeState:
     start_succeeded: bool = False
     start_error: str | None = None
     pi_env: dict[str, str] | None = None
-    process: subprocess.Popen | None = None
     processes: list[subprocess.Popen] = field(default_factory=list)
+    agent_client: AgentClient = None

@@ -70,9 +70,7 @@ class MaaWorker:
         return None
 
     def shutdown(self):
-        if self.agent_state.processes:
-            for process in self.agent_state.processes:
-                process.terminate()
-        elif self.agent_state.process:
-            self.agent_state.process.terminate()
+        self.agent_state.agent_client.disconnect()
+        for process in self.agent_state.processes:
+            process.terminate()
         self.http_client.close()

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from maa.resource import Resource
+from maa.agent_client import AgentClient
 
 
 class _DepsFirstFinder(importlib.abc.MetaPathFinder):
@@ -486,38 +487,41 @@ def load_agents(
     agent_configs: list[Any],
     resource: Resource,
     send_log: Callable[[str], None],
+    agent_client: AgentClient,
     pi_env: dict[str, str] | None = None,
-) -> tuple[subprocess.Popen | None, list[subprocess.Popen]]:
-    agent_process: subprocess.Popen | None = None
+) -> list[subprocess.Popen]:
     agent_processes: list[subprocess.Popen] = []
     errors: list[str] = []
 
     if not agent_configs:
-        return agent_process, agent_processes
+        return agent_processes
     for agent_config in agent_configs:
         if "python" in agent_config.child_exec:
             assert agent_config.child_args, "Agent解析错误，缺少child_args"
             try:
                 if pi_env:
                     os.environ.update(pi_env)
-                run_black_magic(agent_config, resource, send_log)
+                run_black_magic(agent_config, resource)
             except Exception as e:
                 send_log("黑魔法爆炸了！")
                 send_log(f"自定义Agent加载失败: {e}")
                 errors.append(f"自定义Agent加载失败: {e}")
                 traceback.print_exc()
         else:
+            socket_id = agent_client.identifier
             command = [agent_config.child_exec]
             if agent_config.child_args:
                 command += agent_config.child_args
+            command.append(socket_id)
             try:
                 env = os.environ.copy()
                 if pi_env:
                     env.update(pi_env)
                 agent_process = subprocess.Popen(command, env=env)
+                if not agent_client.connect():
+                    raise RuntimeError("Agent连接失败")
                 agent_processes.append(agent_process)
             except Exception as e:
-                agent_process = None
                 send_log(f"Agent进程启动失败: {e}")
                 errors.append(f"Agent进程启动失败: {e}")
                 traceback.print_exc()
@@ -526,4 +530,4 @@ def load_agents(
         _cleanup_agent_processes(agent_processes, send_log)
         raise RuntimeError("；".join(errors))
 
-    return agent_process, agent_processes
+    return agent_processes
