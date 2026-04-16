@@ -26,8 +26,13 @@ resource.set_cpu()
 
 
 class MaaWorker:
-    def __init__(self, message_conn: SimpleQueue, interface: InterfaceModel):
-        Toolkit.init_option("./")
+    def __init__(
+        self,
+        message_conn: SimpleQueue,
+        interface: InterfaceModel,
+        app_root_dir: Path,
+    ):
+        Toolkit.init_option(str(app_root_dir))
 
         self.interface = interface
         self.message_conn = message_conn
@@ -35,9 +40,7 @@ class MaaWorker:
         self.tasker = Tasker()
         self.http_client = httpx.Client(timeout=30)
 
-        self.context = WorkerContext(
-            interface_base_dir=Path("interface.json").resolve().parent
-        )
+        self.context = WorkerContext(interface_base_dir=app_root_dir.resolve())
         self.device_state = DeviceRuntimeState()
         self.task_state = TaskRuntimeState()
         self.agent_state = AgentRuntimeState()

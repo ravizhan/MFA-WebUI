@@ -32,10 +32,11 @@ const render = new marked.Renderer()
 
 render.image = function ({ href, title, text }: Tokens.Image) {
   const rawHref = href || ""
-  const safeHref =
+  const resolvedHref =
     rawHref && !isExternalUrl(rawHref) && !rawHref.startsWith("/")
       ? buildResourceUrl(rawHref)
       : rawHref
+  const safeHref = resolvedHref || "data:,"
   const titleAttr = title ? ` title="${title}"` : ""
   const altAttr = text ? ` alt="${text}"` : ""
   return `<img src="${safeHref}"${titleAttr}${altAttr} class="preview-image" style="max-width: 100%; object-fit: contain; cursor: pointer;" />`

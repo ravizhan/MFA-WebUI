@@ -1,20 +1,70 @@
 import type { InterfaceModel } from "@/types/interface/model"
+import { showGlobalMessage } from "@/services/feedback/message"
 
 const textFilePattern = /^(?:\.\/)?(?:[^/]+[/])*[^/]+\.(?:md|markdown|txt|html?)$/i
+const invalidPathNotified = new Set<string>()
+const windowsDrivePattern = /^[A-Za-z]:/
 
 export function isExternalUrl(value: string): boolean {
   return /^(?:https?:)?\/\//i.test(value) || /^(?:data|blob):/i.test(value)
 }
 
-export function buildResourceUrl(path: string): string {
-  const normalizedPath = path.trim().replace(/\\/g, "/").replace(/^\.\//, "")
-  if (normalizedPath === "/resource" || normalizedPath.startsWith("/resource/")) {
-    return normalizedPath
+function normalizeRootRelativePath(path: string): string | undefined {
+  const normalizedPath = path.trim().replace(/\\/g, "/")
+  if (!normalizedPath) {
+    notifyInvalidPath(path, "路径不能为空")
+    return undefined
   }
+
+  if (normalizedPath.startsWith("//")) {
+    notifyInvalidPath(path, "不允许使用 UNC 或双斜杠开头路径")
+    return undefined
+  }
+
+  if (normalizedPath.startsWith("/")) {
+    notifyInvalidPath(path, "不允许使用绝对路径")
+    return undefined
+  }
+
+  if (windowsDrivePattern.test(normalizedPath)) {
+    notifyInvalidPath(path, "不允许使用 Windows 盘符路径")
+    return undefined
+  }
+
+  if (normalizedPath.includes(":")) {
+    notifyInvalidPath(path, "不允许包含冒号(:)")
+    return undefined
+  }
+
+  const parts = normalizedPath.split("/")
+  if (parts.some((part) => part.length === 0 || part === "." || part === "..")) {
+    notifyInvalidPath(path, "禁止使用 . 或 .. 路径段")
+    return undefined
+  }
+
+  return parts.join("/")
+}
+
+function notifyInvalidPath(path: string, reason: string): void {
+  const key = `${path}::${reason}`
+  if (invalidPathNotified.has(key)) {
+    return
+  }
+  invalidPathNotified.add(key)
+  showGlobalMessage("error", `资源路径不合法: ${path || "(空)"}，${reason}`)
+}
+
+export function buildResourceUrl(path: string): string | undefined {
+  const normalizedPath = normalizeRootRelativePath(path)
+  if (!normalizedPath) {
+    return undefined
+  }
+
   if (normalizedPath === "resource" || normalizedPath.startsWith("resource/")) {
     return `/${normalizedPath}`
   }
-  return normalizedPath
+
+  return `/api/file?path=${encodeURIComponent(normalizedPath)}`
 }
 
 export function resolveInterfaceText(
@@ -46,7 +96,8 @@ export function resolveInterfaceAssetUrl(
   if (isExternalUrl(resolvedValue)) {
     return resolvedValue
   }
-  return buildResourceUrl(resolvedValue)
+  const url = buildResourceUrl(resolvedValue)
+  return url
 }
 
 export async function resolveInterfaceDocumentContent(
@@ -69,6 +120,9 @@ export async function resolveInterfaceDocumentContent(
   }
 
   const url = buildResourceUrl(trimmedValue)
+  if (!url) {
+    return resolvedValue
+  }
 
   try {
     const response = await fetch(url)
