@@ -53,6 +53,8 @@ _✨ 基于 **[Vue](https://github.com/vuejs/vue)** 和 **[FastAPI](https://gith
 
 如果您选择全代码开发集成，并且也想使用本项目的UI，请继续阅读 [项目架构与开发](https://github.com/ravizhan/MWU#%EF%B8%8F-%E9%A1%B9%E7%9B%AE%E6%9E%B6%E6%9E%84%E4%B8%8E%E5%BC%80%E5%8F%91)
 
+> 如需集成帮助，请加MaaFW官方 QQ 群（595990173）。群内仅讨论开发相关议题，不提供日常使用/客服支持
+
 ### ⚙️ 配置清单
 
 | 配置         | 默认值                  | 修改方法                                                     |
