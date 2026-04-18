@@ -14,18 +14,85 @@ class TaskService:
     def __init__(self, worker: "MaaWorker"):
         self.worker = worker
 
+    def _get_task_definition(self, task_entry: str):
+        return next(
+            (
+                task
+                for task in self.worker.interface.task or []
+                if task.entry == task_entry
+            ),
+            None,
+        )
+
+    def _is_task_compatible(
+        self,
+        task_definition,
+        controller_names: set[str],
+        resource_name: str | None,
+    ) -> tuple[bool, str]:
+        if task_definition is None:
+            return True, ""
+
+        if task_definition.controller and not controller_names.intersection(
+            task_definition.controller
+        ):
+            return (
+                False,
+                "当前控制器不受支持"
+                + f" (支持: {', '.join(task_definition.controller)})",
+            )
+
+        if task_definition.resource and (
+            resource_name is None or resource_name not in task_definition.resource
+        ):
+            return (
+                False,
+                "当前资源不受支持" + f" (支持: {', '.join(task_definition.resource)})",
+            )
+
+        return True, ""
+
     def start(
         self,
         task_list: list[str],
         options: TaskOptionsByTask,
         task_name: str | None = None,
     ) -> bool:
+        self.worker.task_state.last_error = None
         if not self.worker.device_state.connected:
             return False
         if not self.worker.device_state.current_resource_name:
             self.worker.device_state.last_resource_error = "请先设置资源"
             self.worker.events.send_log(self.worker.device_state.last_resource_error)
             return False
+
+        controller_names = self.worker.device.get_active_controller_names()
+        current_resource_name = self.worker.device_state.current_resource_name
+
+        filtered_task_list: list[str] = []
+        for task_entry in task_list:
+            task_definition = self._get_task_definition(task_entry)
+            compatible, reason = self._is_task_compatible(
+                task_definition,
+                controller_names,
+                current_resource_name,
+            )
+            if compatible:
+                filtered_task_list.append(task_entry)
+                continue
+
+            task_display_name = (
+                task_definition.label or task_definition.name
+                if task_definition is not None
+                else task_entry
+            )
+            self.worker.events.send_log(f"跳过任务 {task_display_name}: {reason}")
+
+        if not filtered_task_list:
+            self.worker.task_state.last_error = "当前资源/控制器下无可执行任务"
+            self.worker.events.send_log(self.worker.task_state.last_error)
+            return False
+
         if not self.worker.agents.ensure_started_once():
             return False
 
@@ -68,7 +135,7 @@ class TaskService:
             state.current_task_name = task_name
             state.thread = threading.Thread(
                 target=self.run_process,
-                args=(task_list, copy.deepcopy(cleaned_options)),
+                args=(filtered_task_list, copy.deepcopy(cleaned_options)),
                 daemon=True,
             )
             state.thread.start()

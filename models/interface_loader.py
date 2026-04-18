@@ -444,6 +444,41 @@ def _validate_presets(interface_model: InterfaceModel) -> None:
                 )
 
 
+def _validate_task_context_constraints(interface_model: InterfaceModel) -> None:
+    tasks = interface_model.task or []
+    resource_names = {resource.name for resource in interface_model.resource}
+    controller_names = {controller.name for controller in interface_model.controller}
+
+    for task in tasks:
+        task_ref = f"{task.name}({task.entry})"
+
+        if task.resource:
+            invalid_resources = sorted(
+                {
+                    resource_name
+                    for resource_name in task.resource
+                    if resource_name not in resource_names
+                }
+            )
+            if invalid_resources:
+                raise InterfaceLoadError(
+                    f"任务 {task_ref} 引用了不存在的 resource: {', '.join(invalid_resources)}"
+                )
+
+        if task.controller:
+            invalid_controllers = sorted(
+                {
+                    controller_name
+                    for controller_name in task.controller
+                    if controller_name not in controller_names
+                }
+            )
+            if invalid_controllers:
+                raise InterfaceLoadError(
+                    f"任务 {task_ref} 引用了不存在的 controller: {', '.join(invalid_controllers)}"
+                )
+
+
 def _merge_imports_into_target(
     target: dict[str, Any],
     import_paths: list[str],
@@ -494,6 +529,7 @@ def load_interface_model(base_dir: str | Path) -> InterfaceModel:
 
     try:
         interface_model = InterfaceModel.model_validate(merged_data)
+        _validate_task_context_constraints(interface_model)
         _validate_presets(interface_model)
         return interface_model
     except Exception as exc:
