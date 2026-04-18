@@ -1,4 +1,4 @@
-import type { TaskOptionValue } from "@/types/scheduler/model"
+import type { TaskOptionsByTask } from "@/types/scheduler/model"
 
 export const CUSTOM_PRESET_NAME = "__mwu_reserved_custom_preset__"
 
@@ -12,7 +12,7 @@ export interface TaskListItem {
 export interface TaskPresetSnapshot {
   taskOrder: string[]
   taskChecked: Record<string, boolean>
-  taskOptions: Record<string, TaskOptionValue>
+  taskOptions: TaskOptionsByTask
 }
 
 export interface PersistedTaskConfig {

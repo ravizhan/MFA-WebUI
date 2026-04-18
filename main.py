@@ -32,7 +32,11 @@ from models.scheduler import (
     TaskExecutionPayload,
 )
 from models.settings import SettingsModel
-from models.task_config import TaskConfigModel, normalize_task_config
+from models.task_config import (
+    TaskConfigModel,
+    normalize_task_config,
+    normalize_task_execution_payload,
+)
 from scheduler_manager import SchedulerManager
 from services.update_service import (
     check_github_update,
@@ -632,9 +636,20 @@ def start(task_execution: TaskExecutionPayload):
         msg = "请先连接设备"
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
-    if not app_state.worker.tasks.start(
+    normalized_task_list, normalized_task_options = normalize_task_execution_payload(
         task_execution.task_list,
         task_execution.task_options,
+        interface,
+    )
+
+    if not normalized_task_list:
+        msg = "请选择任务"
+        app_state.send_log(msg)
+        return {"status": "failed", "message": msg}
+
+    if not app_state.worker.tasks.start(
+        normalized_task_list,
+        normalized_task_options,
     ):
         msg = (
             app_state.worker.device_state.last_resource_error

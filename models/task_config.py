@@ -5,7 +5,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from models.interface import InterfaceModel, Option, Preset, PresetOptionValue
-from models.scheduler import TaskOptionValue
+from models.scheduler import TaskOptionValue, TaskOptionsByTask
 
 CUSTOM_PRESET_NAME = "__mwu_reserved_custom_preset__"
 
@@ -18,8 +18,9 @@ class TaskPresetSnapshotModel(BaseModel):
         default_factory=dict,
         description="任务选中状态映射，key为任务ID，value为是否选中",
     )
-    taskOptions: dict[str, TaskOptionValue] = Field(
-        default_factory=dict, description="任务选项配置，key为选项名，value为选项值"
+    taskOptions: TaskOptionsByTask = Field(
+        default_factory=dict,
+        description="任务选项配置，key为任务ID，value为该任务的选项映射",
     )
 
 
@@ -35,18 +36,23 @@ class TaskConfigModel(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def migrate_legacy_config(cls, value: Any):
+    def normalize_raw_config(cls, value: Any):
         if not isinstance(value, dict):
             return value
 
-        if isinstance(value.get("presets"), dict):
-            selected_preset = value.get("selectedPreset")
-            return {
-                **value,
-                "selectedPreset": _normalize_preset_name(selected_preset),
-            }
+        selected_preset = _normalize_preset_name(value.get("selectedPreset"))
+        raw_presets = value.get("presets")
+        normalized_presets: dict[str, dict[str, Any]] = {}
+        if isinstance(raw_presets, dict):
+            for preset_name, snapshot in raw_presets.items():
+                if not isinstance(preset_name, str):
+                    continue
+                normalized_presets[preset_name] = _normalize_raw_snapshot(snapshot)
 
-        return _migrate_legacy_config(value)
+        return {
+            "selectedPreset": selected_preset,
+            "presets": normalized_presets,
+        }
 
 
 def normalize_task_config(
@@ -85,23 +91,12 @@ def normalize_snapshot(
     normalized_order: list[str] = []
     seen_task_ids: set[str] = set()
 
-    if snapshot is None:
-        raw_task_order: list[Any] = []
-        raw_task_checked: dict[str, Any] = {}
-        raw_task_options: dict[str, Any] = {}
-    else:
-        snapshot_model = (
-            snapshot
-            if isinstance(snapshot, TaskPresetSnapshotModel)
-            else TaskPresetSnapshotModel(**snapshot)
-        )
-        raw_task_order = snapshot_model.taskOrder
-        raw_task_checked = snapshot_model.taskChecked
-        raw_task_options = snapshot_model.taskOptions
+    raw_snapshot = _normalize_raw_snapshot(snapshot)
+    raw_task_order = raw_snapshot["taskOrder"]
+    raw_task_checked = raw_snapshot["taskChecked"]
+    raw_task_options = raw_snapshot["taskOptions"]
 
     for task_id in raw_task_order:
-        if not isinstance(task_id, str):
-            continue
         if task_id in valid_task_ids and task_id not in seen_task_ids:
             normalized_order.append(task_id)
             seen_task_ids.add(task_id)
@@ -115,24 +110,11 @@ def normalize_snapshot(
         if task_id in valid_task_ids:
             normalized_checked[task_id] = bool(checked)
 
-    option_defaults, option_value_types = _build_option_defaults(interface_model)
-    option_case_name_sets = _build_option_case_name_sets(interface_model)
-    normalized_options = dict(option_defaults)
-    for option_key, option_value in raw_task_options.items():
-        expected_type = option_value_types.get(option_key)
-        if expected_type == "string" and isinstance(option_value, str):
-            allowed_cases = option_case_name_sets.get(option_key)
-            if allowed_cases is not None and option_value not in allowed_cases:
-                continue
-            normalized_options[option_key] = option_value
-        elif expected_type == "string_list" and isinstance(option_value, list):
-            normalized_items = [item for item in option_value if isinstance(item, str)]
-            allowed_cases = option_case_name_sets.get(option_key)
-            if allowed_cases is not None:
-                normalized_items = [
-                    item for item in normalized_items if item in allowed_cases
-                ]
-            normalized_options[option_key] = normalized_items
+    normalized_options = normalize_task_options_by_task(
+        raw_task_options,
+        normalized_order,
+        interface_model,
+    )
 
     return TaskPresetSnapshotModel(
         taskOrder=normalized_order,
@@ -141,16 +123,76 @@ def normalize_snapshot(
     )
 
 
+def normalize_task_options_by_task(
+    raw_task_options: dict[str, Any] | None,
+    task_ids: list[str],
+    interface_model: InterfaceModel,
+) -> TaskOptionsByTask:
+    task_option_maps = _build_task_option_maps(interface_model)
+    normalized: TaskOptionsByTask = {}
+    normalized_task_ids = [task_id for task_id in task_ids if isinstance(task_id, str)]
+
+    for task_id in normalized_task_ids:
+        option_map = task_option_maps.get(task_id, {})
+        defaults, value_types = _build_option_defaults(option_map)
+        case_name_sets = _build_option_case_name_sets(option_map)
+
+        raw_options_for_task = None
+        if isinstance(raw_task_options, dict):
+            raw_options_for_task = raw_task_options.get(task_id)
+
+        normalized[task_id] = _normalize_options_for_task(
+            raw_options_for_task,
+            option_map,
+            defaults,
+            value_types,
+            case_name_sets,
+        )
+
+    return normalized
+
+
+def normalize_task_execution_payload(
+    raw_task_list: Any,
+    raw_task_options: Any,
+    interface_model: InterfaceModel,
+) -> tuple[list[str], TaskOptionsByTask]:
+    valid_task_ids = {task.entry for task in (interface_model.task or [])}
+    normalized_task_list: list[str] = []
+    seen_task_ids: set[str] = set()
+
+    if isinstance(raw_task_list, list):
+        for task_id in raw_task_list:
+            if not isinstance(task_id, str):
+                continue
+            if task_id not in valid_task_ids or task_id in seen_task_ids:
+                continue
+            normalized_task_list.append(task_id)
+            seen_task_ids.add(task_id)
+
+    normalized_task_options = normalize_task_options_by_task(
+        raw_task_options if isinstance(raw_task_options, dict) else None,
+        normalized_task_list,
+        interface_model,
+    )
+
+    return normalized_task_list, normalized_task_options
+
+
 def build_interface_preset_snapshot(
     interface_model: InterfaceModel, preset: Preset
 ) -> TaskPresetSnapshotModel:
-    option_defaults, _ = _build_option_defaults(interface_model)
     task_order = _build_default_task_order(interface_model)
     task_checked = {task_id: False for task_id in task_order}
     task_name_to_entry = {
         task.name: task.entry for task in (interface_model.task or [])
     }
-    option_map = interface_model.option or {}
+    task_option_maps = _build_task_option_maps(interface_model)
+
+    task_options_by_task: TaskOptionsByTask = {}
+    for task_id in task_order:
+        defaults, _ = _build_option_defaults(task_option_maps.get(task_id, {}))
+        task_options_by_task[task_id] = defaults
 
     ordered_preset_tasks: list[str] = []
     seen_task_ids: set[str] = set()
@@ -166,9 +208,16 @@ def build_interface_preset_snapshot(
             True if preset_task.enabled is None else preset_task.enabled
         )
 
+        option_map = task_option_maps.get(task_entry, {})
+        target_options = task_options_by_task.setdefault(task_entry, {})
         for option_name, option_value in (preset_task.option or {}).items():
+            if option_name not in option_map:
+                continue
             _apply_preset_option_value(
-                option_name, option_value, option_map, option_defaults
+                option_name,
+                option_value,
+                option_map,
+                target_options,
             )
 
     normalized_order = ordered_preset_tasks + [
@@ -178,83 +227,92 @@ def build_interface_preset_snapshot(
     return TaskPresetSnapshotModel(
         taskOrder=normalized_order,
         taskChecked=task_checked,
-        taskOptions=option_defaults,
+        taskOptions=task_options_by_task,
     )
 
 
-def _migrate_legacy_config(value: dict[str, Any]) -> dict[str, Any]:
-    selected_preset = _normalize_preset_name(value.get("selectedPreset"))
-    presets: dict[str, dict[str, Any]] = {}
+def _normalize_raw_snapshot(snapshot: Any) -> dict[str, Any]:
+    if isinstance(snapshot, TaskPresetSnapshotModel):
+        return {
+            "taskOrder": [
+                task_id for task_id in snapshot.taskOrder if isinstance(task_id, str)
+            ],
+            "taskChecked": {
+                task_id: bool(checked)
+                for task_id, checked in snapshot.taskChecked.items()
+                if isinstance(task_id, str)
+            },
+            "taskOptions": _normalize_raw_task_options(snapshot.taskOptions),
+        }
 
-    legacy_current_snapshot = _build_legacy_snapshot(
-        value.get("taskOrder"),
-        value.get("taskChecked"),
-        value.get("taskOptions"),
-    )
-    legacy_custom_snapshot = _build_legacy_snapshot(
-        value.get("customTaskOrder"),
-        value.get("customTaskChecked"),
-        value.get("customTaskOptions"),
-    )
+    if not isinstance(snapshot, dict):
+        return {
+            "taskOrder": [],
+            "taskChecked": {},
+            "taskOptions": {},
+        }
 
-    if selected_preset == CUSTOM_PRESET_NAME:
-        if _snapshot_has_content(legacy_current_snapshot):
-            presets[CUSTOM_PRESET_NAME] = legacy_current_snapshot
-        elif _snapshot_has_content(legacy_custom_snapshot):
-            presets[CUSTOM_PRESET_NAME] = legacy_custom_snapshot
-    else:
-        if _snapshot_has_content(legacy_current_snapshot):
-            presets[selected_preset] = legacy_current_snapshot
-        if _snapshot_has_content(legacy_custom_snapshot):
-            presets[CUSTOM_PRESET_NAME] = legacy_custom_snapshot
-
-    if (
-        selected_preset != CUSTOM_PRESET_NAME
-        and CUSTOM_PRESET_NAME not in presets
-        and _snapshot_has_content(legacy_custom_snapshot)
-    ):
-        presets[CUSTOM_PRESET_NAME] = legacy_custom_snapshot
-
-    return {
-        "selectedPreset": selected_preset,
-        "presets": presets,
-    }
-
-
-def _build_legacy_snapshot(
-    task_order: Any, task_checked: Any, task_options: Any
-) -> dict[str, Any]:
-    normalized_order = (
+    task_order = snapshot.get("taskOrder")
+    raw_task_order = (
         [item for item in task_order if isinstance(item, str)]
         if isinstance(task_order, list)
         else []
     )
-    normalized_checked = (
+
+    task_checked = snapshot.get("taskChecked")
+    raw_task_checked = (
         {
-            key: bool(value)
-            for key, value in task_checked.items()
-            if isinstance(key, str)
+            task_id: bool(checked)
+            for task_id, checked in task_checked.items()
+            if isinstance(task_id, str)
         }
         if isinstance(task_checked, dict)
         else {}
     )
-    normalized_options = (
-        {key: value for key, value in task_options.items() if isinstance(key, str)}
-        if isinstance(task_options, dict)
-        else {}
-    )
 
     return {
-        "taskOrder": normalized_order,
-        "taskChecked": normalized_checked,
-        "taskOptions": normalized_options,
+        "taskOrder": raw_task_order,
+        "taskChecked": raw_task_checked,
+        "taskOptions": _normalize_raw_task_options(snapshot.get("taskOptions")),
     }
 
 
-def _snapshot_has_content(snapshot: dict[str, Any]) -> bool:
-    return bool(
-        snapshot["taskOrder"] or snapshot["taskChecked"] or snapshot["taskOptions"]
-    )
+def _normalize_raw_task_options(value: Any) -> dict[str, dict[str, TaskOptionValue]]:
+    normalized: dict[str, dict[str, TaskOptionValue]] = {}
+    if not isinstance(value, dict):
+        return normalized
+
+    for task_id, option_map in value.items():
+        if not isinstance(task_id, str) or not isinstance(option_map, dict):
+            continue
+
+        normalized_options: dict[str, TaskOptionValue] = {}
+        for option_name, option_value in option_map.items():
+            if not isinstance(option_name, str):
+                continue
+
+            normalized_option_value = _normalize_option_value_for_storage(option_value)
+            if normalized_option_value is None:
+                continue
+            normalized_options[option_name] = normalized_option_value
+
+        normalized[task_id] = normalized_options
+
+    return normalized
+
+
+def _normalize_option_value_for_storage(value: Any) -> TaskOptionValue | None:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, str)]
+    if isinstance(value, dict):
+        return {
+            key: item
+            for key, item in value.items()
+            if isinstance(key, str) and isinstance(item, str)
+        }
+    return None
 
 
 def _normalize_preset_name(value: Any) -> str:
@@ -267,13 +325,45 @@ def _build_default_task_order(interface_model: InterfaceModel) -> list[str]:
     return [task.entry for task in (interface_model.task or [])]
 
 
-def _build_option_defaults(
+def _build_task_option_maps(
     interface_model: InterfaceModel,
+) -> dict[str, dict[str, Option]]:
+    option_map = interface_model.option or {}
+    task_option_maps: dict[str, dict[str, Option]] = {}
+
+    for task in interface_model.task or []:
+        collected: dict[str, Option] = {}
+        _collect_task_options(task.option or [], option_map, collected)
+        task_option_maps[task.entry] = collected
+
+    return task_option_maps
+
+
+def _collect_task_options(
+    option_names: list[str],
+    option_map: dict[str, Option],
+    target: dict[str, Option],
+) -> None:
+    for option_name in option_names:
+        if option_name in target:
+            continue
+        option = option_map.get(option_name)
+        if option is None:
+            continue
+
+        target[option_name] = option
+        for case in option.cases or []:
+            if case.option:
+                _collect_task_options(case.option, option_map, target)
+
+
+def _build_option_defaults(
+    option_map: dict[str, Option],
 ) -> tuple[dict[str, TaskOptionValue], dict[str, str]]:
     defaults: dict[str, TaskOptionValue] = {}
     value_types: dict[str, str] = {}
 
-    for option_name, option in (interface_model.option or {}).items():
+    for option_name, option in option_map.items():
         if option.type in {"select", "scan_select", "switch"}:
             default_value = option.default_case or (
                 option.cases[0].name if option.cases else ""
@@ -282,13 +372,6 @@ def _build_option_defaults(
                 default_value if isinstance(default_value, str) else ""
             )
             value_types[option_name] = "string"
-            continue
-
-        if option.type == "input":
-            for input_case in option.inputs or []:
-                input_key = f"{option_name}_{input_case.name}"
-                defaults[input_key] = input_case.default or ""
-                value_types[input_key] = "string"
             continue
 
         if option.type == "checkbox":
@@ -303,20 +386,100 @@ def _build_option_defaults(
                 if case.name in selected_values
             ]
             value_types[option_name] = "string_list"
+            continue
+
+        if option.type == "input":
+            input_defaults: dict[str, str] = {}
+            for input_case in option.inputs or []:
+                input_defaults[input_case.name] = input_case.default or ""
+            defaults[option_name] = input_defaults
+            value_types[option_name] = "object"
 
     return defaults, value_types
 
 
-def _build_option_case_name_sets(
-    interface_model: InterfaceModel,
-) -> dict[str, set[str]]:
+def _build_option_case_name_sets(option_map: dict[str, Option]) -> dict[str, set[str]]:
     case_name_sets: dict[str, set[str]] = {}
 
-    for option_name, option in (interface_model.option or {}).items():
+    for option_name, option in option_map.items():
         if option.type in {"select", "scan_select", "switch", "checkbox"}:
             case_name_sets[option_name] = {case.name for case in (option.cases or [])}
 
     return case_name_sets
+
+
+def _normalize_options_for_task(
+    raw_options_for_task: Any,
+    option_map: dict[str, Option],
+    defaults: dict[str, TaskOptionValue],
+    value_types: dict[str, str],
+    case_name_sets: dict[str, set[str]],
+) -> dict[str, TaskOptionValue]:
+    normalized_options = {
+        key: _clone_option_value(value) for key, value in defaults.items()
+    }
+
+    if not isinstance(raw_options_for_task, dict):
+        return normalized_options
+
+    for option_key, option_value in raw_options_for_task.items():
+        if not isinstance(option_key, str) or option_key not in option_map:
+            continue
+
+        expected_type = value_types.get(option_key)
+        if expected_type == "string" and isinstance(option_value, str):
+            allowed_cases = case_name_sets.get(option_key)
+            if allowed_cases is not None and option_value not in allowed_cases:
+                continue
+            normalized_options[option_key] = option_value
+            continue
+
+        if expected_type == "string_list" and isinstance(option_value, list):
+            normalized_items = [item for item in option_value if isinstance(item, str)]
+            allowed_cases = case_name_sets.get(option_key)
+            if allowed_cases is not None:
+                normalized_items = [
+                    item for item in normalized_items if item in allowed_cases
+                ]
+            normalized_options[option_key] = normalized_items
+            continue
+
+        if expected_type == "object" and isinstance(option_value, dict):
+            option = option_map.get(option_key)
+            if option is None or option.type != "input":
+                continue
+
+            existing_value = normalized_options.get(option_key)
+            normalized_input = (
+                {
+                    key: item
+                    for key, item in existing_value.items()
+                    if isinstance(key, str) and isinstance(item, str)
+                }
+                if isinstance(existing_value, dict)
+                else {}
+            )
+
+            for input_case in option.inputs or []:
+                input_value = option_value.get(input_case.name)
+                if isinstance(input_value, str):
+                    normalized_input[input_case.name] = input_value
+
+            normalized_options[option_key] = normalized_input
+
+    return normalized_options
+
+
+def _clone_option_value(value: TaskOptionValue) -> TaskOptionValue:
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, str)]
+    if isinstance(value, dict):
+        return {
+            key: item
+            for key, item in value.items()
+            if isinstance(key, str) and isinstance(item, str)
+        }
+    return value
 
 
 def _apply_preset_option_value(
@@ -332,10 +495,24 @@ def _apply_preset_option_value(
     if option.type == "input":
         if not isinstance(value, dict):
             return
+
+        existing_value = target_options.get(option_name)
+        normalized_input: dict[str, str] = (
+            {
+                key: item
+                for key, item in existing_value.items()
+                if isinstance(key, str) and isinstance(item, str)
+            }
+            if isinstance(existing_value, dict)
+            else {}
+        )
+
         for input_case in option.inputs or []:
             input_value = value.get(input_case.name)
             if isinstance(input_value, str):
-                target_options[f"{option_name}_{input_case.name}"] = input_value
+                normalized_input[input_case.name] = input_value
+
+        target_options[option_name] = normalized_input
         return
 
     if option.type == "checkbox":

@@ -4,7 +4,7 @@ import time
 import traceback
 from typing import TYPE_CHECKING
 
-from models.scheduler import TaskOptionValue
+from models.scheduler import TaskOptionValue, TaskOptionsByTask
 
 if TYPE_CHECKING:
     from maa_utils import MaaWorker
@@ -17,7 +17,7 @@ class TaskService:
     def start(
         self,
         task_list: list[str],
-        options: dict[str, TaskOptionValue],
+        options: TaskOptionsByTask,
         task_name: str | None = None,
     ) -> bool:
         if not self.worker.device_state.connected:
@@ -29,9 +29,31 @@ class TaskService:
         if not self.worker.agents.ensure_started_once():
             return False
 
-        cleaned_options: dict[str, TaskOptionValue] = {}
-        for key, value in options.items():
-            cleaned_options[key] = "" if value is None else value
+        cleaned_options: TaskOptionsByTask = {}
+        for task_id, task_options in options.items():
+            if not isinstance(task_id, str) or not isinstance(task_options, dict):
+                continue
+
+            cleaned_task_options: dict[str, TaskOptionValue] = {}
+            for key, value in task_options.items():
+                if not isinstance(key, str):
+                    continue
+                if value is None:
+                    cleaned_task_options[key] = ""
+                elif isinstance(value, list):
+                    cleaned_task_options[key] = [
+                        item for item in value if isinstance(item, str)
+                    ]
+                elif isinstance(value, dict):
+                    cleaned_task_options[key] = {
+                        input_key: input_value
+                        for input_key, input_value in value.items()
+                        if isinstance(input_key, str) and isinstance(input_value, str)
+                    }
+                else:
+                    cleaned_task_options[key] = value
+
+            cleaned_options[task_id] = cleaned_task_options
 
         state = self.worker.task_state
         if not state.lock.acquire(blocking=False):
@@ -66,7 +88,7 @@ class TaskService:
     def run_process(
         self,
         task_list: list[str],
-        options: dict[str, TaskOptionValue],
+        options: TaskOptionsByTask,
     ):
         state = self.worker.task_state
         try:
@@ -80,7 +102,8 @@ class TaskService:
                     return
 
                 pipeline_override = self.worker.pipeline.build_task_pipeline_override(
-                    task, options
+                    task,
+                    options.get(task, {}),
                 )
                 if pipeline_override:
                     task_result = self.worker.tasker.post_task(task, pipeline_override)

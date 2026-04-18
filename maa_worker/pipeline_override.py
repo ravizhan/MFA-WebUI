@@ -195,11 +195,16 @@ class PipelineOverrideService:
         typed_replacements: dict[str, object] = {}
         text_replacements: dict[str, str] = {}
         for field in option.inputs:
-            raw_value = options.get(f"{option_name}_{field.name}", field.default or "")
-            if isinstance(raw_value, list):
-                raw_text = raw_value[0] if raw_value else ""
-            else:
-                raw_text = str(raw_value)
+            raw_option_value = options.get(option_name)
+            raw_text = field.default or ""
+            if isinstance(raw_option_value, dict):
+                field_value = raw_option_value.get(field.name)
+                if isinstance(field_value, str):
+                    raw_text = field_value
+            elif isinstance(raw_option_value, str):
+                raw_text = raw_option_value
+            elif isinstance(raw_option_value, list):
+                raw_text = raw_option_value[0] if raw_option_value else ""
 
             typed_value, text_value = self._coerce_input_value(
                 raw_text,
