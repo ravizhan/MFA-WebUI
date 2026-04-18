@@ -63,6 +63,9 @@ interface Props {
   tasks: TaskListItem[]
   selectedTasks: string[]
   scrollable?: boolean
+  controllerName?: string | null
+  resourceName?: string | null
+  hideIncompatible?: boolean
 }
 
 interface Emits {
@@ -73,15 +76,72 @@ interface Emits {
 
 const props = withDefaults(defineProps<Props>(), {
   scrollable: false,
+  controllerName: null,
+  resourceName: null,
+  hideIncompatible: false,
 })
 
 const emit = defineEmits<Emits>()
 const { locale } = useI18n()
 const interfaceStore = useInterfaceStore()
 
+function isTaskVisible(taskId: string): boolean {
+  if (!props.hideIncompatible) {
+    return true
+  }
+  return interfaceStore.isTaskCompatibleByEntry(taskId, props.controllerName, props.resourceName)
+}
+
 const taskListData = computed({
-  get: () => props.tasks,
-  set: (value: TaskListItem[]) => emit("update:tasks", value),
+  get: () => props.tasks.filter((task) => isTaskVisible(task.id)),
+  set: (value: TaskListItem[]) => {
+    if (!props.hideIncompatible) {
+      emit("update:tasks", value)
+      return
+    }
+
+    const visibleTaskIds = props.tasks
+      .filter((task) => isTaskVisible(task.id))
+      .map((task) => task.id)
+    const visibleTaskIdSet = new Set(visibleTaskIds)
+
+    const reorderedVisibleTaskIds = value.map((task) => task.id)
+    const reorderedVisibleTaskIdSet = new Set(reorderedVisibleTaskIds)
+    const taskById = new Map(props.tasks.map((task) => [task.id, task]))
+
+    const orderedVisibleTasks: TaskListItem[] = []
+    for (const taskId of reorderedVisibleTaskIds) {
+      if (!visibleTaskIdSet.has(taskId)) {
+        continue
+      }
+      const task = taskById.get(taskId)
+      if (task) {
+        orderedVisibleTasks.push(task)
+      }
+    }
+
+    for (const taskId of visibleTaskIds) {
+      if (reorderedVisibleTaskIdSet.has(taskId)) {
+        continue
+      }
+      const task = taskById.get(taskId)
+      if (task) {
+        orderedVisibleTasks.push(task)
+      }
+    }
+
+    let visibleCursor = 0
+    const mergedTasks = props.tasks.map((task) => {
+      if (!visibleTaskIdSet.has(task.id)) {
+        return task
+      }
+      const visibleTask = orderedVisibleTasks[visibleCursor]
+      visibleCursor += 1
+      return visibleTask || task
+    })
+
+    emit("update:tasks", mergedTasks)
+  },
 })
 
 function resolveTaskLabel(taskId: string, fallback: string) {

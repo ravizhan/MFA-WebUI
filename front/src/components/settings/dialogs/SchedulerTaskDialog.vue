@@ -179,6 +179,19 @@
         </n-form-item>
       </template>
 
+      <n-space class="mb-6" :size="12" :wrap="true" justify="space-evenly">
+        <n-select
+          v-model:value="selectedControllerFilter"
+          :options="controllerFilterOptions"
+          class="min-w-[20rem]"
+        />
+        <n-select
+          v-model:value="selectedResourceFilter"
+          :options="resourceFilterOptions"
+          class="min-w-[20rem]"
+        />
+      </n-space>
+
       <n-tabs v-model:value="activeTab" type="segment" animated>
         <!-- Tab 1: 任务列表 -->
         <n-tab-pane name="task-list" :tab="t('settings.scheduler.dialog.tab.taskList')">
@@ -186,6 +199,9 @@
             <TaskSelectList
               :tasks="taskListData"
               :selected-tasks="formData.task_list"
+              :controller-name="selectedControllerFilter"
+              :resource-name="selectedResourceFilter"
+              :hide-incompatible="true"
               @update:tasks="handleTasksUpdate"
               @update:selected-tasks="handleSelectedTasksUpdate"
               @config="openTaskSettings"
@@ -219,14 +235,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from "vue"
+import { ref, computed, nextTick, watch } from "vue"
 import { useMessage, type FormInst, type FormRules } from "naive-ui"
 import { useI18n } from "vue-i18n"
-import { useSchedulerStore } from "@/stores"
+import {
+  useInterfaceStore,
+  useSchedulerStore,
+  useSettingsStore,
+  useTaskConfigStore,
+} from "@/stores"
 import type { TaskListItem } from "@/types/task-config/model"
-import { useTaskConfigStore } from "@/stores"
 import TaskSelectList from "@/components/panel/task/TaskSelectList.vue"
 import TaskOptionPanel from "@/components/panel/task/TaskOptionPanel.vue"
+import { resolveInterfaceText } from "@/utils/interface/content"
 import type {
   ScheduledTask,
   ScheduledTaskCreate,
@@ -251,15 +272,20 @@ const props = defineProps<Props>()
 const emit = defineEmits<Emits>()
 
 const message = useMessage()
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const schedulerStore = useSchedulerStore()
 const configStore = useTaskConfigStore()
+const interfaceStore = useInterfaceStore()
+const settingsStore = useSettingsStore()
 
 const formRef = ref<FormInst | null>(null)
 const loading = ref(false)
 
 const activeTab = ref<"task-list" | "task-settings">("task-list")
 const currentSettingTaskId = ref<string | null>(null)
+const selectedControllerFilter = ref<string | null>(null)
+const selectedResourceFilter = ref<string | null>(null)
+const suppressFilterSelectionCleanup = ref(false)
 
 const showDialog = computed({
   get: () => props.show,
@@ -268,6 +294,30 @@ const showDialog = computed({
 
 const isEditMode = computed(() => !!props.task)
 const availableTasks = computed(() => configStore.taskList)
+
+const controllerFilterOptions = computed(() =>
+  (interfaceStore.interface?.controller || []).map((controller) => ({
+    label: resolveInterfaceText(
+      interfaceStore.interface,
+      locale.value,
+      controller.label,
+      controller.name,
+    ),
+    value: controller.name,
+  })),
+)
+
+const resourceFilterOptions = computed(() =>
+  (interfaceStore.interface?.resource || []).map((resource) => ({
+    label: resolveInterfaceText(
+      interfaceStore.interface,
+      locale.value,
+      resource.label,
+      resource.name,
+    ),
+    value: resource.name,
+  })),
+)
 
 // 触发器配置的 computed 属性
 const cronConfig = computed(() => formData.value.trigger_config as CronTriggerConfig)
@@ -364,8 +414,49 @@ watch(
   (task) => {
     formData.value = initFormData(task)
     syncTaskListData(formData.value.task_list)
+    resetFilterContext()
   },
 )
+
+watch(
+  () => showDialog.value,
+  (show) => {
+    if (show) {
+      resetFilterContext()
+    }
+  },
+)
+
+watch([selectedControllerFilter, selectedResourceFilter], ([controllerName, resourceName]) => {
+  if (!showDialog.value || suppressFilterSelectionCleanup.value) {
+    return
+  }
+
+  const compatibleTaskIds = formData.value.task_list.filter((taskId) =>
+    interfaceStore.isTaskCompatibleByEntry(taskId, controllerName, resourceName),
+  )
+  const removedCount = formData.value.task_list.length - compatibleTaskIds.length
+  if (removedCount <= 0) {
+    return
+  }
+
+  formData.value.task_list = compatibleTaskIds
+  formData.value.task_options = configStore.buildOptionsForTasks(
+    compatibleTaskIds,
+    formData.value.task_options,
+  )
+
+  if (currentSettingTaskId.value && !compatibleTaskIds.includes(currentSettingTaskId.value)) {
+    currentSettingTaskId.value = null
+    activeTab.value = "task-list"
+  }
+
+  message.warning(
+    t("settings.scheduler.dialog.removedIncompatibleTasks", {
+      count: removedCount,
+    }),
+  )
+})
 
 // 监听可用任务变化，更新可拖拽任务列表
 watch(
@@ -379,8 +470,30 @@ watch(
 function resetForm() {
   formData.value = initFormData()
   syncTaskListData(formData.value.task_list)
+  resetFilterContext()
   currentSettingTaskId.value = null
   activeTab.value = "task-list"
+}
+
+function resetFilterContext() {
+  const availableControllerNames = new Set(
+    (interfaceStore.interface?.controller || []).map((controller) => controller.name),
+  )
+  const availableResourceNames = new Set(
+    (interfaceStore.interface?.resource || []).map((resource) => resource.name),
+  )
+
+  const savedController = settingsStore.settings.panel.lastConnectedDevice?.controller_name || null
+  const savedResource = settingsStore.settings.panel.lastResource || null
+
+  suppressFilterSelectionCleanup.value = true
+  selectedControllerFilter.value =
+    savedController && availableControllerNames.has(savedController) ? savedController : null
+  selectedResourceFilter.value =
+    savedResource && availableResourceNames.has(savedResource) ? savedResource : null
+  void nextTick(() => {
+    suppressFilterSelectionCleanup.value = false
+  })
 }
 
 function syncTaskListData(preferredOrder: string[]) {

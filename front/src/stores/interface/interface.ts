@@ -46,6 +46,34 @@ export const useInterfaceStore = defineStore("interface", {
       return this.interface?.task?.find((task) => task.entry === entry) || null
     },
 
+    isTaskCompatible(
+      task: Task | null,
+      controllerName?: string | null,
+      resourceName?: string | null,
+    ): boolean {
+      if (!task) {
+        return true
+      }
+
+      if (controllerName && task.controller?.length && !task.controller.includes(controllerName)) {
+        return false
+      }
+
+      if (resourceName && task.resource?.length && !task.resource.includes(resourceName)) {
+        return false
+      }
+
+      return true
+    },
+
+    isTaskCompatibleByEntry(
+      entry: string,
+      controllerName?: string | null,
+      resourceName?: string | null,
+    ): boolean {
+      return this.isTaskCompatible(this.getTaskByEntry(entry), controllerName, resourceName)
+    },
+
     getTaskByName(name: string): Task | null {
       return this.interface?.task?.find((task) => task.name === name) || null
     },

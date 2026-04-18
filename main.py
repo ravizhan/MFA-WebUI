@@ -655,6 +655,7 @@ def start(task_execution: TaskExecutionPayload):
             app_state.worker.device_state.last_resource_error
             or app_state.worker.device_state.last_device_error
             or app_state.worker.agent_state.start_error
+            or app_state.worker.task_state.last_error
             or "任务启动失败"
         )
         app_state.send_log(msg)

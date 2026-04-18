@@ -29,6 +29,9 @@
     :tasks="configStore.taskList"
     :selected-task-ids="selectedTaskIds"
     :scroll-show="scrollShow"
+    :controller-name="selectedControllerName"
+    :resource-name="resource"
+    :hide-incompatible="true"
     @update:tasks="handleTasksUpdate"
     @update:selected-tasks="handleSelectedTasksUpdate"
     @config="handleConfigTask"
@@ -56,7 +59,7 @@ import {
   type ConnectableDevice,
   type DeviceControllerCapability,
 } from "@/services/api"
-import { useIndexStore, useSettingsStore, useTaskConfigStore } from "@/stores"
+import { useIndexStore, useInterfaceStore, useSettingsStore, useTaskConfigStore } from "@/stores"
 import type { TaskListItem } from "@/types/task-config/model"
 import type { PanelLastConnectedDevice } from "@/types/settings/model"
 import {
@@ -75,6 +78,7 @@ const dialog = useDialog()
 const { t } = useI18n()
 const configStore = useTaskConfigStore()
 const indexStore = useIndexStore()
+const interfaceStore = useInterfaceStore()
 const settingsStore = useSettingsStore()
 
 if (typeof window !== "undefined") {
@@ -120,6 +124,8 @@ const selectedControllerCapability = computed(() => {
 const selectedControllerDisabled = computed(() =>
   selectedControllerCapability.value ? !selectedControllerCapability.value.enabled : false,
 )
+
+const selectedControllerName = computed(() => selectedControllerCapability.value?.name || null)
 
 const deviceOptions = computed(() => {
   if (availableDevices.value.length === 0) {
@@ -488,11 +494,27 @@ onUnmounted(() => {
 })
 
 function StartTask() {
-  const payload = configStore.buildExecutionPayload(selectedTaskIds.value)
-  if (payload.task_list.length === 0) {
-    message.error(t("panel.selectTask"))
+  const isTaskCompatibleInCurrentContext = (taskId: string) =>
+    interfaceStore.isTaskCompatibleByEntry(taskId, selectedControllerName.value, resource.value)
+
+  const allCompatibleTaskIds = configStore.taskList
+    .map((task) => task.id)
+    .filter((taskId) => isTaskCompatibleInCurrentContext(taskId))
+
+  const compatibleTaskIds = selectedTaskIds.value.filter((taskId) =>
+    isTaskCompatibleInCurrentContext(taskId),
+  )
+
+  if (compatibleTaskIds.length === 0) {
+    if (allCompatibleTaskIds.length === 0) {
+      message.error(t("panel.noCompatibleTask"))
+    } else {
+      message.error(t("panel.selectTask"))
+    }
     return
   }
+
+  const payload = configStore.buildExecutionPayload(compatibleTaskIds)
   startTask(payload)
 }
 

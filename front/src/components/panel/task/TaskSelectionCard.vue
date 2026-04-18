@@ -5,6 +5,9 @@
       :tasks="tasks"
       :selected-tasks="selectedTaskIds"
       :scrollable="scrollShow"
+      :controller-name="controllerName"
+      :resource-name="resourceName"
+      :hide-incompatible="hideIncompatible"
       @update:tasks="(value) => emit('update:tasks', value)"
       @update:selected-tasks="(value) => emit('update:selected-tasks', value)"
       @config="(taskId) => emit('config', taskId)"
@@ -46,6 +49,9 @@ defineProps<{
   tasks: TaskListItem[]
   selectedTaskIds: string[]
   scrollShow: boolean
+  controllerName?: string | null
+  resourceName?: string | null
+  hideIncompatible?: boolean
 }>()
 
 const emit = defineEmits<{
