@@ -12,7 +12,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
-from models.task_config import normalize_task_options_by_task
+from models.task_config import normalize_task_execution_payload
 from models.scheduler import (
     ScheduledTask,
     ScheduledTaskCreate,
@@ -149,46 +149,29 @@ class SchedulerManager:
         else:
             raise ValueError(f"未知的触发器类型: {type(trigger_config)}")
 
-    def _normalize_task_list(self, task_list: Any) -> list[str]:
-        if not isinstance(task_list, list):
-            return []
-
-        valid_task_ids: set[str] | None = None
-        if self._worker and getattr(self._worker, "interface", None):
-            valid_task_ids = {
-                task.entry for task in (self._worker.interface.task or [])
-            }
-
-        normalized_task_list: list[str] = []
-        seen_task_ids: set[str] = set()
-        for task_id in task_list:
-            if not isinstance(task_id, str) or task_id in seen_task_ids:
-                continue
-            if valid_task_ids is not None and task_id not in valid_task_ids:
-                continue
-            normalized_task_list.append(task_id)
-            seen_task_ids.add(task_id)
-
-        return normalized_task_list
-
     def _normalize_task_payload(
         self,
         task_list: Any,
         task_options: Any,
     ) -> tuple[list[str], TaskOptionsByTask]:
-        normalized_task_list = self._normalize_task_list(task_list)
-
         if not self._worker or not getattr(self._worker, "interface", None):
+            normalized_task_list: list[str] = []
+            if isinstance(task_list, list):
+                seen_task_ids: set[str] = set()
+                for task_id in task_list:
+                    if not isinstance(task_id, str) or task_id in seen_task_ids:
+                        continue
+                    normalized_task_list.append(task_id)
+                    seen_task_ids.add(task_id)
             return normalized_task_list, {
                 task_id: {} for task_id in normalized_task_list
             }
 
-        normalized_task_options = normalize_task_options_by_task(
-            task_options if isinstance(task_options, dict) else None,
-            normalized_task_list,
+        return normalize_task_execution_payload(
+            task_list,
+            task_options,
             self._worker.interface,
         )
-        return normalized_task_list, normalized_task_options
 
     async def _execute_task(
         self,

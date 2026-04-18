@@ -68,10 +68,17 @@ const currentTaskName = computed(() => {
 })
 
 const currentTaskOptions = computed(() => {
-  if (!props.currentTaskId) {
+  const taskId = props.currentTaskId
+  if (!taskId) {
     return {}
   }
-  return props.options[props.currentTaskId] || {}
+
+  let optionMap = props.options[taskId]
+  if (!optionMap) {
+    optionMap = {}
+    props.options[taskId] = optionMap
+  }
+  return optionMap
 })
 
 const taskOptions = computed(() => {

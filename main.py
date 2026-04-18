@@ -35,7 +35,7 @@ from models.settings import SettingsModel
 from models.task_config import (
     TaskConfigModel,
     normalize_task_config,
-    normalize_task_options_by_task,
+    normalize_task_execution_payload,
 )
 from scheduler_manager import SchedulerManager
 from services.update_service import (
@@ -636,24 +636,16 @@ def start(task_execution: TaskExecutionPayload):
         msg = "请先连接设备"
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
-    valid_task_ids = {task.entry for task in (interface.task or [])}
-    normalized_task_list: list[str] = []
-    seen_task_ids: set[str] = set()
-    for task_id in task_execution.task_list:
-        if task_id in valid_task_ids and task_id not in seen_task_ids:
-            normalized_task_list.append(task_id)
-            seen_task_ids.add(task_id)
+    normalized_task_list, normalized_task_options = normalize_task_execution_payload(
+        task_execution.task_list,
+        task_execution.task_options,
+        interface,
+    )
 
     if not normalized_task_list:
         msg = "请选择任务"
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
-
-    normalized_task_options = normalize_task_options_by_task(
-        task_execution.task_options,
-        normalized_task_list,
-        interface,
-    )
 
     if not app_state.worker.tasks.start(
         normalized_task_list,

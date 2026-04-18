@@ -152,6 +152,33 @@ def normalize_task_options_by_task(
     return normalized
 
 
+def normalize_task_execution_payload(
+    raw_task_list: Any,
+    raw_task_options: Any,
+    interface_model: InterfaceModel,
+) -> tuple[list[str], TaskOptionsByTask]:
+    valid_task_ids = {task.entry for task in (interface_model.task or [])}
+    normalized_task_list: list[str] = []
+    seen_task_ids: set[str] = set()
+
+    if isinstance(raw_task_list, list):
+        for task_id in raw_task_list:
+            if not isinstance(task_id, str):
+                continue
+            if task_id not in valid_task_ids or task_id in seen_task_ids:
+                continue
+            normalized_task_list.append(task_id)
+            seen_task_ids.add(task_id)
+
+    normalized_task_options = normalize_task_options_by_task(
+        raw_task_options if isinstance(raw_task_options, dict) else None,
+        normalized_task_list,
+        interface_model,
+    )
+
+    return normalized_task_list, normalized_task_options
+
+
 def build_interface_preset_snapshot(
     interface_model: InterfaceModel, preset: Preset
 ) -> TaskPresetSnapshotModel:
