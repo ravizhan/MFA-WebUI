@@ -129,8 +129,6 @@
         "selectStartTime": "Select Start Time",
         "endTime": "End Time",
         "selectEndTime": "Select End Time",
-        "allControllers": "All Controllers",
-        "allResources": "All Resources",
         "currentSetting": "Current Setting: ",
         "selectTaskTip": "Please select a task from the list and click settings button first",
         "saveSuccess": "Saved successfully",

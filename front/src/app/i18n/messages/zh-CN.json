@@ -129,8 +129,6 @@
         "selectStartTime": "选择开始时间",
         "endTime": "结束时间",
         "selectEndTime": "选择结束时间",
-        "allControllers": "全部控制器",
-        "allResources": "全部资源",
         "currentSetting": "当前设置: ",
         "selectTaskTip": "请先在任务列表中选择任务并点击设置按钮",
         "saveSuccess": "保存成功",

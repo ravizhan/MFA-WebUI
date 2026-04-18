@@ -183,13 +183,11 @@
         <n-select
           v-model:value="selectedControllerFilter"
           :options="controllerFilterOptions"
-          :placeholder="t('settings.scheduler.dialog.allControllers')"
           class="min-w-[20rem]"
         />
         <n-select
           v-model:value="selectedResourceFilter"
           :options="resourceFilterOptions"
-          :placeholder="t('settings.scheduler.dialog.allResources')"
           class="min-w-[20rem]"
         />
       </n-space>
