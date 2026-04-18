@@ -238,7 +238,12 @@
 import { ref, computed, nextTick, watch } from "vue"
 import { useMessage, type FormInst, type FormRules } from "naive-ui"
 import { useI18n } from "vue-i18n"
-import { useInterfaceStore, useSchedulerStore, useSettingsStore, useTaskConfigStore } from "@/stores"
+import {
+  useInterfaceStore,
+  useSchedulerStore,
+  useSettingsStore,
+  useTaskConfigStore,
+} from "@/stores"
 import type { TaskListItem } from "@/types/task-config/model"
 import TaskSelectList from "@/components/panel/task/TaskSelectList.vue"
 import TaskOptionPanel from "@/components/panel/task/TaskOptionPanel.vue"

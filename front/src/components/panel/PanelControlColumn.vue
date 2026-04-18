@@ -494,17 +494,23 @@ onUnmounted(() => {
 })
 
 function StartTask() {
-  if (selectedTaskIds.value.length === 0) {
-    message.error(t("panel.selectTask"))
-    return
-  }
+  const isTaskCompatibleInCurrentContext = (taskId: string) =>
+    interfaceStore.isTaskCompatibleByEntry(taskId, selectedControllerName.value, resource.value)
+
+  const allCompatibleTaskIds = configStore.taskList
+    .map((task) => task.id)
+    .filter((taskId) => isTaskCompatibleInCurrentContext(taskId))
 
   const compatibleTaskIds = selectedTaskIds.value.filter((taskId) =>
-    interfaceStore.isTaskCompatibleByEntry(taskId, selectedControllerName.value, resource.value),
+    isTaskCompatibleInCurrentContext(taskId),
   )
 
   if (compatibleTaskIds.length === 0) {
-    message.error(t("panel.noCompatibleTask"))
+    if (allCompatibleTaskIds.length === 0) {
+      message.error(t("panel.noCompatibleTask"))
+    } else {
+      message.error(t("panel.selectTask"))
+    }
     return
   }
 
