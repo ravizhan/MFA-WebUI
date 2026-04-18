@@ -494,15 +494,21 @@ onUnmounted(() => {
 })
 
 function StartTask() {
+  if (selectedTaskIds.value.length === 0) {
+    message.error(t("panel.selectTask"))
+    return
+  }
+
   const compatibleTaskIds = selectedTaskIds.value.filter((taskId) =>
     interfaceStore.isTaskCompatibleByEntry(taskId, selectedControllerName.value, resource.value),
   )
 
-  const payload = configStore.buildExecutionPayload(compatibleTaskIds)
-  if (payload.task_list.length === 0) {
+  if (compatibleTaskIds.length === 0) {
     message.error(t("panel.noCompatibleTask"))
     return
   }
+
+  const payload = configStore.buildExecutionPayload(compatibleTaskIds)
   startTask(payload)
 }
 

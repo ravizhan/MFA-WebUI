@@ -131,6 +131,7 @@
         "selectEndTime": "Select End Time",
         "currentSetting": "Current Setting: ",
         "selectTaskTip": "Please select a task from the list and click settings button first",
+        "removedIncompatibleTasks": "Removed {count} incompatible task(s) after filter change",
         "saveSuccess": "Saved successfully",
         "saveFail": "Save failed",
         "taskRequired": "Please select at least one task",

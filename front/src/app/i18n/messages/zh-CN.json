@@ -131,6 +131,7 @@
         "selectEndTime": "选择结束时间",
         "currentSetting": "当前设置: ",
         "selectTaskTip": "请先在任务列表中选择任务并点击设置按钮",
+        "removedIncompatibleTasks": "筛选条件变更后，已移除 {count} 个不兼容任务",
         "saveSuccess": "保存成功",
         "saveFail": "保存失败",
         "taskRequired": "请选择至少一个任务",

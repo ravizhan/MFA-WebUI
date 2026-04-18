@@ -52,7 +52,7 @@ export const useInterfaceStore = defineStore("interface", {
       resourceName?: string | null,
     ): boolean {
       if (!task) {
-        return false
+        return true
       }
 
       if (controllerName && task.controller?.length && !task.controller.includes(controllerName)) {

@@ -235,7 +235,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from "vue"
+import { ref, computed, nextTick, watch } from "vue"
 import { useMessage, type FormInst, type FormRules } from "naive-ui"
 import { useI18n } from "vue-i18n"
 import { useInterfaceStore, useSchedulerStore, useSettingsStore } from "@/stores"
@@ -281,6 +281,7 @@ const activeTab = ref<"task-list" | "task-settings">("task-list")
 const currentSettingTaskId = ref<string | null>(null)
 const selectedControllerFilter = ref<string | null>(null)
 const selectedResourceFilter = ref<string | null>(null)
+const suppressFilterSelectionCleanup = ref(false)
 
 const showDialog = computed({
   get: () => props.show,
@@ -422,6 +423,37 @@ watch(
   },
 )
 
+watch([selectedControllerFilter, selectedResourceFilter], ([controllerName, resourceName]) => {
+  if (!showDialog.value || suppressFilterSelectionCleanup.value) {
+    return
+  }
+
+  const compatibleTaskIds = formData.value.task_list.filter((taskId) =>
+    interfaceStore.isTaskCompatibleByEntry(taskId, controllerName, resourceName),
+  )
+  const removedCount = formData.value.task_list.length - compatibleTaskIds.length
+  if (removedCount <= 0) {
+    return
+  }
+
+  formData.value.task_list = compatibleTaskIds
+  formData.value.task_options = configStore.buildOptionsForTasks(
+    compatibleTaskIds,
+    formData.value.task_options,
+  )
+
+  if (currentSettingTaskId.value && !compatibleTaskIds.includes(currentSettingTaskId.value)) {
+    currentSettingTaskId.value = null
+    activeTab.value = "task-list"
+  }
+
+  message.warning(
+    t("settings.scheduler.dialog.removedIncompatibleTasks", {
+      count: removedCount,
+    }),
+  )
+})
+
 // 监听可用任务变化，更新可拖拽任务列表
 watch(
   availableTasks,
@@ -450,10 +482,14 @@ function resetFilterContext() {
   const savedController = settingsStore.settings.panel.lastConnectedDevice?.controller_name || null
   const savedResource = settingsStore.settings.panel.lastResource || null
 
+  suppressFilterSelectionCleanup.value = true
   selectedControllerFilter.value =
     savedController && availableControllerNames.has(savedController) ? savedController : null
   selectedResourceFilter.value =
     savedResource && availableResourceNames.has(savedResource) ? savedResource : null
+  void nextTick(() => {
+    suppressFilterSelectionCleanup.value = false
+  })
 }
 
 function syncTaskListData(preferredOrder: string[]) {
