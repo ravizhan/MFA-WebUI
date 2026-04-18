@@ -16,7 +16,7 @@
             v-for="optName in taskOptions"
             :key="optName"
             :name="optName"
-            :options="options"
+            :task-options="currentTaskOptions"
           />
         </n-list>
         <n-empty v-else :description="noOptionsText" />
@@ -29,7 +29,7 @@
 import { computed } from "vue"
 import { useI18n } from "vue-i18n"
 import { useInterfaceStore } from "@/stores"
-import type { TaskOptionValue } from "@/types/scheduler/model"
+import type { TaskOptionsByTask } from "@/types/scheduler/model"
 import OptionItem from "@/components/panel/task/OptionItem.vue"
 import { resolveInterfaceText } from "@/utils/interface/content"
 
@@ -37,7 +37,7 @@ interface Props {
   /** 当前配置的任务ID */
   currentTaskId: string | null
   /** 选项数据 */
-  options: Record<string, TaskOptionValue>
+  options: TaskOptionsByTask
   /** 是否显示头部 */
   showHeader?: boolean
   /** 头部标签前缀 */
@@ -65,6 +65,13 @@ const currentTaskName = computed(() => {
   if (!props.currentTaskId) return ""
   const task = interfaceStore.getTaskByEntry(props.currentTaskId)
   return resolveInterfaceText(interfaceStore.interface, locale.value, task?.label, task?.name || "")
+})
+
+const currentTaskOptions = computed(() => {
+  if (!props.currentTaskId) {
+    return {}
+  }
+  return props.options[props.currentTaskId] || {}
 })
 
 const taskOptions = computed(() => {

@@ -12,7 +12,7 @@
               :checked-value="checkedValue"
               :unchecked-value="uncheckedValue"
               :round="false"
-              v-model:value="options[name]"
+              v-model:value="taskOptions[name]"
             />
           </template>
 
@@ -20,13 +20,13 @@
             <n-select
               class="w-full max-w-xs"
               :options="selectOptions"
-              v-model:value="options[name]"
+              v-model:value="taskOptions[name]"
             />
           </template>
 
           <template v-else-if="option.type === 'scan_select'">
             <div class="flex w-full max-w-xs items-center gap-2">
-              <n-select class="flex-1" :options="selectOptions" v-model:value="options[name]" />
+              <n-select class="flex-1" :options="selectOptions" v-model:value="taskOptions[name]" />
               <n-button
                 circle
                 quaternary
@@ -51,7 +51,8 @@
                   resolveInputLabel(input.label, input.name)
                 }}</span>
                 <n-input
-                  v-model:value="options[`${name}_${input.name}`]"
+                  :value="getInputValue(input.name)"
+                  @update:value="(v: string) => setInputValue(input.name, v)"
                   :allow-input="(v: string) => handleAllowInput(v, input.verify, input.pattern_msg)"
                 />
               </div>
@@ -80,7 +81,7 @@
         :key="childName"
         :name="childName"
         :level="(level || 0) + 1"
-        :options="options"
+        :task-options="taskOptions"
       />
     </template>
   </template>
@@ -88,24 +89,22 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from "vue"
-import { storeToRefs } from "pinia"
 import { useMessage } from "naive-ui"
 import { useI18n } from "vue-i18n"
-import { useInterfaceStore, useTaskConfigStore } from "@/stores"
+import { useInterfaceStore } from "@/stores"
 import type { TaskOptionValue } from "@/types/scheduler/model"
 import { resolveInterfaceText } from "@/utils/interface/content"
 
 const props = defineProps<{
   name: string
   level?: number
-  options?: Record<string, TaskOptionValue>
+  taskOptions: Record<string, TaskOptionValue>
 }>()
 
 const message = useMessage()
 const { locale } = useI18n()
 const interfaceStore = useInterfaceStore()
-const configStore = useTaskConfigStore()
-const options = props.options ? computed(() => props.options!) : storeToRefs(configStore).options
+const taskOptions = computed(() => props.taskOptions)
 
 const option = computed(() => interfaceStore.interface?.option?.[props.name])
 const resolvedLabel = computed(() =>
@@ -141,19 +140,39 @@ function resolveInputLabel(label: string | undefined, fallback: string) {
   return resolveInterfaceText(interfaceStore.interface, locale.value, label, fallback)
 }
 
+function getInputValue(inputName: string): string {
+  const currentValue = taskOptions.value[props.name]
+  if (currentValue && typeof currentValue === "object" && !Array.isArray(currentValue)) {
+    const inputValue = currentValue[inputName]
+    return typeof inputValue === "string" ? inputValue : ""
+  }
+  return ""
+}
+
+function setInputValue(inputName: string, value: string): void {
+  const currentValue = taskOptions.value[props.name]
+  const nextValue: Record<string, string> =
+    currentValue && typeof currentValue === "object" && !Array.isArray(currentValue)
+      ? { ...currentValue }
+      : {}
+
+  nextValue[inputName] = value
+  taskOptions.value[props.name] = nextValue
+}
+
 async function handleRescanScanSelect() {
   const currentOption = option.value
   if (!currentOption || currentOption.type !== "scan_select") {
     return
   }
 
-  const previousValue = options.value[props.name]
+  const previousValue = taskOptions.value[props.name]
   scanSelectRefreshing.value = true
   try {
-    options.value[props.name] = null as never
+    taskOptions.value[props.name] = null as never
     await interfaceStore.rescanScanSelectOption(props.name)
   } catch (error) {
-    options.value[props.name] = previousValue
+    taskOptions.value[props.name] = previousValue
     if (error instanceof Error && error.message) {
       message.error(error.message)
     }
@@ -190,7 +209,7 @@ const checkboxValue = computed<string[]>({
     }
 
     return normalizeCheckboxValue(
-      options.value[props.name],
+      taskOptions.value[props.name],
       currentOption.cases.map((item) => item.name),
     )
   },
@@ -200,7 +219,7 @@ const checkboxValue = computed<string[]>({
       return
     }
 
-    options.value[props.name] = normalizeCheckboxValue(
+    taskOptions.value[props.name] = normalizeCheckboxValue(
       value,
       currentOption.cases.map((item) => item.name),
     )
@@ -224,7 +243,7 @@ const isSelectValueInvalid = computed(() => {
     return false
   }
 
-  const currentValue = options.value[props.name]
+  const currentValue = taskOptions.value[props.name]
   if (currentValue == null || typeof currentValue !== "string") {
     return false
   }
@@ -236,7 +255,7 @@ watch(
   () => isSelectValueInvalid.value,
   (invalid) => {
     if (invalid) {
-      options.value[props.name] = null as never
+      taskOptions.value[props.name] = null as never
     }
   },
   { immediate: true },
@@ -245,7 +264,7 @@ watch(
 const nestedOptions = computed(() => {
   const currentOption = option.value
   if (!currentOption) return []
-  const currentValue = options.value[props.name]
+  const currentValue = taskOptions.value[props.name]
 
   if (currentOption.type === "switch") {
     const activeCase = currentOption.cases.find((caseItem) => caseItem.name === currentValue)
@@ -260,7 +279,7 @@ const nestedOptions = computed(() => {
   if (currentOption.type === "checkbox") {
     const activeNames = new Set(
       normalizeCheckboxValue(
-        options.value[props.name],
+        taskOptions.value[props.name],
         currentOption.cases.map((item) => item.name),
       ),
     )

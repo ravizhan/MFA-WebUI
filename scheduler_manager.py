@@ -3,7 +3,7 @@ import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Dict, Literal
+from typing import Any, Optional, List, Literal
 
 import aiosqlite
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
@@ -12,12 +12,13 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
+from models.task_config import normalize_task_options_by_task
 from models.scheduler import (
     ScheduledTask,
     ScheduledTaskCreate,
     ScheduledTaskUpdate,
     TaskExecution,
-    TaskOptionValue,
+    TaskOptionsByTask,
     TriggerConfig,
     CronTriggerConfig,
     DateTriggerConfig,
@@ -34,7 +35,7 @@ async def execute_scheduled_task(
     task_name: str,
     task_description: str,
     task_list: List[str],
-    task_options: Dict[str, TaskOptionValue],
+    task_options: TaskOptionsByTask,
 ):
     """APScheduler 可持久化执行入口"""
     if _ACTIVE_MANAGER is None:
@@ -148,13 +149,54 @@ class SchedulerManager:
         else:
             raise ValueError(f"未知的触发器类型: {type(trigger_config)}")
 
+    def _normalize_task_list(self, task_list: Any) -> list[str]:
+        if not isinstance(task_list, list):
+            return []
+
+        valid_task_ids: set[str] | None = None
+        if self._worker and getattr(self._worker, "interface", None):
+            valid_task_ids = {
+                task.entry for task in (self._worker.interface.task or [])
+            }
+
+        normalized_task_list: list[str] = []
+        seen_task_ids: set[str] = set()
+        for task_id in task_list:
+            if not isinstance(task_id, str) or task_id in seen_task_ids:
+                continue
+            if valid_task_ids is not None and task_id not in valid_task_ids:
+                continue
+            normalized_task_list.append(task_id)
+            seen_task_ids.add(task_id)
+
+        return normalized_task_list
+
+    def _normalize_task_payload(
+        self,
+        task_list: Any,
+        task_options: Any,
+    ) -> tuple[list[str], TaskOptionsByTask]:
+        normalized_task_list = self._normalize_task_list(task_list)
+
+        if not self._worker or not getattr(self._worker, "interface", None):
+            return normalized_task_list, {
+                task_id: {} for task_id in normalized_task_list
+            }
+
+        normalized_task_options = normalize_task_options_by_task(
+            task_options if isinstance(task_options, dict) else None,
+            normalized_task_list,
+            self._worker.interface,
+        )
+        return normalized_task_list, normalized_task_options
+
     async def _execute_task(
         self,
         task_id: str,
         task_name: str,
         _task_description: str,
         task_list: List[str],
-        task_options: Dict[str, TaskOptionValue],
+        task_options: TaskOptionsByTask,
     ):
         """执行定时任务"""
         logger.info(f"开始执行定时任务: {task_id}")
@@ -189,9 +231,25 @@ class SchedulerManager:
                 )
                 return
 
+            normalized_task_list, normalized_task_options = (
+                self._normalize_task_payload(
+                    task_list,
+                    task_options,
+                )
+            )
+            if not normalized_task_list:
+                await self._update_execution_status(
+                    execution_id,
+                    "failed",
+                    "任务列表为空",
+                )
+                return
+
             # 启动任务
             if not self._worker.tasks.start(
-                task_list, task_options, task_name=task_name
+                normalized_task_list,
+                normalized_task_options,
+                task_name=task_name,
             ):
                 logger.warning(f"任务已在运行，跳过定时任务 {task_id}")
                 await self._update_execution_status(
@@ -343,6 +401,12 @@ class SchedulerManager:
 
         task_id = str(uuid.uuid4())
         trigger = self._create_trigger(task_create.trigger_config)
+        normalized_task_list, normalized_task_options = self._normalize_task_payload(
+            task_create.task_list,
+            task_create.task_options,
+        )
+        if not normalized_task_list:
+            raise ValueError("任务列表不能为空")
 
         # 添加任务到调度器，存储完整的任务信息
         self.scheduler.add_job(
@@ -353,8 +417,8 @@ class SchedulerManager:
                 "task_id": task_id,
                 "task_name": task_create.name,
                 "task_description": task_create.description or "",
-                "task_list": task_create.task_list,
-                "task_options": task_create.task_options,
+                "task_list": normalized_task_list,
+                "task_options": normalized_task_options,
             },
         )
 
@@ -374,8 +438,8 @@ class SchedulerManager:
             enabled=task_create.enabled,
             trigger_type=task_create.trigger_type,
             trigger_config=task_create.trigger_config,
-            task_list=task_create.task_list,
-            task_options=task_create.task_options,
+            task_list=normalized_task_list,
+            task_options=normalized_task_options,
             next_run_time=next_run_time,
         )
 
@@ -393,8 +457,10 @@ class SchedulerManager:
         # 从 kwargs 中获取任务信息
         task_name = job.kwargs.get("task_name", "")
         task_description = job.kwargs.get("task_description", "")
-        task_list = job.kwargs.get("task_list", [])
-        task_options = job.kwargs.get("task_options", {})
+        task_list, task_options = self._normalize_task_payload(
+            job.kwargs.get("task_list", []),
+            job.kwargs.get("task_options", {}),
+        )
         trigger_type: Literal["cron", "date", "interval"]
 
         try:
@@ -426,8 +492,10 @@ class SchedulerManager:
         for job in jobs:
             task_name = job.kwargs.get("task_name", "")
             task_description = job.kwargs.get("task_description", "")
-            task_list = job.kwargs.get("task_list", [])
-            task_options = job.kwargs.get("task_options", {})
+            task_list, task_options = self._normalize_task_payload(
+                job.kwargs.get("task_list", []),
+                job.kwargs.get("task_options", {}),
+            )
             trigger_type: Literal["cron", "date", "interval"]
 
             try:
@@ -497,6 +565,14 @@ class SchedulerManager:
                 if task_update.task_options is not None
                 else current_kwargs.get("task_options", {})
             )
+            normalized_task_list, normalized_task_options = (
+                self._normalize_task_payload(
+                    new_task_list,
+                    new_options,
+                )
+            )
+            if not normalized_task_list:
+                raise ValueError("任务列表不能为空")
 
             new_trigger_config = (
                 task_update.trigger_config
@@ -515,8 +591,8 @@ class SchedulerManager:
                     "task_id": task_id,
                     "task_name": new_name,
                     "task_description": new_description,
-                    "task_list": new_task_list,
-                    "task_options": new_options,
+                    "task_list": normalized_task_list,
+                    "task_options": normalized_task_options,
                 },
             )
 
