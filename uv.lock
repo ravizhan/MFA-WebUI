@@ -209,7 +209,7 @@ wheels = [
 
 [[package]]
 name = "maafw"
-version = "5.10.1"
+version = "5.10.2"
 source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple/" }
 dependencies = [
     { name = "maaagentbinary" },
@@ -217,12 +217,12 @@ dependencies = [
     { name = "strenum" },
 ]
 wheels = [
-    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/f6/b2/2fc4148bae91856ea0b063f2d5f5bf0e3e9cade8515fc606dff5cc908722/maafw-5.10.1-py3-none-macosx_13_0_arm64.whl", hash = "sha256:15dfa04f0278b92af7d237e5f51c86acfc7d10d8540afdcab09b9fa63c759a87", size = 16056044, upload-time = "2026-04-13T10:23:31.616Z" },
-    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/9f/9b/f8a73843d894f2a2e073a89bb1c95aa1eed81818e8f6093962366a69cbc8/maafw-5.10.1-py3-none-macosx_13_0_x86_64.whl", hash = "sha256:a25d111d3ec3b6da6b60885c421c6ac664309dcf917f9cb5f23df81848b8a3f8", size = 18089856, upload-time = "2026-04-13T10:23:34.317Z" },
-    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/10/c5/d084fc3135b5ae3c2e38417200b3f559150de393e1d16fc20878a0573df4/maafw-5.10.1-py3-none-manylinux2014_aarch64.whl", hash = "sha256:736aae5f4bf5d10c36567c026e3e619ed049fd309a7d3dbaaa6fec6ef536cfde", size = 16580677, upload-time = "2026-04-13T10:23:37.364Z" },
-    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/c3/15/aa5f1c33e2a9f9cc8b80d8ee274342981530945c2d22bc96918aa83497ae/maafw-5.10.1-py3-none-manylinux2014_x86_64.whl", hash = "sha256:df2cc9cb19ff28d0eee94cf8bbf53ee5244cd7dd4171088721db5c848b0ca2ee", size = 18503493, upload-time = "2026-04-13T10:23:40.197Z" },
-    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/f5/28/a492eaf50d1e398d3e88aa13c5b2eaadc4b09ea0185f54b549ba1b6cb670/maafw-5.10.1-py3-none-win_amd64.whl", hash = "sha256:006b1c997698b58ce36e8454da2ad97d8ff5e0c90a4407948707cc51ee6b7b16", size = 24926314, upload-time = "2026-04-13T10:23:43.644Z" },
-    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/b6/a5/14fea0989eec5d7b2f14ced53f08ddd5980806ed5dfd140b37bd687af2b0/maafw-5.10.1-py3-none-win_arm64.whl", hash = "sha256:11d8d565e0a903ba79cf7e22a03c053bdf5b6493579769735b5111bd5716c067", size = 23798205, upload-time = "2026-04-13T10:23:47.505Z" },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/6e/8c/126bd16d3d47775c6342cb0d7345c9cdb38d4fa4c58220ca1259d12155bf/maafw-5.10.2-py3-none-macosx_13_0_arm64.whl", hash = "sha256:6e9d313479c150b754a0b02390b2ba9b87e8ba2e38dcccb3106c3cace7a4b1b5", size = 16057357, upload-time = "2026-04-17T15:50:48.214Z" },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/fd/41/f89e70fb864ba721ada0dc7f8a71bdbfa37beafcfec1ce4c665cdeaeccfc/maafw-5.10.2-py3-none-macosx_13_0_x86_64.whl", hash = "sha256:e0b9324def37bfc64749ecac702b61b793a97bbae9178cd7bff4852e5965a3ac", size = 18092359, upload-time = "2026-04-17T15:50:51.321Z" },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/d1/76/3f7e487c91f431dbfd8fd9d689965f7bb5598b782762b1d51a8ed9d28a97/maafw-5.10.2-py3-none-manylinux2014_aarch64.whl", hash = "sha256:d1e7ff9ae4333c8e40da52525b16d5e9a5577bea323a6715a3dfd3877f711c3a", size = 16585253, upload-time = "2026-04-17T15:50:54.369Z" },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/b8/30/dd0896046cb6a9aaaf06c2f6468597ee9e4dd83337f39f7e0b5584e8837b/maafw-5.10.2-py3-none-manylinux2014_x86_64.whl", hash = "sha256:5b1cdebca5566091a42a418aebcedbe965864115887e1048d128c747f612daf4", size = 18508167, upload-time = "2026-04-17T15:50:56.71Z" },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/75/0a/5e576c5f113bb0e1fbaa3deade4dd889c06a0e6501383ebd024f8cb50020/maafw-5.10.2-py3-none-win_amd64.whl", hash = "sha256:7048feb2f95f871b9dc344ec2dc002b75c40e1646936c6ccab9b4af16f44d43e", size = 24926540, upload-time = "2026-04-17T15:50:59.563Z" },
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/e3/cb/fedeaaec5926d6c162457b7434a003b74f6b9211ccd667b880f2d298f74c/maafw-5.10.2-py3-none-win_arm64.whl", hash = "sha256:09e7c4ea5daddcab79b61d06d7ff2ea3fb526eeb2a0ddee9d0b7d22527f91a8b", size = 23798080, upload-time = "2026-04-17T15:51:02.445Z" },
 ]
 
 [[package]]
@@ -252,7 +252,7 @@ requires-dist = [
     { name = "apscheduler", specifier = ">=3.11.2" },
     { name = "fastapi", specifier = ">=0.135.3" },
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "maafw", specifier = ">=5.10.1" },
+    { name = "maafw", specifier = ">=5.10.2" },
     { name = "nuitka", extras = ["all"], specifier = ">=4.0.8" },
     { name = "numpy", specifier = ">=2.3.5" },
     { name = "pillow", specifier = ">=12.2.0" },
