@@ -251,6 +251,7 @@ class Agent(BaseModel):
     child_exec: str
     child_args: Optional[List[str]] = None
     identifier: Optional[str] = None
+    embedded: Optional[bool] = True
 
 
 class Task(BaseModel):

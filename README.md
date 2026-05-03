@@ -57,11 +57,11 @@ _✨ 基于 **[Vue](https://github.com/vuejs/vue)** 和 **[FastAPI](https://gith
 
 ### ⚙️ 配置清单
 
-| 配置         | 默认值                  | 修改方法                                                     |
-| ------------ | ----------------------- | ------------------------------------------------------------ |
+| 配置         | 默认值                  | 修改方法                                                                                                                                                   |
+| ------------ | ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 压缩包名     | 仓库名-版本号-平台-架构 | [deploy/install.yml#L170](https://github.com/ravizhan/MWU/blob/baeec32ecc5db8ea6390ceb5575d73e2d2754ba6/deploy/install.yml#L170)，注意下方各处也要一并修改 |
-| 可执行文件名 | MWU               | 暂不可修改                                                   |
-| LOGO         |                         | 暂不可修改                                                   |
+| 可执行文件名 | MWU                     | 暂不可修改                                                                                                                                                 |
+| LOGO         |                         | 暂不可修改                                                                                                                                                 |
 
 ### 📁 路径规范
 
@@ -100,10 +100,9 @@ _✨ 基于 **[Vue](https://github.com/vuejs/vue)** 和 **[FastAPI](https://gith
 
 传统的运行方式。MWU 会通过 `subprocess`，根据 `child_exec` 和 `child_arg` 的配置启动一个独立的子进程作为 Agent Server。
 
-- **使用建议**：如果您的 Agent Server 基于 Python 编写且不希望使用“黑魔法”模式，请确保 `agent.child_exec` 中**不包含** `python` 字样，并需自行调整 CI 流程以在压缩包内准备独立的 Python 环境。
+- **使用建议**：如果您的 Agent Server 基于 Python 编写且不希望使用“黑魔法”模式，请确保 `agent.child_exec` 中**不包含** `python` 字样 或 设置`agent.embedded`为`False`，并需自行调整 CI 流程以在压缩包内准备独立的 Python 环境。
 
 > **推荐建议**：优先使用**动态加载（黑魔法）**模式。若遇到无法解决的兼容性问题，请尝试切换为**外挂进程**模式并向本项目提交 Issue。
-
 
 ### 📦 额外拓展功能
 
@@ -113,16 +112,16 @@ _✨ 基于 **[Vue](https://github.com/vuejs/vue)** 和 **[FastAPI](https://gith
 
 字段定义如下：
 
-| 字段 | 类型 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `type` | `"scan_select"` | 是 | 选项类型 |
-| `label` | `string` | 否 | 前端显示名称 |
-| `description` | `string` | 否 | 描述信息 |
-| `scan_dir` | `string` | 是 | 扫描目录，路径基于软件根目录解析 |
-| `scan_filter` | `string` | 是 | `glob pattern`，用于筛选文件，如 `**/*.json` |
-| `pipeline_override` | `object` | 是 | 任务执行时使用的覆盖配置，必须在任意层级的 `attach` 中至少包含一次当前选项名键（如 `attach.bbc_team_config`） |
-| `cases` | `OptionCase[]` | 否（配置阶段应省略或空数组） | 加载时自动生成，`name`/`label` 均为相对 `scan_dir` 的路径+文件名 |
-| `default_case` | `string` | 否 | 默认选项名称 |
+| 字段                | 类型            | 必填                         | 说明                                                                                                          |
+| ------------------- | --------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `type`              | `"scan_select"` | 是                           | 选项类型                                                                                                      |
+| `label`             | `string`        | 否                           | 前端显示名称                                                                                                  |
+| `description`       | `string`        | 否                           | 描述信息                                                                                                      |
+| `scan_dir`          | `string`        | 是                           | 扫描目录，路径基于软件根目录解析                                                                              |
+| `scan_filter`       | `string`        | 是                           | `glob pattern`，用于筛选文件，如 `**/*.json`                                                                  |
+| `pipeline_override` | `object`        | 是                           | 任务执行时使用的覆盖配置，必须在任意层级的 `attach` 中至少包含一次当前选项名键（如 `attach.bbc_team_config`） |
+| `cases`             | `OptionCase[]`  | 否（配置阶段应省略或空数组） | 加载时自动生成，`name`/`label` 均为相对 `scan_dir` 的路径+文件名                                              |
+| `default_case`      | `string`        | 否                           | 默认选项名称                                                                                                  |
 
 示例：
 
@@ -150,6 +149,7 @@ _✨ 基于 **[Vue](https://github.com/vuejs/vue)** 和 **[FastAPI](https://gith
 ```
 
 加载完成且用户选择 `1.json`：
+
 > 该结果仅在内存中保留，不会实际修改 interface.json
 
 ```json
@@ -186,6 +186,50 @@ _✨ 基于 **[Vue](https://github.com/vuejs/vue)** 和 **[FastAPI](https://gith
 `scan_select` 会递归遍历 `pipeline_override`，并对所有命中的 `attach.option_name` 赋值。
 例如在 `队伍配置1` 和 `队伍配置2` 下都存在 `attach.bbc_team_config` 时，两处都会被写入同一个用户选择结果。
 
+#### agent 黑魔法模式
+
+`interface.json` 的 `agent` 配置中新增了 `embedded` 可选字段，默认值为 `true`。该字段与 `child_exec` 共同决定 Agent 的运行模式：
+
+- **启用黑魔法**：`embedded` 为 `true`（默认）**且** `child_exec` 包含 `python` 字样。
+- **禁用黑魔法**：`embedded` 为 `false`，**或** `child_exec` 不含 `python` 字样。
+
+示例：
+
+**启用黑魔法**（`embedded` 未显式设置，默认 `true`；`child_exec` 含 `python`）
+
+```json
+{
+  "agent": {
+    "child_exec": "python/python.exe",
+    "child_args": ["-u", "agent/main.py"]
+  }
+}
+```
+
+**禁用黑魔法**（显式设置 `embedded` 为 `false`）
+
+```json
+{
+  "agent": {
+    "child_exec": "python/python.exe",
+    "child_args": ["-u", "agent/main.py"],
+    "embedded": false
+  }
+}
+```
+
+**禁用黑魔法**（`child_exec` 不含 `python` 字样）
+
+```json
+{
+  "agent": {
+    "child_exec": "py/py.exe",
+    "child_args": ["-u", "agent/main.py"],
+    "embedded": true
+  }
+}
+```
+
 ## 🏗️ 项目架构与开发
 
 > **如果您需要更多的定制化功能或想为本项目做出贡献，请阅读以下部分**
@@ -220,7 +264,7 @@ uv run main.py  # 启动 FastAPI 服务
 
 #### 🧪 项目构建
 
-``` bash
+```bash
 cd front && pnpm run build   # 前端构建
 cd updater && go build       # 更新器构建
 uv run python -m nuitka --standalone --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --output-dir=build --include-package=PIL --include-package=maa -o MWU main.py # 后端构建
@@ -463,7 +507,6 @@ class MyCustomAction(CustomAction):
 
 - **[NaiveUI](https://github.com/tusen-ai/naive-ui)**\
   A Vue 3 Component Library. Fairly Complete. Theme Customizable. Uses TypeScript. Fast.
-  
 - **[FastAPI](https://github.com/fastapi/fastapi)**\
   FastAPI framework, high performance, easy to learn, fast to code, ready for production
 
@@ -472,19 +515,14 @@ class MyCustomAction(CustomAction):
 
 - **[Vite](https://github.com/vitejs/vite)**\
   Next Generation Frontend Tooling. It's fast!
-  
 - **[MaaFramework](https://github.com/MaaAssistantArknights/MaaFramework)**\
   基于图像识别的自动化黑盒测试框架。
-  
 - **[VueDraggablePlus](https://github.com/Alfred-Skyblue/vue-draggable-plus)**\
   支持 Vue2 和 Vue3 的拖拽组件
-  
 - **[Plyer](https://github.com/kivy/plyer)**\
   Plyer is a platform-independent Python wrapper for platform-dependent APIs
-  
 - **[marked](https://github.com/markedjs/marked)**\
   A markdown parser and compiler. Built for speed.
-  
 - **[tailwindcss](https://github.com/tailwindlabs/tailwindcss)**\
   A utility-first CSS framework for rapid UI development.
 
