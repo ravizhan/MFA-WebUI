@@ -128,7 +128,11 @@ async def lifespan(app: FastAPI):
     app_state.broadcaster = LogBroadcaster()
     with SETTINGS_FILE.open("r", encoding="utf-8") as f:
         config_data = json.load(f)
-    app_state.settings = SettingsModel(**config_data)
+    with interface_lock:
+        app_state.settings = SettingsModel.model_validate(
+            config_data,
+            context={"interface": interface},
+        )
     # 初始化调度器
     app_state.scheduler_manager = SchedulerManager()
     app_state.scheduler_manager.set_worker(app_state.worker)
@@ -343,7 +347,11 @@ async def set_resource(name: str):
 def get_settings():
     with SETTINGS_FILE.open("r", encoding="utf-8") as f:
         config_data = json.load(f)
-    app_state.settings = SettingsModel(**config_data)
+    with interface_lock:
+        app_state.settings = SettingsModel.model_validate(
+            config_data,
+            context={"interface": interface},
+        )
     return {"status": "success", "settings": app_state.settings.model_dump()}
 
 

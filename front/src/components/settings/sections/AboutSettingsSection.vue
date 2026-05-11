@@ -5,7 +5,20 @@
         {{ settings.about.version || t("common.unknown") }}
       </n-descriptions-item>
       <n-descriptions-item :label="t('settings.about.author')">
-        {{ settings.about.author || t("common.unknown") }}
+        <n-button
+          v-if="settings.about.author"
+          text
+          tag="a"
+          :href="`https://github.com/${settings.about.author}`"
+          target="_blank"
+          type="primary"
+        >
+          <template #icon>
+            <n-icon><div class="i-mdi-github" /></n-icon>
+          </template>
+          {{ settings.about.author }}
+        </n-button>
+        <span v-else>{{ t("common.unknown") }}</span>
       </n-descriptions-item>
       <n-descriptions-item :label="t('settings.about.license')">
         {{ settings.about.license || "MIT" }}
