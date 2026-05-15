@@ -103,8 +103,10 @@ jobs:
           fail-on-cache-miss: true
 
       - name: Setup ccache
-        if: ${{ matrix.platform != 'win' }}
-        uses: Chocobo1/setup-ccache-action@v1
+        if: ${{ matrix.platform == 'linux' }}
+        shell: bash
+        run: |
+          sudo apt-get install -y ccache
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7.5.0
@@ -138,17 +140,21 @@ jobs:
           restore-keys: |
             nuitka-${{ runner.os }}-${{ runner.arch }}-
 
+      - name: Cache Debug
+        shell: bash
+        run: ls -la ${{ env.NUITKA_CACHE_DIR }}
+
       - name: Build Executable
         if: ${{ matrix.os == 'windows-11-arm' || matrix.os == 'windows-2025' }}
-        run: uv run python -m nuitka --standalone --lto=no --windows-icon-from-ico=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --output-dir=build --include-package=PIL --include-package=maa -o MWU main.py
+        run: uv run python -m nuitka --standalone --lto=yes --windows-icon-from-ico=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --output-dir=build --include-package=PIL --include-package=maa -o MWU main.py
 
       - name: Build Executable
         if: ${{ matrix.platform == 'linux' }}
-        run: uv run python -m nuitka --standalone --lto=no --linux-icon=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --output-dir=build --include-package=PIL --include-package=maa -o MWU main.py
+        run: uv run python -m nuitka --standalone --lto=yes --linux-icon=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --output-dir=build --include-package=PIL --include-package=maa -o MWU main.py
 
       - name: Build Executable
         if: ${{ matrix.platform == 'macos' }}
-        run: uv run python -m nuitka --standalone --lto=no --macos-app-icon=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --output-dir=build --include-package=PIL --include-package=maa -o MWU main.py
+        run: uv run python -m nuitka --standalone --lto=yes --macos-app-icon=logo.jpg --assume-yes-for-downloads --user-package-configuration-file=nuitka-package.config.yml --output-dir=build --include-package=PIL --include-package=maa -o MWU main.py
 
       - name: Build Updater
         if: ${{ matrix.platform != 'win' }}
