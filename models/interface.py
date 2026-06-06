@@ -245,6 +245,7 @@ class Resource(BaseModel):
     path: List[str]
     controller: Optional[List[str]] = None
     option: Optional[List[str]] = None
+    hash: Optional[str] = None
 
 
 class Agent(BaseModel):

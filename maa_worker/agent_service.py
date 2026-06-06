@@ -8,7 +8,7 @@ if TYPE_CHECKING:
     from maa_utils import MaaWorker
 
 
-PI_INTERFACE_VERSION = "v2.5.0"
+PI_INTERFACE_VERSION = "v2.6.0"
 PI_CLIENT_LANGUAGE = "zh_cn"
 
 

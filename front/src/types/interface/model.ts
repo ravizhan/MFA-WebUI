@@ -90,6 +90,7 @@ export interface Resource {
   path: string[]
   controller?: string[]
   option?: string[]
+  hash?: string
 }
 
 export interface Agent {

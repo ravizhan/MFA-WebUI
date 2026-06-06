@@ -403,6 +403,15 @@ class DeviceService:
             loaded_paths = [
                 self._load_resource_bundle(path) for path in resource_config.path
             ]
+
+            if (
+                resource_config.hash
+                and resource_config.hash != self.worker.resource.hash
+            ):
+                self.worker.events.send_log(
+                    f"资源包校验值不匹配，建议重新下载资源包: {resource_config.name}"
+                )
+
             state.current_resource_name = resource_config.name
             controller = self.get_controller_definition(state.controller_name)
             attached_paths = self._append_controller_resource_paths(controller)
