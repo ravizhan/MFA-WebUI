@@ -18,6 +18,7 @@ from maa_worker.runtime import (
     TaskRuntimeState,
     WorkerContext,
 )
+from maa_worker.sink_service import SinkHandler, SinkService
 from maa_worker.task_service import TaskService
 from models.interface import InterfaceModel
 
@@ -51,6 +52,10 @@ class MaaWorker:
         self.agents = AgentService(self)
         self.tasks = TaskService(self)
 
+        self._sink_handler = SinkHandler(self)
+        self.sinks = SinkService(self._sink_handler)
+        self.sinks.register_all(self.resource, self.tasker)
+
         self.events.send_log("MAA初始化成功")
 
     def get_screencap_bytes(self):
@@ -71,6 +76,11 @@ class MaaWorker:
         return None
 
     def shutdown(self):
+        self.sinks.unregister_all(
+            self.resource,
+            self.tasker,
+            controller=self.device_state.controller,
+        )
         if self.agent_state.agent_client is not None:
             self.agent_state.agent_client.disconnect()
         for process in self.agent_state.processes:

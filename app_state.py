@@ -1,6 +1,7 @@
 import asyncio
 import subprocess
 import time
+from collections import deque
 from queue import SimpleQueue
 from typing import Any
 
@@ -10,11 +11,14 @@ from models.settings import SettingsModel
 from scheduler_manager import SchedulerManager
 
 
+_HISTORY_MAXLEN = 2000
+
+
 class LogBroadcaster:
     def __init__(self):
         self._queues: list[asyncio.Queue] = []
 
-    def add_client(self, history: list[RealtimeEvent]) -> asyncio.Queue:
+    def add_client(self, history: deque[RealtimeEvent]) -> asyncio.Queue:
         q = asyncio.Queue()
         for message in history:
             q.put_nowait(message.model_copy(update={"notify": False}))
@@ -59,7 +63,7 @@ class AppState:
         self.message_conn = SimpleQueue()
         self.worker: MaaWorker | None = None
         self.is_shutting_down = False
-        self.history_message: list[RealtimeEvent] = []
+        self.history_message: deque[RealtimeEvent] = deque(maxlen=_HISTORY_MAXLEN)
         self.current_status = None
         self.broadcaster: LogBroadcaster | None = None
         self.scheduler_manager: SchedulerManager | None = None

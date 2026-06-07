@@ -55,6 +55,7 @@ class EventService:
         level: RealtimeEventLevel = "info",
         notify: bool = False,
         title: str | None = None,
+        display: list[str] | None = None,
     ):
         realtime_event = RealtimeEvent(
             event=event,
@@ -63,6 +64,7 @@ class EventService:
             time=current_time(),
             notify=notify,
             title=title,
+            display=display or ["log"],
         )
 
         self._publish_event(realtime_event)

@@ -10,6 +10,7 @@ import {
   formatRealtimeLog,
   showBrowserRealtimeNotification,
   showRealtimeMessage,
+  showToastMessage,
 } from "@/services/realtime/events"
 import type { RealtimeEvent } from "@/types/realtime/model"
 import "virtual:uno.css"
@@ -24,20 +25,43 @@ const indexStore = useIndexStore(pinia)
 const settingsStore = useSettingsStore(pinia)
 
 function handleRealtimeEvent(data: RealtimeEvent): void {
-  indexStore.UpdateLog(formatRealtimeLog(data))
+  const display = data.display ?? ["log"]
+
+  if (display.includes("log")) {
+    indexStore.UpdateLog(formatRealtimeLog(data))
+  }
+  if (display.includes("toast")) {
+    showToastMessage(data)
+  }
+  if (display.includes("notification") && data.notify) {
+    showBrowserRealtimeNotification(data, settingsStore.settings.notification)
+  }
 
   if (!data.notify) {
     return
   }
 
   showRealtimeMessage(data)
-  showBrowserRealtimeNotification(data, settingsStore.settings.notification)
 }
 
-;(["log", "task.started", "task.completed", "task.failed", "notification.test"] as const).forEach(
-  (eventName) => {
-    sse.addEventListener(eventName, handleRealtimeEvent)
-  },
-)
+/** 所有 SSE 事件类型（保持兼容：非 sink 事件仍独立触发 handleRealtimeEvent） */
+;(
+  [
+    "log",
+    "focus.display",
+    "task.started",
+    "task.completed",
+    "task.failed",
+    "notification.test",
+    "resource.loading",
+    "controller.action",
+    "tasker.task",
+    "node.recognition",
+    "node.action",
+    "sink",
+  ] as const
+).forEach((eventName) => {
+  sse.addEventListener(eventName, handleRealtimeEvent)
+})
 
 app.mount("#app")

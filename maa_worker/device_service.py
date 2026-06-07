@@ -283,6 +283,11 @@ class DeviceService:
             or state.controller_name is not None
             or state.controller_type is not None
         )
+
+        # 注销 controller sink
+        if state.controller is not None and hasattr(self.worker, "sinks"):
+            self.worker.sinks.unregister_controller_sink(state.controller)
+
         state.connected = False
         state.configuration_locked = False
         state.controller = None
@@ -370,6 +375,11 @@ class DeviceService:
             state.controller_type = device_type
             state.controller_name = selected_controller.name
             state.last_device_error = None
+
+            # 注册 controller sink
+            if hasattr(self.worker, "sinks"):
+                self.worker.sinks.register_controller_sink(controller)
+
             self.worker.events.send_log("设备连接成功")
             return True
 

@@ -1,3 +1,4 @@
+import ast
 import importlib.abc
 import importlib.machinery
 import importlib.util
@@ -17,6 +18,14 @@ if TYPE_CHECKING:
 
 from maa.resource import Resource
 from maa.agent_client import AgentClient
+
+# Sink 基类名称映射 — 用于 AST 隐式继承检测
+_SINK_BASE_CLASS_MAP: dict[str, str] = {
+    "ResourceEventSink": "resource",
+    "ControllerEventSink": "controller",
+    "TaskerEventSink": "tasker",
+    "ContextEventSink": "context",
+}
 
 
 class _DepsFirstFinder(importlib.abc.MetaPathFinder):
@@ -325,11 +334,14 @@ def _black_magic_agent_server_stub():
             delattr(maa_module, "agent")
 
 
-def run_black_magic(agent_config: Any, resource: Resource):
+def run_black_magic(agent_config: Any, maa_worker: "MaaWorker"):
     """
     将Agent转换为custom的黑魔法
-    动态加载并注册自定义 Action 和 Recognition
+    动态加载并注册自定义 Action、Recognition 以及 EventSink 子类
     """
+    tasker = maa_worker.tasker
+    controller = maa_worker.device_state.controller
+    resource = maa_worker.resource
     runtime_root = _resolve_runtime_root()
     agent_index_path = _resolve_agent_index_path(agent_config, runtime_root)
     deps_path = runtime_root / "deps"
@@ -414,13 +426,14 @@ def run_black_magic(agent_config: Any, resource: Resource):
     custom_recognition_pattern = re.compile(
         r"@AgentServer.custom_recognition\(\".*\"\)"
     )
-    to_register = {"action": [], "recognition": []}
+    to_register = {"action": [], "recognition": [], "sink": []}
 
     for module_name, info in module_map.items():
         file_path = info.get("path")
         try:
             with open(file_path, "r", encoding="utf-8") as f:
-                lines = f.readlines()
+                source = f.read()
+            lines = source.splitlines(True)
 
             for i, line in enumerate(lines):
                 match_action = re.match(custom_action_pattern, line.strip())
@@ -445,6 +458,32 @@ def run_black_magic(agent_config: Any, resource: Resource):
                                     "module_name": module_name,
                                 }
                             )
+
+            # --- AST 隐式继承检测：EventSink 子类 -------------------------------
+            try:
+                tree = ast.parse(source, filename=file_path)
+                for node in ast.walk(tree):
+                    if not isinstance(node, ast.ClassDef):
+                        continue
+                    for base in node.bases:
+                        base_name: str | None = None
+                        if isinstance(base, ast.Name):
+                            base_name = base.id
+                        elif isinstance(base, ast.Attribute):
+                            base_name = base.attr
+                        if base_name is None or base_name not in _SINK_BASE_CLASS_MAP:
+                            continue
+                        sink_type = _SINK_BASE_CLASS_MAP[base_name]
+                        to_register["sink"].append(
+                            {
+                                "class_name": node.name,
+                                "module_name": module_name,
+                                "sink_type": sink_type,
+                            }
+                        )
+                        break  # 只匹配第一个能够识别的基类
+            except SyntaxError:
+                pass  # 非 Python 源文件容忍语法错误
         except Exception as e:
             print(f"Error scanning {file_path}: {e}")
             traceback.print_exc()
@@ -481,6 +520,33 @@ def run_black_magic(agent_config: Any, resource: Resource):
                         )
                         traceback.print_exc()
                         raise
+
+            # --- 注册嵌入式 Sink -------------------------------------------------
+            for item in to_register["sink"]:
+                try:
+                    module = sys.modules.get(item["module_name"])
+                    if module is None:
+                        continue
+                    cls = getattr(module, item["class_name"])
+                    instance = cls()
+                    sink_type = item["sink_type"]
+
+                    if sink_type == "resource":
+                        resource.add_sink(instance)
+                    elif sink_type == "controller":
+                        if controller is not None:
+                            controller.add_sink(instance)
+                    elif sink_type == "tasker":
+                        tasker.add_sink(instance)
+                    elif sink_type == "context":
+                        tasker.add_context_sink(instance)
+                except Exception as e:
+                    print(
+                        f"Warning: Failed to register sink "
+                        f"'{item['class_name']}' ({item['sink_type']}): {e}"
+                    )
+                    traceback.print_exc()
+                    raise
     finally:
         # 确保清理 loader，避免污染全局导入链
         if loader in sys.meta_path:
@@ -503,7 +569,7 @@ def load_agents(
             try:
                 if pi_env:
                     os.environ.update(pi_env)
-                run_black_magic(agent_config, maa_worker.resource)
+                run_black_magic(agent_config, maa_worker)
             except Exception as e:
                 maa_worker.events.send_log("黑魔法爆炸了！")
                 maa_worker.events.send_log(f"自定义Agent加载失败: {e}")

@@ -101,6 +101,10 @@ export class SSEClient {
       time: ("time" in data && typeof data.time === "string" ? data.time : "") || "",
       notify: ("notify" in data && typeof data.notify === "boolean" ? data.notify : false) || false,
       title: "title" in data && typeof data.title === "string" ? data.title : null,
+      details:
+        "details" in data && data.details && typeof data.details === "object"
+          ? (data.details as Record<string, unknown>)
+          : null,
     }
   }
 

@@ -1,13 +1,19 @@
-from typing import Literal
-
+from typing import Any, Literal
 from pydantic import BaseModel
 
 RealtimeEventName = Literal[
     "log",
+    "focus.display",
     "task.started",
     "task.completed",
     "task.failed",
     "notification.test",
+    "resource.loading",
+    "controller.action",
+    "tasker.task",
+    "node.recognition",
+    "node.action",
+    "sink",
 ]
 RealtimeEventLevel = Literal["info", "success", "error"]
 
@@ -33,3 +39,5 @@ class RealtimeEvent(BaseModel):
     time: str
     notify: bool = False
     title: str | None = None
+    details: dict[str, Any] | None = None
+    display: list[str] = ["log"]
