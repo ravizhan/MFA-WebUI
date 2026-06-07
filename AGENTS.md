@@ -1,28 +1,36 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-`main.py` is the FastAPI entrypoint and serves the built frontend from `page/`. Backend domain code is split across `maa_worker/` for task runtime and device orchestration, `models/` for Pydantic models, and `services/` for business services such as updates. `updater/` contains the Go-based updater binary. Frontend code lives in `front/src/`: `app/` for bootstrapping, router, theme, and i18n; `views/` for page composition; `components/` for UI blocks; `stores/` for Pinia state; `services/` for API/SSE access; `types/` and `utils/` for shared TS models and helpers. `deploy/` holds packaging and CI scripts.
+
+MWU is a generic UI for `https://github.com/MaaXYZ/MaaFramework`. Backend entry is `main.py`; shared state in `app_state.py`; MAA orchestration in `maa_utils.py`; scheduler logic in `scheduler_manager.py`; services in `services/` and `maa_worker/`; models in `models/`. Frontend code is under `front/src/`: `app/`, `services/api/`, `stores/`, `views/`, and `components/`. Static build output is served from `page/`; deployment helpers live in `deploy/`, CI in `.github/`, and updater code in `updater/`.
+
+## User Integration Scope
+
+Users bring their own MaaFramework `resource/` folder, `interface.json`, and `agent/` code. Treat these as integration inputs, not MWU development targets. Improve the generic loader/runtime; do not bake in project-specific resources, tasks, or agent behavior.
 
 ## Build, Test, and Development Commands
-Use `uv` for Python, `pnpm` for the frontend, and Go tooling for the updater.
 
-- `uv sync`: install Python dependencies from `pyproject.toml` and `uv.lock`.
-- `uv run main.py`: start the FastAPI app on `http://127.0.0.1:55666`.
-- `cd front && pnpm install`: install frontend dependencies.
-- `cd front && pnpm dev`: run the Vite dev server with `/api` proxied to the backend.
-- `cd front && pnpm build`: build the frontend into `page/`.
-- `cd front && pnpm lint`: run `oxlint`.
-- `cd front && pnpm format`: format frontend files with `oxfmt`.
-- `cd updater && go build`: compile the updater.
+- `uv sync`: install Python dependencies.
+- `uv run main.py`: start FastAPI on `127.0.0.1:55666`.
+- `cd front && pnpm dev`: run Vite with API proxying.
+- `cd front && pnpm build`: build frontend output to `../page`.
+- `cd front && pnpm lint`: run oxlint.
+- `cd front && pnpm format`: format frontend files with oxfmt.
+- `cd updater && go build`: build the Go updater.
+- `pre-commit run --all-files`: run lockfile/format hooks.
 
 ## Coding Style & Naming Conventions
-Python uses 4-space indentation, `snake_case` for functions/modules, and typed Pydantic models in `models/`. Keep backend changes scoped to the relevant module instead of growing `maa_utils.py`. Vue single-file components use `PascalCase` filenames such as `PanelView.vue`; TypeScript modules and stores use `camelCase` names such as `taskConfig.ts`. Follow the existing Vite/Vue style and run `pnpm format` before submitting. Avoid adding a top-level `utils` Python package; it conflicts with agent-loading conventions.
+
+Follow module boundaries; keep backend, frontend, and updater changes scoped. Python uses `uv` and snake_case. Frontend files use TypeScript/Vue conventions, 2-space indentation, LF endings, 100-column formatting, double quotes, and no semicolons per `front/.editorconfig` and `front/.oxfmtrc.json`. Do not hand-edit generated declarations. Before changing code that uses a third-party library, query current docs with the Context7 tool and base the edit on those docs.
 
 ## Testing Guidelines
-There is no committed first-party automated test suite yet. Every change should at minimum pass `cd front && pnpm lint`, `cd front && pnpm build`, and any relevant `go build` or `uv run main.py` smoke test. PRs that change runtime behavior should describe the manual verification performed, especially around `interface.json`, scheduling, SSE events, and updater flows.
+
+There is no unified test suite. Validate the affected layer: backend changes should smoke-run with `uv run main.py`; frontend changes should pass `pnpm build` and `pnpm lint`; updater changes should pass `go build`. Add focused tests or smoke scripts for hard-to-verify behavior.
 
 ## Commit & Pull Request Guidelines
-Follow the existing Conventional Commit pattern: `feat:`, `refactor:`, `chore:`, `ci(build):`, or `BREAKING:`. Keep subjects short and imperative; scoped forms like `refactor(agent): ...` match current history. PRs should include a concise summary, linked issue if applicable, validation steps, and screenshots for frontend changes. Call out schema or config-impacting changes explicitly when touching `interface.json`, `config/`, or packaging scripts.
 
-## Configuration Tips
-Manage Python dependencies with `uv`, frontend dependencies with `pnpm`, and Go dependencies with Go modules. Keep external API fields and protocol keys stable. Review `.github/instructions/` before larger changes.
+Use Conventional Commits, matching history: `feat: ...`, `fix(scope): ...`, `build: ...`, `deps: ...`, or `docs: ...`. Keep subjects short and omit trailing periods. PRs should describe the change, list validation, link issues, and include screenshots or recordings for visible frontend changes.
+
+## Agent-Specific Notes
+
+Preserve the backend/frontend API contract and keep `interface.json` path handling rooted at the app directory. `maa_worker/agent_loader.py` contains the dynamic-loading "magic" that imports and registers code from the user's `agent/` folder. Its custom decorator parsing is string-pattern based and can silently fail if expected decorator forms change.
