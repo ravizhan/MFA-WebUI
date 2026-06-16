@@ -2,7 +2,7 @@ import type { RealtimeEvent, RealtimeEventLevel, RealtimeEventName } from "@/typ
 
 type SSEPayload =
   | RealtimeEvent
-  | { type?: string; message?: string; time?: string; notify?: boolean }
+  | { type?: string; message?: string; time?: string; notify?: string[] }
 
 export class SSEClient {
   private eventSource: EventSource | null = null
@@ -99,12 +99,13 @@ export class SSEClient {
       level: (level as RealtimeEventLevel) || "info",
       message: data.message,
       time: ("time" in data && typeof data.time === "string" ? data.time : "") || "",
-      notify: ("notify" in data && typeof data.notify === "boolean" ? data.notify : false) || false,
+      notify: Array.isArray(data.notify) ? data.notify : [],
       title: "title" in data && typeof data.title === "string" ? data.title : null,
       details:
         "details" in data && data.details && typeof data.details === "object"
           ? (data.details as Record<string, unknown>)
           : null,
+      display: "display" in data ? Boolean(data.display) : true,
     }
   }
 

@@ -1,5 +1,5 @@
 from typing import Any, Literal
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 RealtimeEventName = Literal[
     "log",
@@ -37,7 +37,7 @@ class RealtimeEvent(BaseModel):
     level: RealtimeEventLevel = "info"
     message: str
     time: str
-    notify: bool = False
+    notify: list[str] = Field(default_factory=list)
     title: str | None = None
     details: dict[str, Any] | None = None
-    display: list[str] = ["log"]
+    display: bool = True

@@ -21,7 +21,7 @@ class LogBroadcaster:
     def add_client(self, history: deque[RealtimeEvent]) -> asyncio.Queue:
         q = asyncio.Queue()
         for message in history:
-            q.put_nowait(message.model_copy(update={"notify": False}))
+            q.put_nowait(message.model_copy(update={"notify": []}))
         self._queues.append(q)
         return q
 
@@ -40,7 +40,7 @@ def build_log_event(msg: str, level: RealtimeEventLevel = "info") -> RealtimeEve
         level=level,
         message=msg,
         time=time.strftime("%Y-%m-%d %H:%M:%S", time.localtime()),
-        notify=False,
+        notify=[],
     )
 
 
@@ -54,7 +54,7 @@ def normalize_event(payload: RealtimeEvent | dict[str, Any] | str) -> RealtimeEv
         level="info",
         message=payload,
         time="",
-        notify=False,
+        notify=[],
     )
 
 

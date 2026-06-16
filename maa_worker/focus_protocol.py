@@ -19,7 +19,6 @@ DISPLAY_NOTIFICATION = "notification"
 # "dialog" / "modal" reserved for future PR
 
 _VALID_DISPLAYS = frozenset({DISPLAY_LOG, DISPLAY_TOAST, DISPLAY_NOTIFICATION})
-_DEFAULT_DISPLAY = [DISPLAY_LOG]
 
 # ---------------------------------------------------------------------------
 # FocusTemplate — 表示 interface.json 中一条 focus 模板

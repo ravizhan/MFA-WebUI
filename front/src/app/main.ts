@@ -25,19 +25,17 @@ const indexStore = useIndexStore(pinia)
 const settingsStore = useSettingsStore(pinia)
 
 function handleRealtimeEvent(data: RealtimeEvent): void {
-  const display = data.display ?? ["log"]
-
-  if (display.includes("log")) {
+  if (data.display) {
     indexStore.UpdateLog(formatRealtimeLog(data))
   }
-  if (display.includes("toast")) {
+  if (data.notify.includes("toast")) {
     showToastMessage(data)
   }
-  if (display.includes("notification") && data.notify) {
+  if (data.notify.includes("notification")) {
     showBrowserRealtimeNotification(data, settingsStore.settings.notification)
   }
 
-  if (!data.notify) {
+  if (data.notify.length === 0) {
     return
   }
 

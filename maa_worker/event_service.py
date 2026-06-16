@@ -53,10 +53,11 @@ class EventService:
         message: str,
         *,
         level: RealtimeEventLevel = "info",
-        notify: bool = False,
+        notify: list[str] | None = None,
         title: str | None = None,
-        display: list[str] | None = None,
+        display: bool = True,
     ):
+        notify = notify or []
         realtime_event = RealtimeEvent(
             event=event,
             level=level,
@@ -64,12 +65,12 @@ class EventService:
             time=current_time(),
             notify=notify,
             title=title,
-            display=display or ["log"],
+            display=display,
         )
 
         self._publish_event(realtime_event)
 
-        if not notify:
+        if "notification" not in notify:
             return
 
         settings = load_settings()
@@ -154,8 +155,11 @@ class EventService:
         *,
         event: RealtimeEventName = "notification.test",
         level: RealtimeEventLevel = "info",
+        notify: list[str] | None = None,
     ):
-        self.emit(event, message, level=level, notify=True, title=title)
+        self.emit(
+            event, message, level=level, notify=notify or ["notification"], title=title
+        )
 
     def _build_task_subject(self, task_list: list[str]) -> str:
         if self.worker.task_state.current_task_name:
@@ -178,7 +182,7 @@ class EventService:
             "task.completed",
             f"{self._build_task_subject(task_list)} 执行完成",
             level="success",
-            notify=settings.notification.notifyOnComplete,
+            notify=["notification"] if settings.notification.notifyOnComplete else [],
             title="任务完成",
         )
 
@@ -188,7 +192,7 @@ class EventService:
             "task.failed",
             f"{self._build_task_subject(task_list)} 执行失败，请检查日志",
             level="error",
-            notify=settings.notification.notifyOnError,
+            notify=["notification"] if settings.notification.notifyOnError else [],
             title="任务失败",
         )
         self.send_log(f"任务异常详情: {error_message}")

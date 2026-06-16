@@ -7,7 +7,6 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from maa_worker.focus_protocol import (
-    DISPLAY_LOG,
     DISPLAY_NOTIFICATION,
     DISPLAY_TOAST,
     FocusDisplayEvent,
@@ -29,29 +28,16 @@ class FocusEventProcessor:
         self._events = events
 
     def dispatch(self, event: FocusDisplayEvent) -> None:
-        content = event.content
-        level = event.level
-
-        if event.has_log:
-            self._events.emit(
-                "focus.display",
-                content,
-                level=level,
-                display=[DISPLAY_LOG],
-            )
-
+        notify: list[str] = []
         if event.has_toast:
-            self._events.emit(
-                "focus.display",
-                content,
-                level=level,
-                display=[DISPLAY_TOAST],
-            )
-
+            notify.append(DISPLAY_TOAST)
         if event.has_notification:
-            self._events.send_notification(
-                "任务通知",
-                content,
-                event="focus.display",
-                level=level,
-            )
+            notify.append(DISPLAY_NOTIFICATION)
+
+        self._events.emit(
+            "focus.display",
+            event.content,
+            display=event.has_log,
+            notify=notify,
+            level=event.level,
+        )

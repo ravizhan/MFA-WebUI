@@ -19,8 +19,8 @@ export interface RealtimeEvent {
   level: RealtimeEventLevel
   message: string
   time: string
-  notify: boolean
+  notify: string[]
   title?: string | null
   details?: Record<string, unknown> | null
-  display?: string[]
+  display: boolean
 }

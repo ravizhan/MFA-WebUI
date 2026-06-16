@@ -15,7 +15,7 @@ export function showRealtimeMessage(event: RealtimeEvent): void {
 }
 
 /**
- * Naive UI Toast 轻提示（display="toast" 时触发）。
+ * Naive UI Toast 轻提示（notify 包含 "toast" 时触发）。
  */
 export function showToastMessage(event: RealtimeEvent): void {
   if (typeof window === "undefined" || !window.$message) {
@@ -29,7 +29,7 @@ export function showBrowserRealtimeNotification(
   event: RealtimeEvent,
   settings: NotificationSettings,
 ): void {
-  if (!event.notify || !settings.browserNotification) {
+  if (!settings.browserNotification) {
     return
   }
   if (typeof Notification === "undefined" || Notification.permission !== "granted") {
