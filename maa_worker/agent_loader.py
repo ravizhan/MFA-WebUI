@@ -482,8 +482,8 @@ def run_black_magic(agent_config: Any, maa_worker: "MaaWorker"):
                             }
                         )
                         break  # 只匹配第一个能够识别的基类
-            except SyntaxError:
-                pass  # 非 Python 源文件容忍语法错误
+            except SyntaxError as e:
+                print(f"Syntax error in {file_path}: {e}")
         except Exception as e:
             print(f"Error scanning {file_path}: {e}")
             traceback.print_exc()
