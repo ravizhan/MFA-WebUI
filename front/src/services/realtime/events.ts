@@ -14,11 +14,22 @@ export function showRealtimeMessage(event: RealtimeEvent): void {
   showGlobalMessage(event.level, formatMessageContent(event))
 }
 
+/**
+ * Naive UI Toast 轻提示（notify 包含 "toast" 时触发）。
+ */
+export function showToastMessage(event: RealtimeEvent): void {
+  if (typeof window === "undefined" || !window.$message) {
+    return
+  }
+  const type = event.level === "error" ? "error" : event.level === "success" ? "success" : "info"
+  window.$message[type](event.message, { duration: 3000 })
+}
+
 export function showBrowserRealtimeNotification(
   event: RealtimeEvent,
   settings: NotificationSettings,
 ): void {
-  if (!event.notify || !settings.browserNotification) {
+  if (!settings.browserNotification) {
     return
   }
   if (typeof Notification === "undefined" || Notification.permission !== "granted") {
