@@ -33,6 +33,8 @@ class TaskRuntimeState:
     last_status: str = "idle"
     last_error: str | None = None
     current_task_name: str | None = None
+    pre_tasks: list | None = None
+    current_pre_task_process: subprocess.Popen | None = None
 
 
 @dataclass

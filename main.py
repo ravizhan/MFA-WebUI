@@ -644,10 +644,13 @@ def start(task_execution: TaskExecutionPayload):
         msg = "请先连接设备"
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
-    normalized_task_list, normalized_task_options = normalize_task_execution_payload(
-        task_execution.task_list,
-        task_execution.task_options,
-        interface,
+    normalized_task_list, normalized_task_options, normalized_pre_tasks = (
+        normalize_task_execution_payload(
+            task_execution.task_list,
+            task_execution.task_options,
+            interface,
+            task_execution.pre_tasks,
+        )
     )
 
     if not normalized_task_list:
@@ -658,6 +661,7 @@ def start(task_execution: TaskExecutionPayload):
     if not app_state.worker.tasks.start(
         normalized_task_list,
         normalized_task_options,
+        pre_tasks=normalized_pre_tasks,
     ):
         msg = (
             app_state.worker.device_state.last_resource_error

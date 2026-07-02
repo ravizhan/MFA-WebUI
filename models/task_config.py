@@ -5,7 +5,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from models.interface import InterfaceModel, Option, Preset, PresetOptionValue
-from models.scheduler import TaskOptionValue, TaskOptionsByTask
+from models.scheduler import PreTaskCommand, TaskOptionValue, TaskOptionsByTask
 
 CUSTOM_PRESET_NAME = "__mwu_reserved_custom_preset__"
 
@@ -21,6 +21,9 @@ class TaskPresetSnapshotModel(BaseModel):
     taskOptions: TaskOptionsByTask = Field(
         default_factory=dict,
         description="任务选项配置，key为任务ID，value为该任务的选项映射",
+    )
+    pre_tasks: list[PreTaskCommand] = Field(
+        default_factory=list, description="前置 shell 命令列表"
     )
 
 
@@ -95,6 +98,7 @@ def normalize_snapshot(
     raw_task_order = raw_snapshot["taskOrder"]
     raw_task_checked = raw_snapshot["taskChecked"]
     raw_task_options = raw_snapshot["taskOptions"]
+    raw_pre_tasks = raw_snapshot.get("pre_tasks", [])
 
     for task_id in raw_task_order:
         if task_id in valid_task_ids and task_id not in seen_task_ids:
@@ -116,10 +120,25 @@ def normalize_snapshot(
         interface_model,
     )
 
+    normalized_pre_tasks = _normalize_raw_pre_tasks(raw_pre_tasks)
+    parsed_pre_tasks: list[PreTaskCommand] = []
+    for item in normalized_pre_tasks:
+        try:
+            parsed_pre_tasks.append(
+                PreTaskCommand(
+                    command=item["command"],
+                    enabled=item["enabled"],
+                    timeout=item["timeout"],
+                )
+            )
+        except Exception:
+            continue
+
     return TaskPresetSnapshotModel(
         taskOrder=normalized_order,
         taskChecked=normalized_checked,
         taskOptions=normalized_options,
+        pre_tasks=parsed_pre_tasks,
     )
 
 
@@ -156,7 +175,8 @@ def normalize_task_execution_payload(
     raw_task_list: Any,
     raw_task_options: Any,
     interface_model: InterfaceModel,
-) -> tuple[list[str], TaskOptionsByTask]:
+    raw_pre_tasks: Any = None,
+) -> tuple[list[str], TaskOptionsByTask, list[PreTaskCommand]]:
     valid_task_ids = {task.entry for task in (interface_model.task or [])}
     normalized_task_list: list[str] = []
     seen_task_ids: set[str] = set()
@@ -176,7 +196,28 @@ def normalize_task_execution_payload(
         interface_model,
     )
 
-    return normalized_task_list, normalized_task_options
+    normalized_pre_tasks: list[PreTaskCommand] = []
+    if isinstance(raw_pre_tasks, list):
+        for item in raw_pre_tasks:
+            if isinstance(item, PreTaskCommand):
+                if item.enabled and item.command.strip():
+                    normalized_pre_tasks.append(item)
+            elif isinstance(item, dict):
+                command = item.get("command", "")
+                enabled = item.get("enabled", True)
+                timeout = item.get("timeout", 30)
+                if enabled and isinstance(command, str) and command.strip():
+                    try:
+                        validated = PreTaskCommand(
+                            command=command,
+                            enabled=True,
+                            timeout=timeout if isinstance(timeout, int) else 30,
+                        )
+                        normalized_pre_tasks.append(validated)
+                    except Exception:
+                        continue
+
+    return normalized_task_list, normalized_task_options, normalized_pre_tasks
 
 
 def build_interface_preset_snapshot(
@@ -243,6 +284,7 @@ def _normalize_raw_snapshot(snapshot: Any) -> dict[str, Any]:
                 if isinstance(task_id, str)
             },
             "taskOptions": _normalize_raw_task_options(snapshot.taskOptions),
+            "pre_tasks": _normalize_raw_pre_tasks(snapshot.pre_tasks),
         }
 
     if not isinstance(snapshot, dict):
@@ -250,6 +292,7 @@ def _normalize_raw_snapshot(snapshot: Any) -> dict[str, Any]:
             "taskOrder": [],
             "taskChecked": {},
             "taskOptions": {},
+            "pre_tasks": [],
         }
 
     task_order = snapshot.get("taskOrder")
@@ -274,6 +317,7 @@ def _normalize_raw_snapshot(snapshot: Any) -> dict[str, Any]:
         "taskOrder": raw_task_order,
         "taskChecked": raw_task_checked,
         "taskOptions": _normalize_raw_task_options(snapshot.get("taskOptions")),
+        "pre_tasks": _normalize_raw_pre_tasks(snapshot.get("pre_tasks")),
     }
 
 
@@ -299,6 +343,37 @@ def _normalize_raw_task_options(value: Any) -> dict[str, dict[str, TaskOptionVal
         normalized[task_id] = normalized_options
 
     return normalized
+
+
+def _normalize_raw_pre_tasks(value: Any) -> list[dict[str, Any]]:
+    """Normalize pre_tasks for JSON serialization."""
+    if isinstance(value, list):
+        result: list[dict[str, Any]] = []
+        for item in value:
+            if isinstance(item, PreTaskCommand):
+                result.append(
+                    {
+                        "command": item.command,
+                        "enabled": item.enabled,
+                        "timeout": item.timeout,
+                    }
+                )
+            elif isinstance(item, dict):
+                command = item.get("command", "")
+                enabled = item.get("enabled", True)
+                timeout = item.get("timeout", 30)
+                if isinstance(command, str):
+                    result.append(
+                        {
+                            "command": command,
+                            "enabled": bool(enabled),
+                            "timeout": int(timeout)
+                            if isinstance(timeout, (int, float))
+                            else 30,
+                        }
+                    )
+        return result
+    return []
 
 
 def _normalize_option_value_for_storage(value: Any) -> TaskOptionValue | None:

@@ -10,6 +10,7 @@ import type {
 import {
   CUSTOM_PRESET_NAME,
   type PersistedTaskConfig,
+  type PreTaskCommand,
   type TaskListItem,
   type TaskPresetSnapshot,
 } from "@/types/task-config/model"
@@ -166,6 +167,7 @@ export const useTaskConfigStore = defineStore("taskConfig", {
     presetSnapshots: {} as Record<string, TaskPresetSnapshot>,
     configLoaded: false,
     saveTimer: null as ReturnType<typeof setTimeout> | null,
+    preTasks: [] as PreTaskCommand[],
   }),
   actions: {
     normalizeTaskIds(taskIds: string[]): string[] {
@@ -227,6 +229,7 @@ export const useTaskConfigStore = defineStore("taskConfig", {
       return {
         task_list,
         task_options: this.buildOptionsForTasks(task_list, overridesByTask),
+        pre_tasks: this.preTasks || [],
       }
     },
 
@@ -280,6 +283,7 @@ export const useTaskConfigStore = defineStore("taskConfig", {
         taskOrder,
         taskChecked,
         taskOptions,
+        preTasks: [...this.preTasks],
       }
     },
 
@@ -287,6 +291,7 @@ export const useTaskConfigStore = defineStore("taskConfig", {
       this.taskList = this.buildTaskListFromPersisted(snapshot.taskOrder, snapshot.taskChecked)
       const taskIds = this.taskList.map((task) => task.id)
       this.options = this.buildOptionsFromPersisted(taskIds, snapshot.taskOptions)
+      this.preTasks = snapshot.preTasks ? [...snapshot.preTasks] : []
     },
 
     normalizeSnapshot(snapshot?: TaskPresetSnapshot | null): TaskPresetSnapshot {
@@ -294,10 +299,21 @@ export const useTaskConfigStore = defineStore("taskConfig", {
       const taskIds = taskList.map((task) => task.id)
       const taskOptions = this.buildOptionsFromPersisted(taskIds, snapshot?.taskOptions)
 
+      const preTasks = Array.isArray(snapshot?.preTasks)
+        ? snapshot!.preTasks
+            .filter((pt) => typeof pt.command === "string" && pt.command.length > 0)
+            .map((pt) => ({
+              command: pt.command,
+              enabled: typeof pt.enabled === "boolean" ? pt.enabled : true,
+              timeout: typeof pt.timeout === "number" && pt.timeout > 0 ? pt.timeout : 30,
+            }))
+        : []
+
       return {
         taskOrder: taskIds,
         taskChecked: buildTaskCheckedMap(taskList),
         taskOptions: cloneTaskOptionsByTask(taskOptions),
+        preTasks,
       }
     },
 
@@ -352,6 +368,7 @@ export const useTaskConfigStore = defineStore("taskConfig", {
         taskOrder: orderedTaskIds,
         taskChecked,
         taskOptions,
+        preTasks: [],
       })
     },
 
@@ -440,6 +457,7 @@ export const useTaskConfigStore = defineStore("taskConfig", {
       await resetTaskConfig()
       this.presetSnapshots = this.seedPresetSnapshots()
       this.selectedPresetName = CUSTOM_PRESET_NAME
+      this.preTasks = []
       this.hydrateSnapshot(this.presetSnapshots[CUSTOM_PRESET_NAME]!)
     },
   },

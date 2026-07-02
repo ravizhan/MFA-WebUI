@@ -1,3 +1,5 @@
+import type { PreTaskCommand } from "@/types/task-config/model"
+
 export type TriggerType = "cron" | "date" | "interval"
 
 export type ExecutionStatus = "running" | "success" | "failed" | "stopped"
@@ -31,6 +33,7 @@ export type TaskOptionsByTask = Record<string, Record<string, TaskOptionValue>>
 export interface TaskExecutionPayload {
   task_list: string[]
   task_options: TaskOptionsByTask
+  pre_tasks: PreTaskCommand[]
 }
 
 export interface ScheduledTask extends TaskExecutionPayload {

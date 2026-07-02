@@ -12,6 +12,7 @@
       @update:selected-tasks="(value) => emit('update:selected-tasks', value)"
       @config="(taskId) => emit('config', taskId)"
     />
+    <PreTaskList class="mt-4" />
     <n-flex class="form-btn" justify="center" :wrap="true" :size="[12, 12]">
       <n-button
         class="min-w-[9rem]"
@@ -42,6 +43,7 @@
 
 <script setup lang="ts">
 import { useI18n } from "vue-i18n"
+import PreTaskList from "@/components/panel/task/PreTaskList.vue"
 import TaskSelectList from "@/components/panel/task/TaskSelectList.vue"
 import type { TaskListItem } from "@/types/task-config/model"
 
