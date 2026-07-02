@@ -33,7 +33,7 @@ export type TaskOptionsByTask = Record<string, Record<string, TaskOptionValue>>
 export interface TaskExecutionPayload {
   task_list: string[]
   task_options: TaskOptionsByTask
-  pre_tasks: PreTaskCommand[]
+  preTasks: PreTaskCommand[]
 }
 
 export interface ScheduledTask extends TaskExecutionPayload {
@@ -64,6 +64,7 @@ export interface ScheduledTaskUpdate {
   trigger_config?: TriggerConfig
   task_list?: string[]
   task_options?: TaskOptionsByTask
+  preTasks?: PreTaskCommand[]
 }
 
 export interface TaskExecution {

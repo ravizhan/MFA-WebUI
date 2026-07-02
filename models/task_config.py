@@ -5,7 +5,12 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from models.interface import InterfaceModel, Option, Preset, PresetOptionValue
-from models.scheduler import PreTaskCommand, TaskOptionValue, TaskOptionsByTask
+from models.scheduler import (
+    PreTaskCommand,
+    TaskOptionValue,
+    TaskOptionsByTask,
+    _generate_pre_task_id,
+)
 
 CUSTOM_PRESET_NAME = "__mwu_reserved_custom_preset__"
 
@@ -22,7 +27,7 @@ class TaskPresetSnapshotModel(BaseModel):
         default_factory=dict,
         description="任务选项配置，key为任务ID，value为该任务的选项映射",
     )
-    pre_tasks: list[PreTaskCommand] = Field(
+    preTasks: list[PreTaskCommand] = Field(
         default_factory=list, description="前置 shell 命令列表"
     )
 
@@ -98,7 +103,7 @@ def normalize_snapshot(
     raw_task_order = raw_snapshot["taskOrder"]
     raw_task_checked = raw_snapshot["taskChecked"]
     raw_task_options = raw_snapshot["taskOptions"]
-    raw_pre_tasks = raw_snapshot.get("pre_tasks", [])
+    raw_pre_tasks = raw_snapshot.get("preTasks", [])
 
     for task_id in raw_task_order:
         if task_id in valid_task_ids and task_id not in seen_task_ids:
@@ -126,6 +131,7 @@ def normalize_snapshot(
         try:
             parsed_pre_tasks.append(
                 PreTaskCommand(
+                    id=item.get("id", _generate_pre_task_id()),
                     command=item["command"],
                     enabled=item["enabled"],
                     timeout=item["timeout"],
@@ -138,7 +144,7 @@ def normalize_snapshot(
         taskOrder=normalized_order,
         taskChecked=normalized_checked,
         taskOptions=normalized_options,
-        pre_tasks=parsed_pre_tasks,
+        preTasks=parsed_pre_tasks,
     )
 
 
@@ -206,9 +212,13 @@ def normalize_task_execution_payload(
                 command = item.get("command", "")
                 enabled = item.get("enabled", True)
                 timeout = item.get("timeout", 30)
+                task_id = item.get("id")
                 if enabled and isinstance(command, str) and command.strip():
                     try:
                         validated = PreTaskCommand(
+                            id=task_id
+                            if isinstance(task_id, str)
+                            else _generate_pre_task_id(),
                             command=command,
                             enabled=True,
                             timeout=timeout if isinstance(timeout, int) else 30,
@@ -284,7 +294,7 @@ def _normalize_raw_snapshot(snapshot: Any) -> dict[str, Any]:
                 if isinstance(task_id, str)
             },
             "taskOptions": _normalize_raw_task_options(snapshot.taskOptions),
-            "pre_tasks": _normalize_raw_pre_tasks(snapshot.pre_tasks),
+            "preTasks": _normalize_raw_pre_tasks(snapshot.preTasks),
         }
 
     if not isinstance(snapshot, dict):
@@ -292,7 +302,7 @@ def _normalize_raw_snapshot(snapshot: Any) -> dict[str, Any]:
             "taskOrder": [],
             "taskChecked": {},
             "taskOptions": {},
-            "pre_tasks": [],
+            "preTasks": [],
         }
 
     task_order = snapshot.get("taskOrder")
@@ -317,7 +327,9 @@ def _normalize_raw_snapshot(snapshot: Any) -> dict[str, Any]:
         "taskOrder": raw_task_order,
         "taskChecked": raw_task_checked,
         "taskOptions": _normalize_raw_task_options(snapshot.get("taskOptions")),
-        "pre_tasks": _normalize_raw_pre_tasks(snapshot.get("pre_tasks")),
+        "preTasks": _normalize_raw_pre_tasks(
+            snapshot.get("preTasks") or snapshot.get("pre_tasks")
+        ),
     }
 
 
@@ -346,13 +358,14 @@ def _normalize_raw_task_options(value: Any) -> dict[str, dict[str, TaskOptionVal
 
 
 def _normalize_raw_pre_tasks(value: Any) -> list[dict[str, Any]]:
-    """Normalize pre_tasks for JSON serialization."""
+    """Normalize preTasks for JSON serialization."""
     if isinstance(value, list):
         result: list[dict[str, Any]] = []
         for item in value:
             if isinstance(item, PreTaskCommand):
                 result.append(
                     {
+                        "id": item.id,
                         "command": item.command,
                         "enabled": item.enabled,
                         "timeout": item.timeout,
@@ -362,9 +375,13 @@ def _normalize_raw_pre_tasks(value: Any) -> list[dict[str, Any]]:
                 command = item.get("command", "")
                 enabled = item.get("enabled", True)
                 timeout = item.get("timeout", 30)
+                task_id = item.get("id")
                 if isinstance(command, str):
                     result.append(
                         {
+                            "id": task_id
+                            if isinstance(task_id, str)
+                            else _generate_pre_task_id(),
                             "command": command,
                             "enabled": bool(enabled),
                             "timeout": int(timeout)

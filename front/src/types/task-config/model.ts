@@ -10,6 +10,7 @@ export interface TaskListItem {
 }
 
 export interface PreTaskCommand {
+  id: string
   command: string
   enabled: boolean
   timeout: number

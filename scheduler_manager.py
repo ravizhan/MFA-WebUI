@@ -398,7 +398,7 @@ class SchedulerManager:
             self._normalize_task_payload(
                 task_create.task_list,
                 task_create.task_options,
-                task_create.pre_tasks,
+                task_create.preTasks,
             )
         )
         if not normalized_task_list:
@@ -415,7 +415,7 @@ class SchedulerManager:
                 "task_description": task_create.description or "",
                 "task_list": normalized_task_list,
                 "task_options": normalized_task_options,
-                "pre_tasks": [pt.model_dump() for pt in normalized_pre_tasks],
+                "preTasks": [pt.model_dump() for pt in normalized_pre_tasks],
             },
         )
 
@@ -437,6 +437,7 @@ class SchedulerManager:
             trigger_config=task_create.trigger_config,
             task_list=normalized_task_list,
             task_options=normalized_task_options,
+            preTasks=normalized_pre_tasks,
             next_run_time=next_run_time,
         )
 
@@ -454,9 +455,10 @@ class SchedulerManager:
         # 从 kwargs 中获取任务信息
         task_name = job.kwargs.get("task_name", "")
         task_description = job.kwargs.get("task_description", "")
-        task_list, task_options, _ = self._normalize_task_payload(
+        task_list, task_options, pre_tasks = self._normalize_task_payload(
             job.kwargs.get("task_list", []),
             job.kwargs.get("task_options", {}),
+            job.kwargs.get("preTasks", []) or job.kwargs.get("pre_tasks", []),
         )
         trigger_type: Literal["cron", "date", "interval"]
 
@@ -476,6 +478,7 @@ class SchedulerManager:
             trigger_config=trigger_config,
             task_list=task_list,
             task_options=task_options,
+            preTasks=pre_tasks,
             next_run_time=job.next_run_time,
         )
 
@@ -489,9 +492,10 @@ class SchedulerManager:
         for job in jobs:
             task_name = job.kwargs.get("task_name", "")
             task_description = job.kwargs.get("task_description", "")
-            task_list, task_options, _ = self._normalize_task_payload(
+            task_list, task_options, pre_tasks = self._normalize_task_payload(
                 job.kwargs.get("task_list", []),
                 job.kwargs.get("task_options", {}),
+                job.kwargs.get("preTasks", []) or job.kwargs.get("pre_tasks", []),
             )
             trigger_type: Literal["cron", "date", "interval"]
 
@@ -513,6 +517,7 @@ class SchedulerManager:
                 trigger_config=trigger_config,
                 task_list=task_list,
                 task_options=task_options,
+                preTasks=pre_tasks,
                 next_run_time=job.next_run_time,
             )
             tasks.append(task)
@@ -563,9 +568,10 @@ class SchedulerManager:
                 else current_kwargs.get("task_options", {})
             )
             new_pre_tasks = (
-                task_update.pre_tasks
-                if task_update.pre_tasks is not None
-                else current_kwargs.get("pre_tasks", [])
+                task_update.preTasks
+                if task_update.preTasks is not None
+                else current_kwargs.get("preTasks", [])
+                or current_kwargs.get("pre_tasks", [])
             )
             normalized_task_list, normalized_task_options, normalized_pre_tasks = (
                 self._normalize_task_payload(
@@ -596,7 +602,7 @@ class SchedulerManager:
                     "task_description": new_description,
                     "task_list": normalized_task_list,
                     "task_options": normalized_task_options,
-                    "pre_tasks": [pt.model_dump() for pt in normalized_pre_tasks],
+                    "preTasks": [pt.model_dump() for pt in normalized_pre_tasks],
                 },
             )
 

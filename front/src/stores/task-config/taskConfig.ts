@@ -229,7 +229,7 @@ export const useTaskConfigStore = defineStore("taskConfig", {
       return {
         task_list,
         task_options: this.buildOptionsForTasks(task_list, overridesByTask),
-        pre_tasks: this.preTasks || [],
+        preTasks: this.preTasks || [],
       }
     },
 
@@ -303,6 +303,7 @@ export const useTaskConfigStore = defineStore("taskConfig", {
         ? snapshot!.preTasks
             .filter((pt) => typeof pt.command === "string" && pt.command.length > 0)
             .map((pt) => ({
+              id: pt.id || crypto.randomUUID(),
               command: pt.command,
               enabled: typeof pt.enabled === "boolean" ? pt.enabled : true,
               timeout: typeof pt.timeout === "number" && pt.timeout > 0 ? pt.timeout : 30,
