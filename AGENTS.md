@@ -155,7 +155,7 @@ If your change:
 | Situation | Action |
 |---|---|
 | Before writing any code | `mem_search` / `mem_context` to read project memory |
-| Using a third-party library | `context7-resolve-library-id` + `context7-query-docs` (or deepwiki) |
+| Using a third-party library | `mcphub_context7-resolve-library-id` + `mcphub_context7-query-docs` (or deepwiki) |
 | After any code change | `mem_save` with type `manual`, `bugfix`, `decision`, or `architecture` |
 | Architecture-involved change | Update the matching `architecture/*` topic_key entry |
 | End of session | `mem_session_summary` |
