@@ -139,7 +139,8 @@
         "taskCreated": "Task Created",
         "tab": {
           "taskList": "Task List",
-          "taskSettings": "Task Settings"
+          "taskSettings": "Task Settings",
+          "preTasks": "Pre-Task"
         },
         "noOptions": "Nothing here"
       },

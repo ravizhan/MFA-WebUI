@@ -193,7 +193,14 @@
       </n-space>
 
       <n-tabs v-model:value="activeTab" type="segment" animated>
-        <!-- Tab 1: 任务列表 -->
+        <!-- Tab 1: 前置任务 -->
+        <n-tab-pane name="pre-tasks" :tab="t('settings.scheduler.dialog.tab.preTasks')">
+          <n-scrollbar trigger="none" class="max-h-65 !rounded-[12px]">
+            <PreTaskList v-model="formData.preTasks" embedded />
+          </n-scrollbar>
+        </n-tab-pane>
+
+        <!-- Tab 2: 任务列表 -->
         <n-tab-pane name="task-list" :tab="t('settings.scheduler.dialog.tab.taskList')">
           <n-scrollbar trigger="none" class="max-h-65 !rounded-[12px]">
             <TaskSelectList
@@ -209,7 +216,7 @@
           </n-scrollbar>
         </n-tab-pane>
 
-        <!-- Tab 2: 任务设置 -->
+        <!-- Tab 3: 任务设置 -->
         <n-tab-pane name="task-settings" :tab="t('settings.scheduler.dialog.tab.taskSettings')">
           <TaskOptionPanel
             :current-task-id="currentSettingTaskId"
@@ -247,6 +254,7 @@ import {
 import type { TaskListItem } from "@/types/task-config/model"
 import TaskSelectList from "@/components/panel/task/TaskSelectList.vue"
 import TaskOptionPanel from "@/components/panel/task/TaskOptionPanel.vue"
+import PreTaskList from "@/components/panel/task/PreTaskList.vue"
 import { resolveInterfaceText } from "@/utils/interface/content"
 import type {
   ScheduledTask,
@@ -281,7 +289,7 @@ const settingsStore = useSettingsStore()
 const formRef = ref<FormInst | null>(null)
 const loading = ref(false)
 
-const activeTab = ref<"task-list" | "task-settings">("task-list")
+const activeTab = ref<"task-list" | "task-settings" | "pre-tasks">("task-list")
 const currentSettingTaskId = ref<string | null>(null)
 const selectedControllerFilter = ref<string | null>(null)
 const selectedResourceFilter = ref<string | null>(null)
@@ -540,6 +548,7 @@ function initFormData(task?: ScheduledTask | null): ScheduledTaskCreate {
       trigger_config: getTriggerConfigByType(task.trigger_type, task.trigger_config),
       task_list,
       task_options: configStore.buildOptionsForTasks(task_list, task.task_options),
+      preTasks: Array.isArray(task.preTasks) ? task.preTasks.map((pt) => ({ ...pt })) : [],
     }
   }
   return {
@@ -550,6 +559,7 @@ function initFormData(task?: ScheduledTask | null): ScheduledTaskCreate {
     trigger_config: getTriggerConfigByType("cron"),
     task_list: [],
     task_options: configStore.buildOptionsForTasks([]),
+    preTasks: [],
   }
 }
 
@@ -639,8 +649,9 @@ async function handleSave() {
     const taskPayload = {
       ...formData.value,
       ...configStore.buildExecutionPayload(formData.value.task_list, formData.value.task_options),
+      preTasks: formData.value.preTasks ?? [],
     }
-    let success = false
+    let success
     if (isEditMode.value && props.task) {
       success = await schedulerStore.updateTask(props.task.id, taskPayload)
     } else {

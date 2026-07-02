@@ -139,7 +139,8 @@
         "taskCreated": "任务已创建",
         "tab": {
           "taskList": "任务列表",
-          "taskSettings": "任务设置"
+          "taskSettings": "任务设置",
+          "preTasks": "前置任务"
         },
         "noOptions": "空空如也"
       },

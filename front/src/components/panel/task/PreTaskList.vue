@@ -1,11 +1,15 @@
 <template>
-  <n-card hoverable class="pre-task-card" content-style="padding: 0.5rem 1rem;">
+  <n-card :hoverable="!embedded" class="pre-task-card" content-style="padding: 0.5rem 1rem;">
     <n-collapse
-      v-model:expanded-names="ExpandedNames"
+      v-model:expanded-names="expandedNames"
       arrow-placement="right"
       class="pre-task-collapse"
     >
-      <n-collapse-item display-directive="show" :title="$t('taskConfig.preTasks.title')">
+      <n-collapse-item
+        name="preTask"
+        display-directive="show"
+        :title="$t('taskConfig.preTasks.title')"
+      >
         <div
           style="
             display: flex;
@@ -68,25 +72,44 @@
 </template>
 
 <script setup lang="ts">
-import { storeToRefs } from "pinia"
+import { computed, ref } from "vue"
 import { VueDraggable } from "vue-draggable-plus"
-import { useTaskConfigStore } from "@/stores"
-import { ref } from "vue"
-const taskConfigStore = useTaskConfigStore()
-const ExpandedNames = ref<Array<string | number>>([])
-const { preTasks } = storeToRefs(taskConfigStore)
+import type { PreTaskCommand } from "@/types/task-config/model"
+
+interface Props {
+  modelValue: PreTaskCommand[]
+  embedded?: boolean
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  embedded: false,
+})
+
+const emit = defineEmits<{
+  (e: "update:modelValue", value: PreTaskCommand[]): void
+}>()
+
+const expandedNames = ref<Array<string | number>>(props.embedded ? ["preTask"] : [])
+
+const preTasks = computed<PreTaskCommand[]>({
+  get: () => props.modelValue,
+  set: (value) => emit("update:modelValue", value),
+})
 
 function handleAdd() {
-  preTasks.value.push({
-    id: crypto.randomUUID(),
-    command: "",
-    enabled: true,
-    timeout: 30,
-  })
+  preTasks.value = [
+    ...preTasks.value,
+    {
+      id: crypto.randomUUID(),
+      command: "",
+      enabled: true,
+      timeout: 30,
+    },
+  ]
 }
 
 function handleDelete(index: number) {
-  preTasks.value.splice(index, 1)
+  preTasks.value = preTasks.value.filter((_, i) => i !== index)
 }
 </script>
 
