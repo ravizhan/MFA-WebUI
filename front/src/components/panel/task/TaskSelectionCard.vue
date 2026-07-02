@@ -1,6 +1,7 @@
 <template>
   <div class="col-name">{{ t("panel.taskList") }}</div>
   <n-card hoverable>
+    <PreTaskList />
     <TaskSelectList
       :tasks="tasks"
       :selected-tasks="selectedTaskIds"
@@ -12,7 +13,6 @@
       @update:selected-tasks="(value) => emit('update:selected-tasks', value)"
       @config="(taskId) => emit('config', taskId)"
     />
-    <PreTaskList class="mt-4" />
     <n-flex class="form-btn" justify="center" :wrap="true" :size="[12, 12]">
       <n-button
         class="min-w-[9rem]"

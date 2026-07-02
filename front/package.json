@@ -39,6 +39,6 @@
     "unocss": "^66.7.0",
     "unplugin-auto-import": "^21.0.0",
     "unplugin-vue-components": "^32.1.0",
-    "vite": "^8.0.16"
+    "vite": "^8.1.0"
   }
 }

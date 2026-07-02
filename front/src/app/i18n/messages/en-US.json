@@ -241,13 +241,13 @@
   },
   "taskConfig": {
     "preTasks": {
-      "title": "Pre-Task Commands",
+      "title": "Pre-Task",
       "description": "Shell commands executed before the main task starts",
-      "add": "Add Command",
+      "add": "Add Task",
       "command": "Command",
       "timeout": "Timeout (seconds)",
       "enabled": "Enabled",
-      "empty": "No pre-task commands",
+      "empty": "No pre-task",
       "errors": {
         "timeout": "Timeout must be between 1 and 3600 seconds",
         "commandRequired": "Please enter a command"

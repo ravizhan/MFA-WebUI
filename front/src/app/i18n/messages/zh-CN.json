@@ -241,13 +241,13 @@
   },
   "taskConfig": {
     "preTasks": {
-      "title": "前置命令",
+      "title": "前置任务",
       "description": "开始主任务前执行的 Shell 命令",
-      "add": "添加命令",
+      "add": "添加任务",
       "command": "命令",
       "timeout": "超时（秒）",
       "enabled": "启用",
-      "empty": "暂无前置命令",
+      "empty": "暂无前置任务",
       "errors": {
         "timeout": "超时时间必须在 1-3600 秒之间",
         "commandRequired": "请输入命令"
