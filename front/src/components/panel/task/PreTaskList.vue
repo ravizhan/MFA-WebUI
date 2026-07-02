@@ -22,7 +22,7 @@
         handle=".pre-task-drag-handle"
         ghost-class="ghost"
       >
-        <n-list-item v-for="item in preTasks" :key="item.id" class="pre-task-row">
+        <n-list-item v-for="(item, index) in preTasks" :key="item.id" class="pre-task-row">
           <div class="flex w-full items-center gap-2">
             <div class="pre-task-drag-handle cursor-grab text-gray-400">
               <n-icon><div class="i-mdi-drag" /></n-icon>
