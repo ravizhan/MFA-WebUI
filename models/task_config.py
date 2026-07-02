@@ -210,7 +210,7 @@ def normalize_task_execution_payload(
                     normalized_pre_tasks.append(item)
             elif isinstance(item, dict):
                 command = item.get("command", "")
-                enabled = item.get("enabled", True)
+                enabled = bool(item.get("enabled", True))
                 timeout = item.get("timeout", 30)
                 task_id = item.get("id")
                 if enabled and isinstance(command, str) and command.strip():
@@ -221,7 +221,9 @@ def normalize_task_execution_payload(
                             else _generate_pre_task_id(),
                             command=command,
                             enabled=True,
-                            timeout=timeout if isinstance(timeout, int) else 30,
+                            timeout=int(timeout)
+                            if isinstance(timeout, (int, float))
+                            else 30,
                         )
                         normalized_pre_tasks.append(validated)
                     except Exception:
