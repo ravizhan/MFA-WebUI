@@ -1,10 +1,33 @@
-from pydantic import BaseModel, Field
+import uuid
+
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Dict, Optional, Literal
 from datetime import datetime
 
 
 TaskOptionValue = str | List[str] | Dict[str, str]
 TaskOptionsByTask = Dict[str, Dict[str, TaskOptionValue]]
+
+
+def _generate_pre_task_id() -> str:
+    """生成前置命令的唯一标识"""
+    return str(uuid.uuid4())
+
+
+class PreTaskCommand(BaseModel):
+    """前置 shell 命令配置"""
+
+    id: str = Field(default_factory=_generate_pre_task_id, description="唯一标识")
+    command: str = Field(..., description="要执行的 shell 命令")
+    enabled: bool = Field(True, description="是否启用")
+    timeout: int = Field(30, description="超时时间（秒），范围 1-3600")
+
+    @field_validator("timeout")
+    @classmethod
+    def validate_timeout(cls, v: int) -> int:
+        if v < 1 or v > 3600:
+            raise ValueError("timeout must be between 1 and 3600")
+        return v
 
 
 class CronTriggerConfig(BaseModel):
@@ -44,6 +67,9 @@ class TaskExecutionPayload(BaseModel):
     task_options: TaskOptionsByTask = Field(
         default_factory=dict, description="任务选项"
     )
+    preTasks: List[PreTaskCommand] = Field(
+        default_factory=list, description="前置 shell 命令列表"
+    )
 
 
 class ScheduledTask(TaskExecutionPayload):
@@ -82,6 +108,7 @@ class ScheduledTaskUpdate(BaseModel):
     trigger_config: Optional[TriggerConfig] = None
     task_list: Optional[List[str]] = None
     task_options: Optional[TaskOptionsByTask] = None
+    preTasks: Optional[List[PreTaskCommand]] = None
 
 
 class TaskExecution(BaseModel):

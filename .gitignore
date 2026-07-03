@@ -330,3 +330,8 @@ todo.md
 version
 .aiignore
 .codex
+deploy_result
+options
+tasks
+.sisyphus
+deps

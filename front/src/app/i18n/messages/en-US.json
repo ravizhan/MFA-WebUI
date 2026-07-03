@@ -139,7 +139,8 @@
         "taskCreated": "Task Created",
         "tab": {
           "taskList": "Task List",
-          "taskSettings": "Task Settings"
+          "taskSettings": "Task Settings",
+          "preTasks": "Pre-Task"
         },
         "noOptions": "Nothing here"
       },
@@ -237,6 +238,21 @@
       "modified": "Modified",
       "noDescription": "No preset description",
       "customDescription": "You are using a custom task snapshot and can continue editing it manually."
+    }
+  },
+  "taskConfig": {
+    "preTasks": {
+      "title": "Pre-Task",
+      "description": "Shell commands executed before the main task starts",
+      "add": "Add Task",
+      "command": "Command",
+      "timeout": "Timeout (seconds)",
+      "enabled": "Enabled",
+      "empty": "No pre-task",
+      "errors": {
+        "timeout": "Timeout must be between 1 and 3600 seconds",
+        "commandRequired": "Please enter a command"
+      }
     }
   }
 }

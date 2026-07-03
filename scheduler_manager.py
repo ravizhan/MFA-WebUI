@@ -36,6 +36,7 @@ async def execute_scheduled_task(
     task_description: str,
     task_list: List[str],
     task_options: TaskOptionsByTask,
+    pre_tasks: Optional[List[dict]] = None,
 ):
     """APScheduler 可持久化执行入口"""
     if _ACTIVE_MANAGER is None:
@@ -47,6 +48,7 @@ async def execute_scheduled_task(
         _task_description=task_description,
         task_list=task_list,
         task_options=task_options,
+        pre_tasks=pre_tasks or [],
     )
 
 
@@ -153,7 +155,8 @@ class SchedulerManager:
         self,
         task_list: Any,
         task_options: Any,
-    ) -> tuple[list[str], TaskOptionsByTask]:
+        pre_tasks: Any = None,
+    ) -> tuple[list[str], TaskOptionsByTask, list]:
         if not self._worker or not getattr(self._worker, "interface", None):
             normalized_task_list: list[str] = []
             if isinstance(task_list, list):
@@ -163,15 +166,19 @@ class SchedulerManager:
                         continue
                     normalized_task_list.append(task_id)
                     seen_task_ids.add(task_id)
-            return normalized_task_list, {
-                task_id: {} for task_id in normalized_task_list
-            }
+            return (
+                normalized_task_list,
+                {task_id: {} for task_id in normalized_task_list},
+                [],
+            )
 
-        return normalize_task_execution_payload(
+        ntl, nto, npt = normalize_task_execution_payload(
             task_list,
             task_options,
             self._worker.interface,
+            pre_tasks,
         )
+        return ntl, nto, npt
 
     async def _execute_task(
         self,
@@ -180,6 +187,7 @@ class SchedulerManager:
         _task_description: str,
         task_list: List[str],
         task_options: TaskOptionsByTask,
+        pre_tasks: Optional[List[dict]] = None,
     ):
         """执行定时任务"""
         logger.info(f"开始执行定时任务: {task_id}")
@@ -214,10 +222,11 @@ class SchedulerManager:
                 )
                 return
 
-            normalized_task_list, normalized_task_options = (
+            normalized_task_list, normalized_task_options, normalized_pre_tasks = (
                 self._normalize_task_payload(
                     task_list,
                     task_options,
+                    pre_tasks,
                 )
             )
             if not normalized_task_list:
@@ -233,6 +242,7 @@ class SchedulerManager:
                 normalized_task_list,
                 normalized_task_options,
                 task_name=task_name,
+                pre_tasks=normalized_pre_tasks,
             ):
                 logger.warning(f"任务已在运行，跳过定时任务 {task_id}")
                 await self._update_execution_status(
@@ -384,9 +394,12 @@ class SchedulerManager:
 
         task_id = str(uuid.uuid4())
         trigger = self._create_trigger(task_create.trigger_config)
-        normalized_task_list, normalized_task_options = self._normalize_task_payload(
-            task_create.task_list,
-            task_create.task_options,
+        normalized_task_list, normalized_task_options, normalized_pre_tasks = (
+            self._normalize_task_payload(
+                task_create.task_list,
+                task_create.task_options,
+                task_create.preTasks,
+            )
         )
         if not normalized_task_list:
             raise ValueError("任务列表不能为空")
@@ -402,6 +415,7 @@ class SchedulerManager:
                 "task_description": task_create.description or "",
                 "task_list": normalized_task_list,
                 "task_options": normalized_task_options,
+                "pre_tasks": [pt.model_dump() for pt in normalized_pre_tasks],
             },
         )
 
@@ -423,6 +437,7 @@ class SchedulerManager:
             trigger_config=task_create.trigger_config,
             task_list=normalized_task_list,
             task_options=normalized_task_options,
+            preTasks=normalized_pre_tasks,
             next_run_time=next_run_time,
         )
 
@@ -440,9 +455,10 @@ class SchedulerManager:
         # 从 kwargs 中获取任务信息
         task_name = job.kwargs.get("task_name", "")
         task_description = job.kwargs.get("task_description", "")
-        task_list, task_options = self._normalize_task_payload(
+        task_list, task_options, pre_tasks = self._normalize_task_payload(
             job.kwargs.get("task_list", []),
             job.kwargs.get("task_options", {}),
+            job.kwargs.get("preTasks", []) or job.kwargs.get("pre_tasks", []),
         )
         trigger_type: Literal["cron", "date", "interval"]
 
@@ -462,6 +478,7 @@ class SchedulerManager:
             trigger_config=trigger_config,
             task_list=task_list,
             task_options=task_options,
+            preTasks=pre_tasks,
             next_run_time=job.next_run_time,
         )
 
@@ -475,9 +492,10 @@ class SchedulerManager:
         for job in jobs:
             task_name = job.kwargs.get("task_name", "")
             task_description = job.kwargs.get("task_description", "")
-            task_list, task_options = self._normalize_task_payload(
+            task_list, task_options, pre_tasks = self._normalize_task_payload(
                 job.kwargs.get("task_list", []),
                 job.kwargs.get("task_options", {}),
+                job.kwargs.get("preTasks", []) or job.kwargs.get("pre_tasks", []),
             )
             trigger_type: Literal["cron", "date", "interval"]
 
@@ -499,6 +517,7 @@ class SchedulerManager:
                 trigger_config=trigger_config,
                 task_list=task_list,
                 task_options=task_options,
+                preTasks=pre_tasks,
                 next_run_time=job.next_run_time,
             )
             tasks.append(task)
@@ -548,10 +567,17 @@ class SchedulerManager:
                 if task_update.task_options is not None
                 else current_kwargs.get("task_options", {})
             )
-            normalized_task_list, normalized_task_options = (
+            new_pre_tasks = (
+                task_update.preTasks
+                if task_update.preTasks is not None
+                else current_kwargs.get("preTasks", [])
+                or current_kwargs.get("pre_tasks", [])
+            )
+            normalized_task_list, normalized_task_options, normalized_pre_tasks = (
                 self._normalize_task_payload(
                     new_task_list,
                     new_options,
+                    new_pre_tasks,
                 )
             )
             if not normalized_task_list:
@@ -576,6 +602,7 @@ class SchedulerManager:
                     "task_description": new_description,
                     "task_list": normalized_task_list,
                     "task_options": normalized_task_options,
+                    "preTasks": [pt.model_dump() for pt in normalized_pre_tasks],
                 },
             )
 

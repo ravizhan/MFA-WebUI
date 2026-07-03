@@ -139,7 +139,8 @@
         "taskCreated": "任务已创建",
         "tab": {
           "taskList": "任务列表",
-          "taskSettings": "任务设置"
+          "taskSettings": "任务设置",
+          "preTasks": "前置任务"
         },
         "noOptions": "空空如也"
       },
@@ -237,6 +238,21 @@
       "modified": "已修改",
       "noDescription": "暂无预设说明",
       "customDescription": "当前为自定义任务快照，可继续手动调整。"
+    }
+  },
+  "taskConfig": {
+    "preTasks": {
+      "title": "前置任务",
+      "description": "开始主任务前执行的 Shell 命令",
+      "add": "添加任务",
+      "command": "命令",
+      "timeout": "超时（秒）",
+      "enabled": "启用",
+      "empty": "暂无前置任务",
+      "errors": {
+        "timeout": "超时时间必须在 1-3600 秒之间",
+        "commandRequired": "请输入命令"
+      }
     }
   }
 }

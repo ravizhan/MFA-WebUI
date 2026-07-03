@@ -304,7 +304,7 @@ onUnmounted(() => {
 }
 
 .preset-desktop-card {
-  margin: 1rem 0;
+  margin: 0.5rem 0;
   overflow: hidden;
 }
 
@@ -358,7 +358,7 @@ onUnmounted(() => {
 }
 
 .preset-desktop-collapse :deep(.n-collapse-item__content-inner) {
-  padding-top: 0rem !important;
+  padding-top: 0 !important;
   padding-bottom: 0.5rem;
 }
 

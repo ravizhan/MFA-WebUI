@@ -9,10 +9,18 @@ export interface TaskListItem {
   checked?: boolean
 }
 
+export interface PreTaskCommand {
+  id: string
+  command: string
+  enabled: boolean
+  timeout: number
+}
+
 export interface TaskPresetSnapshot {
   taskOrder: string[]
   taskChecked: Record<string, boolean>
   taskOptions: TaskOptionsByTask
+  preTasks: PreTaskCommand[]
 }
 
 export interface PersistedTaskConfig {

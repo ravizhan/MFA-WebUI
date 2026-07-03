@@ -208,6 +208,7 @@ watch(
 
 watch(() => configStore.taskList, saveTaskConfig, { deep: true })
 watch(() => configStore.options, saveTaskConfig, { deep: true })
+watch(() => configStore.preTasks, saveTaskConfig, { deep: true })
 watch(() => configStore.selectedPresetName, saveTaskConfig)
 
 async function persistLastConnectedDevice(deviceInfo: ConnectableDevice, controllerName: string) {

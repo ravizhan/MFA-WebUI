@@ -1,6 +1,7 @@
 <template>
   <div class="col-name">{{ t("panel.taskList") }}</div>
   <n-card hoverable>
+    <PreTaskList v-model="configStore.preTasks" />
     <TaskSelectList
       :tasks="tasks"
       :selected-tasks="selectedTaskIds"
@@ -8,9 +9,9 @@
       :controller-name="controllerName"
       :resource-name="resourceName"
       :hide-incompatible="hideIncompatible"
-      @update:tasks="(value) => emit('update:tasks', value)"
-      @update:selected-tasks="(value) => emit('update:selected-tasks', value)"
-      @config="(taskId) => emit('config', taskId)"
+      @update:tasks="(value: any) => emit('update:tasks', value)"
+      @update:selected-tasks="(value: any) => emit('update:selected-tasks', value)"
+      @config="(taskId: any) => emit('config', taskId)"
     />
     <n-flex class="form-btn" justify="center" :wrap="true" :size="[12, 12]">
       <n-button
@@ -42,6 +43,8 @@
 
 <script setup lang="ts">
 import { useI18n } from "vue-i18n"
+import { useTaskConfigStore } from "@/stores"
+import PreTaskList from "@/components/panel/task/PreTaskList.vue"
 import TaskSelectList from "@/components/panel/task/TaskSelectList.vue"
 import type { TaskListItem } from "@/types/task-config/model"
 
@@ -64,6 +67,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const configStore = useTaskConfigStore()
 </script>
 
 <style scoped>
