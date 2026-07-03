@@ -661,7 +661,7 @@ def start(task_execution: TaskExecutionPayload):
     if not app_state.worker.tasks.start(
         normalized_task_list,
         normalized_task_options,
-        preTasks=normalized_pre_tasks,
+        pre_tasks=normalized_pre_tasks,
     ):
         msg = (
             app_state.worker.device_state.last_resource_error

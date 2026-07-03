@@ -415,7 +415,7 @@ class SchedulerManager:
                 "task_description": task_create.description or "",
                 "task_list": normalized_task_list,
                 "task_options": normalized_task_options,
-                "preTasks": [pt.model_dump() for pt in normalized_pre_tasks],
+                "pre_tasks": [pt.model_dump() for pt in normalized_pre_tasks],
             },
         )
 
