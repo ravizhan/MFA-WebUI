@@ -112,7 +112,7 @@ def main():
 """
 
     data = {
-        "model": "deepseek-ai/DeepSeek-V3.2",
+        "model": "deepseek-ai/DeepSeek-V4-Flash",
         "stream": True,
         "messages": [
             {"role": "system", "content": prompt},
