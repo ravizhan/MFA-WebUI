@@ -139,7 +139,7 @@ async def lifespan(app: FastAPI):
     await app_state.scheduler_manager.initialize()
 
     monitor_task = asyncio.create_task(log_monitor())
-    webbrowser.open_new("http://127.0.0.1:55666")
+    webbrowser.open_new("http://127.0.0.1:5566")
     yield
     app_state.is_shutting_down = True
     monitor_task.cancel()
@@ -534,7 +534,7 @@ async def perform_update():
                     "-archive",
                     os.path.abspath(update_package_path),
                     "-webhook",
-                    "http://127.0.0.1:55666/api/system/shutdown",
+                    "http://127.0.0.1:5566/api/system/shutdown",
                     "-restart-cmd",
                     sys.executable,
                 ]
@@ -863,6 +863,6 @@ if __name__ == "__main__":
     uvicorn.run(
         app,
         host="0.0.0.0",
-        port=55666,
+        port=5566,
         timeout_graceful_shutdown=1,
     )

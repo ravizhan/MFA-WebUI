@@ -11,7 +11,7 @@ Users bring their own MaaFramework `resource/` folder, `interface.json`, and `ag
 ## Build, Test, and Development Commands
 
 - `uv sync`: install Python dependencies.
-- `uv run main.py`: start FastAPI on `127.0.0.1:55666`.
+- `uv run main.py`: start FastAPI on `127.0.0.1:5566`.
 - `cd front && pnpm dev`: run Vite with API proxying.
 - `cd front && pnpm build`: build frontend output to `../page`.
 - `cd front && pnpm lint`: run oxlint.
