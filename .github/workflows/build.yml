@@ -131,18 +131,16 @@ jobs:
         shell: bash
         run: |
           echo "NUITKA_CACHE_DIR=${{ runner.temp }}/nuitka/cache" >> $GITHUB_ENV
+          echo "PYTHON_VERSION=$(python --version | awk '{print $2}' | cut -d '.' -f 1,2)" >> $GITHUB_ENV
 
       - name: Cache Nuitka cache directory
-        uses: actions/cache@v5.0.3
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ${{ env.NUITKA_CACHE_DIR }}
-          key: nuitka-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+          key: nuitka-${{ runner.os }}-${{ runner.arch }}-python-${{ env.PYTHON_VERSION }}-nuitka-${{ github.sha }}
           restore-keys: |
+            nuitka-${{ runner.os }}-${{ runner.arch }}-python-${{ env.PYTHON_VERSION }}-
             nuitka-${{ runner.os }}-${{ runner.arch }}-
-
-      - name: Cache Debug
-        shell: bash
-        run: ls -la ${{ env.NUITKA_CACHE_DIR }}
 
       - name: Build Executable
         if: ${{ matrix.os == 'windows-11-arm' || matrix.os == 'windows-2025' }}
