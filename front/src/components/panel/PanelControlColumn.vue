@@ -4,7 +4,7 @@
     :selected-device-key="selectedDeviceKey"
     :play-cover-address="playCoverAddress"
     :controller-options="controllerOptions"
-    :device-options="deviceOptions as any"
+    :device-options="deviceOptions"
     :loading="loading"
     :device-disabled="isDeviceResourceLocked"
     :resource-disabled="!selectedController || isDeviceResourceLocked"
@@ -18,8 +18,6 @@
     @update:resource="resource = $event"
     @controller-change="handleControllerChange"
     @refresh-devices="refreshDevices"
-    @connect-devices="connectDevices"
-    @confirm-resource="postResourceSelection"
   />
 
   <PresetSelectionCard />

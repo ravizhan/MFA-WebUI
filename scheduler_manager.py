@@ -264,7 +264,7 @@ class SchedulerManager:
 
             # 3. 判断是否已连接到匹配的设备与资源
             device_state = self._worker.device_state
-            device_controller_name = device.get("controller_name")
+            device_controller_name = device.get("controller_name") or controller_name
             need_connect = True
             if (
                 device_state.connected
@@ -276,11 +276,11 @@ class SchedulerManager:
 
             # 4. 若配置已锁定但连接不匹配，先解锁
             if need_connect and device_state.configuration_locked:
-                await asyncio.to_thread(self._worker.devices.reset_connection_state)
+                await asyncio.to_thread(self._worker.device.reset_connection_state)
 
             # 5. 构造 DeviceModel 并重试连接
             if need_connect:
-                device_model = self._worker.devices.build_device_model_from_config(
+                device_model = self._worker.device.build_device_model_from_config(
                     device_controller_name,
                     device["device_type"],
                     device["device_address"],
@@ -293,12 +293,12 @@ class SchedulerManager:
                 for attempt in range(1, max_retry + 1):
                     try:
                         connected = await asyncio.to_thread(
-                            self._worker.devices.connect, device_model
+                            self._worker.device.connect, device_model
                         )
                         if not connected:
                             raise RuntimeError("connect() 返回 False")
                         resource_set = await asyncio.to_thread(
-                            self._worker.devices.set_resource, resource_name
+                            self._worker.device.set_resource, resource_name
                         )
                         if not resource_set:
                             raise RuntimeError("set_resource() 返回 False")
@@ -326,7 +326,7 @@ class SchedulerManager:
                         if _settings.notification.notifyOnError
                         else [],
                     )
-                    await asyncio.to_thread(self._worker.devices.reset_connection_state)
+                    await asyncio.to_thread(self._worker.device.reset_connection_state)
                     await self._update_execution_status(
                         execution_id, "failed", "设备连接失败"
                     )
@@ -737,24 +737,26 @@ class SchedulerManager:
                 else current_kwargs.get("preTasks", [])
                 or current_kwargs.get("pre_tasks", [])
             )
+            # Use model_fields_set to distinguish "field omitted" (keep current)
+            # from "field set to None" (explicitly clear).
+            updated_fields = task_update.model_fields_set
             new_controller_name = (
                 task_update.controller_name
-                if task_update.controller_name is not None
+                if "controller_name" in updated_fields
                 else current_kwargs.get("controller_name", None)
             )
-            new_device_raw = (
-                task_update.device
-                if task_update.device is not None
-                else current_kwargs.get("device", None)
-            )
-            new_device = (
-                new_device_raw.model_dump()
-                if isinstance(new_device_raw, BaseModel)
-                else new_device_raw
-            )
+            if "device" in updated_fields:
+                new_device_raw = task_update.device
+                new_device = (
+                    new_device_raw.model_dump()
+                    if isinstance(new_device_raw, BaseModel)
+                    else new_device_raw
+                )
+            else:
+                new_device = current_kwargs.get("device", None)
             new_resource_name = (
                 task_update.resource_name
-                if task_update.resource_name is not None
+                if "resource_name" in updated_fields
                 else current_kwargs.get("resource_name", None)
             )
             normalized_task_list, normalized_task_options, normalized_pre_tasks = (

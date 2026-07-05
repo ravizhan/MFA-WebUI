@@ -31,7 +31,7 @@ export function getResource(controllerType?: string): Promise<ResourceInfo[]> {
 }
 
 export function postResource(name: string): Promise<PostResourceResult> {
-  return fetch("/api/resource?name=" + name, {
+  return fetch("/api/resource?name=" + encodeURIComponent(name), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

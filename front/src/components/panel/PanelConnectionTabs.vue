@@ -65,13 +65,14 @@
 
 <script setup lang="ts">
 import { useI18n } from "vue-i18n"
+import type { SelectOption, SelectGroupOption } from "naive-ui"
 
 const props = defineProps<{
   selectedController: string | null
   selectedDeviceKey: string | null
   playCoverAddress: string
   controllerOptions: Array<{ label: string; value: string; disabled?: boolean }>
-  deviceOptions: Array<{ label: string; value: string; disabled?: boolean }>
+  deviceOptions: Array<SelectOption | SelectGroupOption>
   loading: boolean
   deviceDisabled: boolean
   resourceDisabled: boolean

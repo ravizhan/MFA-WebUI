@@ -288,7 +288,7 @@ import TaskSelectList from "@/components/panel/task/TaskSelectList.vue"
 import TaskOptionPanel from "@/components/panel/task/TaskOptionPanel.vue"
 import PreTaskList from "@/components/panel/task/PreTaskList.vue"
 import { resolveInterfaceText } from "@/utils/interface/content"
-import { getDevices } from "@/services/api"
+import { getDevices, getResource } from "@/services/api"
 import type { ConnectableDevice, DeviceControllerType } from "@/services/api"
 import { buildDeviceLabel } from "@/utils/panel/device"
 import type { PanelLastConnectedDevice } from "@/types/settings/model"
@@ -794,14 +794,7 @@ async function fetchDevices(controllerName: string) {
 async function fetchResources(controllerType: string) {
   loadingResources.value = true
   try {
-    const response = await fetch(
-      `/api/resource?controller_type=${encodeURIComponent(controllerType)}`,
-    )
-    const data = (await response.json()) as {
-      status: string
-      resource: Array<{ name: string; label?: string; controller?: string[] }>
-    }
-    availableResources.value = data.status === "success" ? data.resource || [] : []
+    availableResources.value = await getResource(controllerType)
   } catch (error) {
     console.error("Failed to fetch resources:", error)
     availableResources.value = []

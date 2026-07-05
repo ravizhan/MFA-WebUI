@@ -6,13 +6,17 @@ def _get_app_state():
     """Access the AppState instance from the entry-point module.
 
     ``main.py`` creates ``app_state = AppState()`` at module level;
-    this helper retrieves it via ``sys.modules["__main__"]`` to avoid
-    circular imports or duplicating the singleton in ``app_state.py``.
+    this helper retrieves it via ``sys.modules`` to avoid circular
+    imports or duplicating the singleton in ``app_state.py``.
+
+    Checks both ``__main__`` (direct ``python main.py`` / ``uv run main.py``)
+    and ``main`` (``uvicorn main:app``) execution modes.
     """
-    main_mod = sys.modules.get("__main__")
-    if main_mod is None:
-        return None
-    return getattr(main_mod, "app_state", None)
+    for mod_name in ("__main__", "main"):
+        main_mod = sys.modules.get(mod_name)
+        if main_mod is not None and hasattr(main_mod, "app_state"):
+            return main_mod.app_state
+    return None
 
 
 def filter_resources_by_controller_type(
@@ -26,9 +30,9 @@ def filter_resources_by_controller_type(
 
     Controller-name-to-type mapping is resolved from the loaded
     interface (``InterfaceModel.controller``).  When the interface is
-    not available (e.g. worker not yet initialised) the function falls
-    back to a case-insensitive comparison between *controller_type* and
-    each entry in the resource's controller list.
+    not available (e.g. worker not yet initialised) the function skips
+    filtering and returns all resources unchanged to avoid false
+    negatives.
     """
     controller_names: list[str] | None = None
 
@@ -58,9 +62,9 @@ def filter_resources_by_controller_type(
             if any(name in controller_names for name in rc):
                 result.append(resource)
         else:
-            # Fallback: case-insensitive comparison
-            ct_lower = controller_type.lower()
-            if any(name.lower() == ct_lower for name in rc):
-                result.append(resource)
+            # Interface mapping unavailable — cannot reliably match
+            # controller names to types, so keep the resource to avoid
+            # false negatives.
+            result.append(resource)
 
     return result

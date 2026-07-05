@@ -31,6 +31,7 @@ const defaultSettings: SettingsModel = {
     reminderInterval: 30,
     autoRetry: true,
     maxRetryCount: 3,
+    retryInterval: 5,
   },
   about: {
     version: "",
@@ -44,6 +45,7 @@ const defaultSettings: SettingsModel = {
   panel: {
     lastResource: "",
     lastConnectedDevice: null,
+    recentDevices: [],
   },
 }
 
