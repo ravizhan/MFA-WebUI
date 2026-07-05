@@ -33,6 +33,7 @@ export interface RuntimeSettings {
   reminderInterval: number
   autoRetry: boolean
   maxRetryCount: number
+  retryInterval: number
 }
 
 // 关于我们（包含联系方式）
@@ -64,6 +65,7 @@ export interface PanelLastConnectedDevice {
 export interface PanelSettings {
   lastResource: string
   lastConnectedDevice: PanelLastConnectedDevice | null
+  recentDevices: PanelLastConnectedDevice[] | null
 }
 
 // 完整设置模型

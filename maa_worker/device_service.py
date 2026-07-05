@@ -300,6 +300,85 @@ class DeviceService:
             if state_changed:
                 self.worker.events.send_log(reason)
 
+    @staticmethod
+    def build_device_model_from_config(
+        controller_name: str, device_type: str, device_address: str
+    ) -> DeviceModel:
+        """从简化设备配置构造 DeviceModel。
+
+        由调度器使用，在执行定时任务前根据存储的设备配置构造 DeviceModel，
+        然后传递给 connect() 进行实际连接。
+
+        Args:
+            controller_name: 控制器名称（来自 interface.json 的 controller name）
+            device_type: 设备类型 ("Adb", "Win32", "Gamepad", "PlayCover")
+            device_address: 设备地址（格式因类型而异）
+                - Adb: IP:PORT 地址，如 "127.0.0.1:5555"
+                - Win32: hWnd 的字符串形式，如 "123456"
+                - Gamepad: "hWnd|gamepad_type" 格式，如 "123456|1"
+                - PlayCover: IP:PORT 地址，如 "127.0.0.1:1717"
+
+        Returns:
+            构造好的 DeviceModel 实例
+
+        Raises:
+            ValueError: 不支持的设备类型
+        """
+        if device_type == "Adb":
+            return DeviceModel(
+                type="Adb",
+                controller_name=controller_name,
+                name=device_address,
+                address=device_address,
+                adb_path="",
+                screencap_methods=0,
+                input_methods=0,
+                config={},
+            )
+        elif device_type == "Win32":
+            try:
+                hwnd = int(device_address)
+            except (ValueError, TypeError):
+                hwnd = 0
+            return DeviceModel(
+                type="Win32",
+                controller_name=controller_name,
+                name=device_address,
+                hWnd=hwnd,
+                screencap_methods=0,
+                input_methods=0,
+            )
+        elif device_type == "Gamepad":
+            parts = device_address.split("|", 1)
+            try:
+                hwnd = int(parts[0]) if parts else 0
+            except (ValueError, TypeError):
+                hwnd = 0
+            gamepad_type = 0
+            if len(parts) > 1:
+                try:
+                    gamepad_type = int(parts[1])
+                except (ValueError, TypeError):
+                    gamepad_type = 0
+            return DeviceModel(
+                type="Gamepad",
+                controller_name=controller_name,
+                name=device_address,
+                hWnd=hwnd,
+                gamepad_type=gamepad_type,
+                screencap_methods=0,
+            )
+        elif device_type == "PlayCover":
+            return DeviceModel(
+                type="PlayCover",
+                controller_name=controller_name,
+                name=device_address,
+                address=device_address,
+                uuid="",
+            )
+        else:
+            raise ValueError(f"不支持的设备类型: {device_type}")
+
     def connect(self, device_config: DeviceModel) -> bool:
         state = self.worker.device_state
         if state.configuration_locked:

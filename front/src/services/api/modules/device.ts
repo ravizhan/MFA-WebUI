@@ -1,5 +1,9 @@
-import { showGlobalMessage } from "@/services/feedback/message"
 import type { ApiResponse } from "@/services/api/core/types"
+
+export interface PostDeviceResult {
+  success: boolean
+  message: string
+}
 
 export type DeviceControllerType = "Adb" | "Win32" | "Gamepad" | "PlayCover"
 
@@ -86,7 +90,7 @@ export function getDevices(controllerName?: string): Promise<DeviceSearchData> {
     .then((data: DeviceResponse) => data.data)
 }
 
-export function postDevices(payload: ConnectDevicePayload): Promise<boolean> {
+export function postDevices(payload: ConnectDevicePayload): Promise<PostDeviceResult> {
   return fetch("/api/device", {
     method: "POST",
     body: JSON.stringify({
@@ -100,11 +104,13 @@ export function postDevices(payload: ConnectDevicePayload): Promise<boolean> {
     .then((res) => res.json())
     .then((data: ApiResponse) => {
       if (data.status === "success") {
-        showGlobalMessage("success", "设备连接成功")
-        return true
+        return { success: true, message: "设备连接成功" }
       }
-      showGlobalMessage("error", "设备连接失败，请检查终端日志")
-      return false
+      return { success: false, message: data.message || "设备连接失败，请检查终端日志" }
+    })
+    .catch((error) => {
+      console.error("Failed to connect device:", error)
+      return { success: false, message: "网络错误，请稍后重试" }
     })
 }
 

@@ -9,6 +9,16 @@ TaskOptionValue = str | List[str] | Dict[str, str]
 TaskOptionsByTask = Dict[str, Dict[str, TaskOptionValue]]
 
 
+class ScheduledTaskDeviceConfig(BaseModel):
+    """定时任务设备配置"""
+
+    controller_name: str = Field(..., description="控制器名称")
+    device_type: Literal["Adb", "Win32", "Gamepad", "PlayCover"] = Field(
+        ..., description="设备类型"
+    )
+    device_address: str = Field(..., description="设备地址")
+
+
 def _generate_pre_task_id() -> str:
     """生成前置命令的唯一标识"""
     return str(uuid.uuid4())
@@ -83,6 +93,9 @@ class ScheduledTask(TaskExecutionPayload):
         ..., description="触发器类型"
     )
     trigger_config: TriggerConfig = Field(..., description="触发器配置")
+    controller_name: Optional[str] = Field(None, description="控制器名称")
+    device: Optional[ScheduledTaskDeviceConfig] = Field(None, description="设备配置")
+    resource_name: Optional[str] = Field(None, description="资源包名称")
     next_run_time: Optional[datetime] = Field(None, description="下次执行时间")
     created_at: datetime = Field(default_factory=datetime.now, description="创建时间")
     updated_at: datetime = Field(default_factory=datetime.now, description="更新时间")
@@ -96,6 +109,9 @@ class ScheduledTaskCreate(TaskExecutionPayload):
     enabled: bool = True
     trigger_type: Literal["cron", "date", "interval"]
     trigger_config: TriggerConfig
+    controller_name: Optional[str] = Field(None, description="控制器名称")
+    device: Optional[ScheduledTaskDeviceConfig] = Field(None, description="设备配置")
+    resource_name: Optional[str] = Field(None, description="资源包名称")
 
 
 class ScheduledTaskUpdate(BaseModel):
@@ -106,6 +122,9 @@ class ScheduledTaskUpdate(BaseModel):
     enabled: Optional[bool] = None
     trigger_type: Optional[Literal["cron", "date", "interval"]] = None
     trigger_config: Optional[TriggerConfig] = None
+    controller_name: Optional[str] = Field(None, description="控制器名称")
+    device: Optional[ScheduledTaskDeviceConfig] = Field(None, description="设备配置")
+    resource_name: Optional[str] = Field(None, description="资源包名称")
     task_list: Optional[List[str]] = None
     task_options: Optional[TaskOptionsByTask] = None
     preTasks: Optional[List[PreTaskCommand]] = None

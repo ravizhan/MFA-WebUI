@@ -1,13 +1,25 @@
-import { showGlobalMessage } from "@/services/feedback/message"
 import type { ApiResponse } from "@/services/api/core/types"
+import { showGlobalMessage } from "@/services/feedback/message"
+
+export interface PostResourceResult {
+  success: boolean
+  message: string
+}
+
+export interface ResourceInfo {
+  name: string
+  label?: string | null
+  controller?: string[] | null
+}
 
 interface ResourceResponse {
   status: string
-  resource: string[]
+  resource: ResourceInfo[]
 }
 
-export function getResource(): Promise<string[]> {
-  return fetch("/api/resource", { method: "GET" })
+export function getResource(controllerType?: string): Promise<ResourceInfo[]> {
+  const query = controllerType ? `?controller_type=${encodeURIComponent(controllerType)}` : ""
+  return fetch(`/api/resource${query}`, { method: "GET" })
     .then((res) => res.json())
     .then((data: ResourceResponse & ApiResponse) => {
       if (data.status !== "success") {
@@ -18,7 +30,7 @@ export function getResource(): Promise<string[]> {
     })
 }
 
-export function postResource(name: string): Promise<boolean> {
+export function postResource(name: string): Promise<PostResourceResult> {
   return fetch("/api/resource?name=" + name, {
     method: "POST",
     headers: {
@@ -28,15 +40,12 @@ export function postResource(name: string): Promise<boolean> {
     .then((res) => res.json())
     .then((data: ApiResponse) => {
       if (data.status === "success") {
-        showGlobalMessage("success", "资源添加成功")
-        return true
+        return { success: true, message: "资源添加成功" }
       }
-      showGlobalMessage("error", data.message || "资源设置失败")
-      return false
+      return { success: false, message: data.message || "资源设置失败" }
     })
     .catch((error) => {
       console.error("Failed to set resource:", error)
-      showGlobalMessage("error", "网络错误，请稍后重试")
-      return false
+      return { success: false, message: "网络错误，请稍后重试" }
     })
 }

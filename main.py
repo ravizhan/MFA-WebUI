@@ -11,7 +11,7 @@ from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -313,12 +313,25 @@ def get_device_state():
 
 
 @app.get("/api/resource")
-def get_resource():
+def get_resource(controller_type: str | None = Query(default=None)):
     if app_state.worker is None:
         return {"status": "failed", "message": "Worker未初始化"}
-    if not app_state.worker.device_state.connected:
-        return {"status": "failed", "message": "请先连接设备后再选择资源"}
-    return {"status": "success", "resource": [i.name for i in interface.resource]}
+    resources = [
+        {
+            "name": r.name,
+            "label": r.label,
+            "controller": r.controller,
+        }
+        for r in interface.resource
+    ]
+    if controller_type:
+        try:
+            from maa_worker.resource_utils import filter_resources_by_controller_type
+
+            resources = filter_resources_by_controller_type(resources, controller_type)
+        except ImportError:
+            pass
+    return {"status": "success", "resource": resources}
 
 
 @app.post("/api/resource")

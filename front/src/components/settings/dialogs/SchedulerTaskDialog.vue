@@ -179,18 +179,50 @@
         </n-form-item>
       </template>
 
-      <n-space class="mb-6" :size="12" :wrap="true" justify="space-evenly">
+      <n-divider title-placement="left">
+        {{ t("settings.scheduler.dialog.deviceAndResource") }}
+      </n-divider>
+
+      <n-form-item :label="t('settings.scheduler.dialog.controller')" path="controller_name">
         <n-select
-          v-model:value="selectedControllerFilter"
-          :options="controllerFilterOptions"
-          class="min-w-[20rem]"
+          v-model:value="formData.controller_name"
+          :placeholder="t('panel.selectDeviceType')"
+          :options="deviceControllerOptions"
+          :loading="loadingDevices"
+          clearable
+        />
+      </n-form-item>
+
+      <n-form-item :label="t('settings.scheduler.dialog.deviceAddress')" path="device">
+        <n-input
+          v-if="isPlayCover"
+          v-model:value="selectedDeviceAddress"
+          :placeholder="t('panel.playcoverAddress')"
+          :disabled="!formData.controller_name"
         />
         <n-select
-          v-model:value="selectedResourceFilter"
-          :options="resourceFilterOptions"
-          class="min-w-[20rem]"
+          v-else
+          v-model:value="selectedDeviceAddress"
+          :placeholder="t('panel.selectDevice')"
+          :options="deviceAddressOptions"
+          :loading="loadingDevices"
+          :disabled="!formData.controller_name"
+          filterable
+          tag
+          clearable
         />
-      </n-space>
+      </n-form-item>
+
+      <n-form-item :label="t('settings.scheduler.dialog.resource')" path="resource_name">
+        <n-select
+          v-model:value="formData.resource_name"
+          :placeholder="t('panel.selectResource')"
+          :options="resourceOptions"
+          :loading="loadingResources"
+          :disabled="!formData.controller_name"
+          clearable
+        />
+      </n-form-item>
 
       <n-tabs v-model:value="activeTab" type="segment" animated>
         <!-- Tab 1: 前置任务 -->
@@ -206,8 +238,8 @@
             <TaskSelectList
               :tasks="taskListData"
               :selected-tasks="formData.task_list"
-              :controller-name="selectedControllerFilter"
-              :resource-name="selectedResourceFilter"
+              :controller-name="formData.controller_name"
+              :resource-name="formData.resource_name"
               :hide-incompatible="true"
               @update:tasks="handleTasksUpdate"
               @update:selected-tasks="handleSelectedTasksUpdate"
@@ -256,6 +288,10 @@ import TaskSelectList from "@/components/panel/task/TaskSelectList.vue"
 import TaskOptionPanel from "@/components/panel/task/TaskOptionPanel.vue"
 import PreTaskList from "@/components/panel/task/PreTaskList.vue"
 import { resolveInterfaceText } from "@/utils/interface/content"
+import { getDevices } from "@/services/api"
+import type { ConnectableDevice, DeviceControllerType } from "@/services/api"
+import { buildDeviceLabel } from "@/utils/panel/device"
+import type { PanelLastConnectedDevice } from "@/types/settings/model"
 import type {
   ScheduledTask,
   ScheduledTaskCreate,
@@ -291,9 +327,19 @@ const loading = ref(false)
 
 const activeTab = ref<"task-list" | "task-settings" | "pre-tasks">("task-list")
 const currentSettingTaskId = ref<string | null>(null)
-const selectedControllerFilter = ref<string | null>(null)
-const selectedResourceFilter = ref<string | null>(null)
-const suppressFilterSelectionCleanup = ref(false)
+const suppressFormInit = ref(false)
+
+const availableDevices = ref<ConnectableDevice[]>([])
+const availableResources = ref<Array<{ name: string; label?: string; controller?: string[] }>>([])
+const loadingDevices = ref(false)
+const loadingResources = ref(false)
+
+const SUPPORTED_DEVICE_TYPES = new Set<DeviceControllerType>([
+  "Adb",
+  "Win32",
+  "Gamepad",
+  "PlayCover",
+])
 
 const showDialog = computed({
   get: () => props.show,
@@ -303,20 +349,57 @@ const showDialog = computed({
 const isEditMode = computed(() => !!props.task)
 const availableTasks = computed(() => configStore.taskList)
 
-const controllerFilterOptions = computed(() =>
-  (interfaceStore.interface?.controller || []).map((controller) => ({
-    label: resolveInterfaceText(
-      interfaceStore.interface,
-      locale.value,
-      controller.label,
-      controller.name,
-    ),
-    value: controller.name,
-  })),
+const selectedControllerType = computed(() => {
+  const controller = interfaceStore.interface?.controller?.find(
+    (item) => item.name === formData.value.controller_name,
+  )
+  return controller?.type || null
+})
+
+const isPlayCover = computed(() => selectedControllerType.value === "PlayCover")
+
+const deviceControllerOptions = computed(() =>
+  (interfaceStore.interface?.controller || [])
+    .filter((controller) => SUPPORTED_DEVICE_TYPES.has(controller.type as DeviceControllerType))
+    .map((controller) => ({
+      label: resolveInterfaceText(
+        interfaceStore.interface,
+        locale.value,
+        controller.label,
+        controller.name,
+      ),
+      value: controller.name,
+    })),
 )
 
-const resourceFilterOptions = computed(() =>
-  (interfaceStore.interface?.resource || []).map((resource) => ({
+const deviceAddressOptions = computed(() => {
+  if (!formData.value.controller_name) {
+    return []
+  }
+
+  const options = new Map<string, { label: string; value: string }>()
+  for (const device of availableDevices.value) {
+    const value = getDeviceAddressValue(device)
+    options.set(value, { label: buildDeviceLabel(device), value })
+  }
+
+  const recentDevices = settingsStore.settings.panel.recentDevices ?? []
+  for (const device of recentDevices) {
+    if (device.controller_name !== formData.value.controller_name) {
+      continue
+    }
+    const value = getStoredDeviceAddress(device)
+    if (options.has(value)) {
+      continue
+    }
+    options.set(value, { label: buildStoredDeviceLabel(device), value })
+  }
+
+  return Array.from(options.values())
+})
+
+const resourceOptions = computed(() =>
+  availableResources.value.map((resource) => ({
     label: resolveInterfaceText(
       interfaceStore.interface,
       locale.value,
@@ -326,6 +409,24 @@ const resourceFilterOptions = computed(() =>
     value: resource.name,
   })),
 )
+
+const selectedDeviceAddress = computed<string | null>({
+  get: () => formData.value.device?.device_address ?? null,
+  set: (value) => {
+    const controller = interfaceStore.interface?.controller?.find(
+      (item) => item.name === formData.value.controller_name,
+    )
+    if (!controller || !value) {
+      formData.value.device = null
+      return
+    }
+    formData.value.device = {
+      controller_name: controller.name,
+      device_type: controller.type as DeviceControllerType,
+      device_address: value,
+    }
+  },
+})
 
 // 触发器配置的 computed 属性
 const cronConfig = computed(() => formData.value.trigger_config as CronTriggerConfig)
@@ -420,51 +521,70 @@ watch(
 watch(
   () => props.task,
   (task) => {
+    suppressFormInit.value = true
     formData.value = initFormData(task)
     syncTaskListData(formData.value.task_list)
-    resetFilterContext()
+    void nextTick(() => {
+      suppressFormInit.value = false
+    })
   },
 )
 
 watch(
-  () => showDialog.value,
-  (show) => {
-    if (show) {
-      resetFilterContext()
+  () => formData.value.controller_name,
+  (newVal, oldVal) => {
+    const controller = interfaceStore.interface?.controller?.find((item) => item.name === newVal)
+    const type = controller?.type
+
+    if (!suppressFormInit.value && oldVal != null && oldVal !== newVal) {
+      formData.value.device = null
+      formData.value.resource_name = undefined
+    }
+
+    if (newVal && type) {
+      void fetchDevices(newVal)
+      void fetchResources(type)
+    } else {
+      availableDevices.value = []
+      availableResources.value = []
     }
   },
 )
 
-watch([selectedControllerFilter, selectedResourceFilter], ([controllerName, resourceName]) => {
-  if (!showDialog.value || suppressFilterSelectionCleanup.value) {
-    return
-  }
+watch(
+  [() => formData.value.controller_name, () => formData.value.resource_name],
+  ([controllerName, resourceName]) => {
+    if (!showDialog.value || suppressFormInit.value) {
+      return
+    }
 
-  const compatibleTaskIds = formData.value.task_list.filter((taskId) =>
-    interfaceStore.isTaskCompatibleByEntry(taskId, controllerName, resourceName),
-  )
-  const removedCount = formData.value.task_list.length - compatibleTaskIds.length
-  if (removedCount <= 0) {
-    return
-  }
+    const compatibleTaskIds = formData.value.task_list.filter((taskId) =>
+      interfaceStore.isTaskCompatibleByEntry(taskId, controllerName, resourceName),
+    )
+    const removedCount = formData.value.task_list.length - compatibleTaskIds.length
+    if (removedCount <= 0) {
+      return
+    }
 
-  formData.value.task_list = compatibleTaskIds
-  formData.value.task_options = configStore.buildOptionsForTasks(
-    compatibleTaskIds,
-    formData.value.task_options,
-  )
+    formData.value.task_list = compatibleTaskIds
+    formData.value.task_options = configStore.buildOptionsForTasks(
+      compatibleTaskIds,
+      formData.value.task_options,
+    )
 
-  if (currentSettingTaskId.value && !compatibleTaskIds.includes(currentSettingTaskId.value)) {
-    currentSettingTaskId.value = null
-    activeTab.value = "task-list"
-  }
+    if (currentSettingTaskId.value && !compatibleTaskIds.includes(currentSettingTaskId.value)) {
+      currentSettingTaskId.value = null
+      activeTab.value = "task-list"
+    }
 
-  message.warning(
-    t("settings.scheduler.dialog.removedIncompatibleTasks", {
-      count: removedCount,
-    }),
-  )
-})
+    message.warning(
+      t("settings.scheduler.dialog.removedIncompatibleTasks", {
+        count: removedCount,
+      }),
+    )
+  },
+  { flush: "post" },
+)
 
 // 监听可用任务变化，更新可拖拽任务列表
 watch(
@@ -478,30 +598,8 @@ watch(
 function resetForm() {
   formData.value = initFormData()
   syncTaskListData(formData.value.task_list)
-  resetFilterContext()
   currentSettingTaskId.value = null
   activeTab.value = "task-list"
-}
-
-function resetFilterContext() {
-  const availableControllerNames = new Set(
-    (interfaceStore.interface?.controller || []).map((controller) => controller.name),
-  )
-  const availableResourceNames = new Set(
-    (interfaceStore.interface?.resource || []).map((resource) => resource.name),
-  )
-
-  const savedController = settingsStore.settings.panel.lastConnectedDevice?.controller_name || null
-  const savedResource = settingsStore.settings.panel.lastResource || null
-
-  suppressFilterSelectionCleanup.value = true
-  selectedControllerFilter.value =
-    savedController && availableControllerNames.has(savedController) ? savedController : null
-  selectedResourceFilter.value =
-    savedResource && availableResourceNames.has(savedResource) ? savedResource : null
-  void nextTick(() => {
-    suppressFilterSelectionCleanup.value = false
-  })
 }
 
 function syncTaskListData(preferredOrder: string[]) {
@@ -549,6 +647,9 @@ function initFormData(task?: ScheduledTask | null): ScheduledTaskCreate {
       task_list,
       task_options: configStore.buildOptionsForTasks(task_list, task.task_options),
       preTasks: Array.isArray(task.preTasks) ? task.preTasks.map((pt) => ({ ...pt })) : [],
+      controller_name: task.controller_name,
+      device: task.device ? { ...task.device } : null,
+      resource_name: task.resource_name,
     }
   }
   return {
@@ -560,6 +661,9 @@ function initFormData(task?: ScheduledTask | null): ScheduledTaskCreate {
     task_list: [],
     task_options: configStore.buildOptionsForTasks([]),
     preTasks: [],
+    controller_name: undefined,
+    device: null,
+    resource_name: undefined,
   }
 }
 
@@ -635,6 +739,75 @@ function openTaskSettings(taskId: string) {
   }
   currentSettingTaskId.value = taskId
   activeTab.value = "task-settings"
+}
+
+function getDeviceAddressValue(device: ConnectableDevice): string {
+  if (device.type === "Adb") {
+    return device.address
+  }
+  if (device.type === "Win32") {
+    return String(device.hWnd)
+  }
+  if (device.type === "Gamepad") {
+    return `${device.hWnd}|${device.gamepad_type}`
+  }
+  return device.address
+}
+
+function getStoredDeviceAddress(device: PanelLastConnectedDevice): string {
+  if (device.type === "Adb") {
+    return device.address
+  }
+  if (device.type === "Win32") {
+    return String(device.hWnd)
+  }
+  if (device.type === "Gamepad") {
+    return `${device.hWnd}|${device.gamepad_type}`
+  }
+  return device.address
+}
+
+function buildStoredDeviceLabel(device: PanelLastConnectedDevice): string {
+  if (device.type === "Adb") {
+    return device.address
+  }
+  if (device.type === "Win32" || device.type === "Gamepad") {
+    const name = device.window_name || device.class_name
+    return name ? `${name} (${device.hWnd})` : String(device.hWnd)
+  }
+  return device.address
+}
+
+async function fetchDevices(controllerName: string) {
+  loadingDevices.value = true
+  try {
+    const data = await getDevices(controllerName)
+    availableDevices.value = data.devices
+  } catch (error) {
+    console.error("Failed to fetch devices:", error)
+    availableDevices.value = []
+  } finally {
+    loadingDevices.value = false
+  }
+}
+
+async function fetchResources(controllerType: string) {
+  loadingResources.value = true
+  try {
+    const response = await fetch(
+      `/api/resource?controller_type=${encodeURIComponent(controllerType)}`,
+    )
+    const data = (await response.json()) as {
+      status: string
+      resource: Array<{ name: string; label?: string; controller?: string[] }>
+    }
+    availableResources.value = data.status === "success" ? data.resource || [] : []
+  } catch (error) {
+    console.error("Failed to fetch resources:", error)
+    availableResources.value = []
+  } finally {
+    loadingResources.value = false
+  }
 }
 
 async function handleSave() {

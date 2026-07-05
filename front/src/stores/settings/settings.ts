@@ -1,6 +1,6 @@
 import { defineStore } from "pinia"
 import { getSettings, updateSettings } from "@/services/api"
-import type { SettingsModel } from "@/types/settings/model"
+import type { PanelLastConnectedDevice, SettingsModel } from "@/types/settings/model"
 
 const defaultSettings: SettingsModel = {
   update: {
@@ -113,6 +113,7 @@ export const useSettingsStore = defineStore("settings", {
               ...defaultSettings.panel,
               ...data.panel,
               lastConnectedDevice: data.panel?.lastConnectedDevice ?? null,
+              recentDevices: data.panel?.recentDevices ?? [],
             },
           }
           // 确保本地缓存与服务器设置同步
@@ -166,6 +167,23 @@ export const useSettingsStore = defineStore("settings", {
 
       // 后台保存
       return this.saveSettings(updatedSettings)
+    },
+
+    addRecentDevice(deviceConfig: PanelLastConnectedDevice) {
+      const list = this.settings.panel.recentDevices ?? []
+      // Deduplicate: remove existing entry with same fingerprint
+      const filtered = list.filter((d) => d.fingerprint !== deviceConfig.fingerprint)
+      // Add most recent first
+      filtered.unshift(deviceConfig)
+      // Keep max 5
+      this.settings.panel.recentDevices = filtered.slice(0, 5)
+      return this.saveSettings()
+    },
+
+    removeRecentDevice(fingerprint: string) {
+      const list = this.settings.panel.recentDevices ?? []
+      this.settings.panel.recentDevices = list.filter((d) => d.fingerprint !== fingerprint)
+      return this.saveSettings()
     },
 
     async resetSettings() {
