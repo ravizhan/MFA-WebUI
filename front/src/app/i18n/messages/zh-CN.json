@@ -142,7 +142,11 @@
           "taskSettings": "任务设置",
           "preTasks": "前置任务"
         },
-        "noOptions": "空空如也"
+        "noOptions": "空空如也",
+        "deviceAndResource": "设备与资源",
+        "controller": "控制器",
+        "deviceAddress": "设备地址",
+        "resource": "资源"
       },
       "rules": {
         "nameRequired": "请输入任务名称",
@@ -207,11 +211,14 @@
     "selectResource": "请选择一个资源",
     "connect": "连接",
     "confirm": "确定",
+    "refresh": "刷新",
     "taskList": "任务列表",
     "start": "开始任务",
     "stop": "中止任务",
     "resetConfig": "重置配置",
     "noDevice": "无可用设备",
+    "recentDevices": "最近使用",
+    "discoveredDevices": "已发现设备",
     "selectTask": "请至少选择一个任务",
     "noCompatibleTask": "当前资源/控制器下没有可执行任务",
     "resetConfigConfirm": "确定要重置所有任务配置吗？此操作不可撤销。",

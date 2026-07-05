@@ -27,18 +27,20 @@
             :options="deviceOptions"
             :loading="loading"
             :disabled="!selectedController || selectedControllerDisabled || deviceDisabled"
+            filterable
+            tag
+            clearable
             class="min-w-[10rem] flex-1"
             @update:value="(value: string | null) => emit('update:selectedDeviceKey', value)"
-            @click="emit('refresh-devices')"
           />
           <n-button
             strong
             secondary
             type="info"
-            :disabled="deviceDisabled"
-            @click="emit('connect-devices')"
+            :disabled="!selectedController || selectedControllerDisabled || deviceDisabled"
+            @click="emit('refresh-devices')"
           >
-            {{ t("panel.connect") }}
+            {{ t("panel.refresh") }}
           </n-button>
         </n-flex>
       </n-tab-pane>
@@ -50,21 +52,11 @@
             :placeholder="t('panel.selectResource')"
             :options="resourcesList"
             :loading="loading"
-            remote
             :disabled="resourceDisabled"
+            clearable
             class="min-w-[12rem] flex-1"
             @update:value="(value: string | null) => emit('update:resource', value)"
-            @click="emit('fetch-resources')"
           />
-          <n-button
-            strong
-            secondary
-            type="info"
-            :disabled="resourceDisabled"
-            @click="emit('confirm-resource')"
-          >
-            {{ t("panel.confirm") }}
-          </n-button>
         </n-flex>
       </n-tab-pane>
     </n-tabs>
@@ -73,13 +65,14 @@
 
 <script setup lang="ts">
 import { useI18n } from "vue-i18n"
+import type { SelectOption, SelectGroupOption } from "naive-ui"
 
 const props = defineProps<{
   selectedController: string | null
   selectedDeviceKey: string | null
   playCoverAddress: string
   controllerOptions: Array<{ label: string; value: string; disabled?: boolean }>
-  deviceOptions: Array<{ label: string; value: string; disabled?: boolean }>
+  deviceOptions: Array<SelectOption | SelectGroupOption>
   loading: boolean
   deviceDisabled: boolean
   resourceDisabled: boolean
@@ -96,9 +89,6 @@ const emit = defineEmits<{
   (e: "update:resource", value: string | null): void
   (e: "controller-change"): void
   (e: "refresh-devices"): void
-  (e: "connect-devices"): void
-  (e: "fetch-resources"): void
-  (e: "confirm-resource"): void
 }>()
 
 const { t } = useI18n()

@@ -142,7 +142,11 @@
           "taskSettings": "Task Settings",
           "preTasks": "Pre-Task"
         },
-        "noOptions": "Nothing here"
+        "noOptions": "Nothing here",
+        "deviceAndResource": "Device & Resource",
+        "controller": "Controller",
+        "deviceAddress": "Device Address",
+        "resource": "Resource"
       },
       "rules": {
         "nameRequired": "Please enter task name",
@@ -207,11 +211,14 @@
     "selectResource": "Please select a resource",
     "connect": "Connect",
     "confirm": "Confirm",
+    "refresh": "Refresh",
     "taskList": "Task List",
     "start": "Start Task",
     "stop": "Stop Task",
     "resetConfig": "Reset Config",
     "noDevice": "No available device",
+    "recentDevices": "Recent",
+    "discoveredDevices": "Discovered",
     "selectTask": "Please select at least one task",
     "noCompatibleTask": "No executable tasks for current resource/controller",
     "resetConfigConfirm": "Are you sure you want to reset all task configurations? This cannot be undone.",

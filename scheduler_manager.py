@@ -5,6 +5,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional, List, Literal
 
+from pydantic import BaseModel
+
 import aiosqlite
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -12,10 +14,12 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
+from maa_worker.event_service import load_settings
 from models.task_config import normalize_task_execution_payload
 from models.scheduler import (
     ScheduledTask,
     ScheduledTaskCreate,
+    ScheduledTaskDeviceConfig,
     ScheduledTaskUpdate,
     TaskExecution,
     TaskOptionsByTask,
@@ -37,6 +41,9 @@ async def execute_scheduled_task(
     task_list: List[str],
     task_options: TaskOptionsByTask,
     pre_tasks: Optional[List[dict]] = None,
+    controller_name: Optional[str] = None,
+    device: Optional[dict] = None,
+    resource_name: Optional[str] = None,
 ):
     """APScheduler 可持久化执行入口"""
     if _ACTIVE_MANAGER is None:
@@ -49,6 +56,9 @@ async def execute_scheduled_task(
         task_list=task_list,
         task_options=task_options,
         pre_tasks=pre_tasks or [],
+        controller_name=controller_name,
+        device=device,
+        resource_name=resource_name,
     )
 
 
@@ -188,8 +198,20 @@ class SchedulerManager:
         task_list: List[str],
         task_options: TaskOptionsByTask,
         pre_tasks: Optional[List[dict]] = None,
+        controller_name: Optional[str] = None,
+        device: Optional[dict] = None,
+        resource_name: Optional[str] = None,
     ):
-        """执行定时任务"""
+        """执行定时任务
+
+        自动连接设备并设置资源后执行任务。连接流程：
+        1. 检查任务是否已在运行 → 跳过
+        2. 校验 device/resource_name 配置完整性
+        3. 若已连接到匹配设备且资源一致 → 复用连接
+        4. 若 configuration_locked 但连接不匹配 → reset_connection_state() 解锁
+        5. 构造 DeviceModel，按 maxRetryCount/retryInterval 重试 connect + set_resource
+        6. 连接成功后调用 tasks.start() 并等待完成
+        """
         logger.info(f"开始执行定时任务: {task_id}")
 
         # 创建执行记录
@@ -206,22 +228,111 @@ class SchedulerManager:
         await self._add_execution(execution)
 
         try:
-            # 检查是否有任务正在运行
+            # 1. 检查是否有任务正在运行
             if self._worker and self._worker.task_state.running:
-                logger.warning(f"任务已在运行，跳过定时任务 {task_id}")
+                self._worker.events.send_log(
+                    f"定时任务 {task_id} 已被跳过：任务已在运行"
+                )
                 await self._update_execution_status(
                     execution_id, "stopped", "任务已在运行"
                 )
                 return
 
-            # 检查设备是否已连接
-            if not self._worker or not self._worker.device_state.connected:
-                logger.error(f"设备未连接，无法执行定时任务 {task_id}")
+            if not self._worker:
+                logger.error(f"Worker 未就绪，无法执行定时任务 {task_id}")
                 await self._update_execution_status(
-                    execution_id, "failed", "设备未连接"
+                    execution_id, "failed", "Worker 未就绪"
                 )
                 return
 
+            # 2. 校验设备/资源配置完整性
+            if device is None or resource_name is None:
+                _settings = load_settings()
+                self._worker.events.send_notification(
+                    "配置缺失",
+                    f"定时任务 {task_id} 执行失败：设备或资源配置缺失",
+                    event="task.failed",
+                    level="error",
+                    notify=["notification"]
+                    if _settings.notification.notifyOnError
+                    else [],
+                )
+                await self._update_execution_status(
+                    execution_id, "failed", "设备或资源配置缺失"
+                )
+                return
+
+            # 3. 判断是否已连接到匹配的设备与资源
+            device_state = self._worker.device_state
+            device_controller_name = device.get("controller_name") or controller_name
+            need_connect = True
+            if (
+                device_state.connected
+                and device_state.configuration_locked
+                and device_state.controller_name == device_controller_name
+                and device_state.current_resource_name == resource_name
+            ):
+                need_connect = False
+
+            # 4. 若配置已锁定但连接不匹配，先解锁
+            if need_connect and device_state.configuration_locked:
+                await asyncio.to_thread(self._worker.device.reset_connection_state)
+
+            # 5. 构造 DeviceModel 并重试连接
+            if need_connect:
+                device_model = self._worker.device.build_device_model_from_config(
+                    device_controller_name,
+                    device["device_type"],
+                    device["device_address"],
+                )
+                _settings = load_settings()
+                max_retry = _settings.runtime.maxRetryCount
+                retry_interval = _settings.runtime.retryInterval
+
+                connect_success = False
+                for attempt in range(1, max_retry + 1):
+                    try:
+                        connected = await asyncio.to_thread(
+                            self._worker.device.connect, device_model
+                        )
+                        if not connected:
+                            raise RuntimeError("connect() 返回 False")
+                        resource_set = await asyncio.to_thread(
+                            self._worker.device.set_resource, resource_name
+                        )
+                        if not resource_set:
+                            raise RuntimeError("set_resource() 返回 False")
+                        connect_success = True
+                        break
+                    except Exception as e:
+                        if attempt < max_retry:
+                            self._worker.events.send_log(
+                                f"连接失败，第 {attempt} 次重试...: {e}"
+                            )
+                            await asyncio.sleep(retry_interval)
+                        else:
+                            self._worker.events.send_log(
+                                f"连接失败，已达最大重试次数 {max_retry}: {e}"
+                            )
+
+                if not connect_success:
+                    _settings = load_settings()
+                    self._worker.events.send_notification(
+                        "连接失败",
+                        f"定时任务 {task_id} 执行失败：设备连接失败",
+                        event="task.failed",
+                        level="error",
+                        notify=["notification"]
+                        if _settings.notification.notifyOnError
+                        else [],
+                    )
+                    await asyncio.to_thread(self._worker.device.reset_connection_state)
+                    await self._update_execution_status(
+                        execution_id, "failed", "设备连接失败"
+                    )
+                    return
+
+            # 6. 规范化任务载荷
             normalized_task_list, normalized_task_options, normalized_pre_tasks = (
                 self._normalize_task_payload(
                     task_list,
@@ -237,26 +348,29 @@ class SchedulerManager:
                 )
                 return
 
-            # 启动任务
+            # 7. 启动任务
             if not self._worker.tasks.start(
                 normalized_task_list,
                 normalized_task_options,
                 task_name=task_name,
                 pre_tasks=normalized_pre_tasks,
             ):
-                logger.warning(f"任务已在运行，跳过定时任务 {task_id}")
+                self._worker.events.send_log(
+                    f"定时任务 {task_id} 已被跳过：任务已在运行"
+                )
                 await self._update_execution_status(
                     execution_id, "stopped", "任务已在运行"
                 )
                 return
 
-            # 等待任务完成
+            # 8. 等待任务完成
             while self._worker and self._worker.task_state.running:
                 await asyncio.sleep(1)
 
             task_status = getattr(self._worker.task_state, "last_status", "failed")
             task_error = getattr(self._worker.task_state, "last_error", None)
 
+            # 9. 更新执行记录状态
             if task_status == "success":
                 await self._update_execution_status(execution_id, "success")
                 logger.info(f"定时任务 {task_id} 执行成功")
@@ -264,15 +378,18 @@ class SchedulerManager:
                 await self._update_execution_status(
                     execution_id, "stopped", task_error or "任务已终止"
                 )
-                logger.warning(f"定时任务 {task_id} 已停止")
+                self._worker.events.send_log(f"定时任务 {task_id} 已停止")
             else:
                 await self._update_execution_status(
                     execution_id, "failed", task_error or "任务执行失败"
                 )
                 logger.error(f"定时任务 {task_id} 执行失败: {task_error}")
+                self._worker.events.send_log(f"定时任务 {task_id} 执行失败")
 
         except Exception as e:
             logger.error(f"定时任务 {task_id} 执行失败: {e}")
+            if self._worker:
+                self._worker.events.send_log(f"定时任务 {task_id} 执行异常: {e}")
             await self._update_execution_status(execution_id, "failed", str(e))
 
     def _build_trigger_config(
@@ -416,6 +533,11 @@ class SchedulerManager:
                 "task_list": normalized_task_list,
                 "task_options": normalized_task_options,
                 "pre_tasks": [pt.model_dump() for pt in normalized_pre_tasks],
+                "controller_name": task_create.controller_name,
+                "device": task_create.device.model_dump()
+                if task_create.device
+                else None,
+                "resource_name": task_create.resource_name,
             },
         )
 
@@ -439,6 +561,9 @@ class SchedulerManager:
             task_options=normalized_task_options,
             preTasks=normalized_pre_tasks,
             next_run_time=next_run_time,
+            controller_name=task_create.controller_name,
+            device=task_create.device,
+            resource_name=task_create.resource_name,
         )
 
         logger.info(f"创建定时任务: {task.name} ({task_id})")
@@ -460,12 +585,19 @@ class SchedulerManager:
             job.kwargs.get("task_options", {}),
             job.kwargs.get("preTasks", []) or job.kwargs.get("pre_tasks", []),
         )
+        controller_name = job.kwargs.get("controller_name", None)
+        device_raw = job.kwargs.get("device", None)
+        device = ScheduledTaskDeviceConfig(**device_raw) if device_raw else None
+        resource_name = job.kwargs.get("resource_name", None)
         trigger_type: Literal["cron", "date", "interval"]
 
         try:
             trigger_type, trigger_config = self._build_trigger_config(job.trigger)
         except Exception as e:
-            logger.warning(f"重建触发器配置失败，使用默认 cron 配置: {e}")
+            if self._worker:
+                self._worker.events.send_log(
+                    f"重建触发器配置失败，使用默认 cron 配置: {e}"
+                )
             trigger_type = "cron"
             trigger_config = CronTriggerConfig(cron="* * * * *")
 
@@ -480,6 +612,9 @@ class SchedulerManager:
             task_options=task_options,
             preTasks=pre_tasks,
             next_run_time=job.next_run_time,
+            controller_name=controller_name,
+            device=device,
+            resource_name=resource_name,
         )
 
     async def get_all_tasks(self) -> List[ScheduledTask]:
@@ -497,14 +632,19 @@ class SchedulerManager:
                 job.kwargs.get("task_options", {}),
                 job.kwargs.get("preTasks", []) or job.kwargs.get("pre_tasks", []),
             )
+            controller_name = job.kwargs.get("controller_name", None)
+            device_raw = job.kwargs.get("device", None)
+            device = ScheduledTaskDeviceConfig(**device_raw) if device_raw else None
+            resource_name = job.kwargs.get("resource_name", None)
             trigger_type: Literal["cron", "date", "interval"]
 
             try:
                 trigger_type, trigger_config = self._build_trigger_config(job.trigger)
             except Exception as e:
-                logger.warning(
-                    f"重建任务 {job.id} 的触发器配置失败，使用默认 cron 配置: {e}"
-                )
+                if self._worker:
+                    self._worker.events.send_log(
+                        f"重建任务 {job.id} 的触发器配置失败，使用默认 cron 配置: {e}"
+                    )
                 trigger_type = "cron"
                 trigger_config = CronTriggerConfig(cron="* * * * *")
 
@@ -519,6 +659,9 @@ class SchedulerManager:
                 task_options=task_options,
                 preTasks=pre_tasks,
                 next_run_time=job.next_run_time,
+                controller_name=controller_name,
+                device=device,
+                resource_name=resource_name,
             )
             tasks.append(task)
 
@@ -529,11 +672,29 @@ class SchedulerManager:
     ) -> Optional[ScheduledTask]:
         """更新定时任务"""
         if not self.scheduler:
-            logger.error("调度器未初始化")
+            if self._worker:
+                _settings = load_settings()
+                self._worker.events.send_notification(
+                    "调度器未初始化",
+                    "无法更新定时任务：调度器未初始化",
+                    level="error",
+                    notify=["notification"]
+                    if _settings.notification.notifyOnError
+                    else [],
+                )
             return None
         job = self.scheduler.get_job(task_id)
         if not job:
-            logger.error(f"任务不存在: {task_id}")
+            if self._worker:
+                _settings = load_settings()
+                self._worker.events.send_notification(
+                    "任务不存在",
+                    f"无法更新定时任务：任务 {task_id} 不存在",
+                    level="error",
+                    notify=["notification"]
+                    if _settings.notification.notifyOnError
+                    else [],
+                )
             return None
 
         try:
@@ -543,7 +704,10 @@ class SchedulerManager:
             try:
                 _, current_trigger_config = self._build_trigger_config(job.trigger)
             except Exception as e:
-                logger.warning(f"重建当前触发器配置失败，使用默认 cron 配置: {e}")
+                if self._worker:
+                    self._worker.events.send_log(
+                        f"重建当前触发器配置失败，使用默认 cron 配置: {e}"
+                    )
                 current_trigger_config = CronTriggerConfig(cron="* * * * *")
 
             # 合并更新数据
@@ -572,6 +736,28 @@ class SchedulerManager:
                 if task_update.preTasks is not None
                 else current_kwargs.get("preTasks", [])
                 or current_kwargs.get("pre_tasks", [])
+            )
+            # Use model_fields_set to distinguish "field omitted" (keep current)
+            # from "field set to None" (explicitly clear).
+            updated_fields = task_update.model_fields_set
+            new_controller_name = (
+                task_update.controller_name
+                if "controller_name" in updated_fields
+                else current_kwargs.get("controller_name", None)
+            )
+            if "device" in updated_fields:
+                new_device_raw = task_update.device
+                new_device = (
+                    new_device_raw.model_dump()
+                    if isinstance(new_device_raw, BaseModel)
+                    else new_device_raw
+                )
+            else:
+                new_device = current_kwargs.get("device", None)
+            new_resource_name = (
+                task_update.resource_name
+                if "resource_name" in updated_fields
+                else current_kwargs.get("resource_name", None)
             )
             normalized_task_list, normalized_task_options, normalized_pre_tasks = (
                 self._normalize_task_payload(
@@ -603,6 +789,9 @@ class SchedulerManager:
                     "task_list": normalized_task_list,
                     "task_options": normalized_task_options,
                     "preTasks": [pt.model_dump() for pt in normalized_pre_tasks],
+                    "controller_name": new_controller_name,
+                    "device": new_device,
+                    "resource_name": new_resource_name,
                 },
             )
 
@@ -617,6 +806,8 @@ class SchedulerManager:
             return await self.get_task(task_id)
         except Exception as e:
             logger.error(f"更新任务失败: {e}")
+            if self._worker:
+                self._worker.events.send_log(f"更新任务失败: {e}")
             return None
 
     async def delete_task(self, task_id: str) -> bool:
@@ -629,6 +820,8 @@ class SchedulerManager:
             return True
         except Exception as e:
             logger.error(f"删除任务失败: {e}")
+            if self._worker:
+                self._worker.events.send_log(f"删除任务失败: {e}")
             return False
 
     async def pause_task(self, task_id: str) -> bool:
@@ -641,6 +834,8 @@ class SchedulerManager:
             return True
         except Exception as e:
             logger.error(f"暂停任务失败: {e}")
+            if self._worker:
+                self._worker.events.send_log(f"暂停任务失败: {e}")
             return False
 
     async def resume_task(self, task_id: str) -> bool:
@@ -653,6 +848,8 @@ class SchedulerManager:
             return True
         except Exception as e:
             logger.error(f"恢复任务失败: {e}")
+            if self._worker:
+                self._worker.events.send_log(f"恢复任务失败: {e}")
             return False
 
     async def get_executions(self, limit: int = 50) -> List[TaskExecution]:

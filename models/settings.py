@@ -2,7 +2,7 @@ import re
 from typing import Any, Literal, Optional
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, ValidationInfo, model_validator
+from pydantic import BaseModel, ValidationInfo, field_validator, model_validator
 
 
 def _normalize_str(value: Any) -> str:
@@ -89,6 +89,7 @@ class Runtime(BaseModel):
     reminderInterval: int = 30
     autoRetry: bool = True
     maxRetryCount: int = 3
+    retryInterval: int = 5
 
 
 class About(BaseModel):
@@ -117,6 +118,16 @@ class PanelLastConnectedDevice(BaseModel):
 class Panel(BaseModel):
     lastResource: str = ""
     lastConnectedDevice: Optional[PanelLastConnectedDevice] = None
+    recentDevices: Optional[list[PanelLastConnectedDevice]] = None
+
+    @field_validator("recentDevices")
+    @classmethod
+    def truncate_recent_devices(
+        cls, v: Optional[list[PanelLastConnectedDevice]]
+    ) -> Optional[list[PanelLastConnectedDevice]]:
+        if v is not None and len(v) > 5:
+            return v[:5]
+        return v
 
 
 class SettingsModel(BaseModel):
