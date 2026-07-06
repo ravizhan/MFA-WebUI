@@ -11,7 +11,10 @@
     "build": "vite build --emptyOutDir",
     "preview": "vite preview --host",
     "lint": "oxlint",
-    "format": "oxfmt"
+    "format": "oxfmt",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "clipboard": "^2.0.11",
@@ -27,11 +30,16 @@
   },
   "devDependencies": {
     "@iconify-json/mdi": "^1.2.3",
+    "@pinia/testing": "^1.0.3",
     "@tsconfig/node24": "^24.0.4",
     "@types/node": "^24.13.2",
     "@unocss/preset-wind4": "^66.7.4",
     "@vitejs/plugin-vue": "^6.0.7",
+    "@vitest/coverage-v8": "^4.1.9",
+    "@vue/test-utils": "^2.4.11",
     "@vue/tsconfig": "^0.9.1",
+    "jsdom": "^29.1.1",
+    "msw": "^2.14.6",
     "naive-ui": "^2.44.1",
     "oxfmt": "^0.40.0",
     "oxlint": "^1.72.0",
@@ -39,6 +47,7 @@
     "unocss": "^66.7.4",
     "unplugin-auto-import": "^21.0.0",
     "unplugin-vue-components": "^32.1.0",
-    "vite": "^8.1.2"
+    "vite": "^8.1.2",
+    "vitest": "^4.1.9"
   }
 }

@@ -1,0 +1,88 @@
+name: Tests
+
+on:
+  push
+
+concurrency:
+  group: tests-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend-tests:
+    permissions:
+      contents: read
+    env:
+      UV_INDEX: https://pypi.org/simple
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+          - os: ubuntu-24.04-arm
+          - os: macos-15-intel
+          - os: macos-15
+          - os: windows-2025
+          - os: windows-11-arm
+    runs-on: ${{ matrix.os }}
+    name: Backend Tests (${{ matrix.os }})
+    steps:
+      - name: Check-out repository
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7.5.0
+        with:
+          enable-cache: true
+
+      - name: Setup Python
+        uses: actions/setup-python@v6.2.0
+        with:
+          python-version-file: ".python-version"
+
+      - name: Install Dependencies
+        run: uv sync
+
+      - name: Run pytest
+        run: uv run pytest tests/ -q
+
+  frontend-tests:
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+          - os: ubuntu-24.04-arm
+          - os: macos-15-intel
+          - os: macos-15
+          - os: windows-2025
+          - os: windows-11-arm
+    runs-on: ${{ matrix.os }}
+    name: Frontend Tests (${{ matrix.os }})
+    defaults:
+      run:
+        working-directory: ./front
+    steps:
+      - name: Check-out repository
+        uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11
+          run_install: false
+          package_json_file: 'front/package.json'
+
+      - name: Use Node.js 24
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: "pnpm"
+          cache-dependency-path: 'front/pnpm-lock.yaml'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run Vitest
+        run: pnpm test:run
