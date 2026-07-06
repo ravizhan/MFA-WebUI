@@ -9,6 +9,7 @@ from maa_utils import MaaWorker
 from models.api import RealtimeEvent, RealtimeEventLevel
 from models.settings import SettingsModel
 from scheduler_manager import SchedulerManager
+from services.system_scheduler import SystemTaskService
 
 
 _HISTORY_MAXLEN = 2000
@@ -67,6 +68,7 @@ class AppState:
         self.current_status = None
         self.broadcaster: LogBroadcaster | None = None
         self.scheduler_manager: SchedulerManager | None = None
+        self.system_scheduler: SystemTaskService | None = None
         self.settings: SettingsModel | None = None
         self.subprocess_pipe: subprocess.Popen | None = None
         self.update_status: dict | None = None

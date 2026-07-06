@@ -115,7 +115,11 @@
         "success": "成功",
         "failed": "失败",
         "running": "运行中",
-        "stopped": "已停止"
+        "stopped": "已停止",
+        "inProcess": "进程内",
+        "systemUser": "系统级·用户",
+        "systemSystem": "系统级·系统",
+        "needsRepair": "需修复"
       },
       "dialog": {
         "editTitle": "编辑定时任务",
@@ -167,7 +171,20 @@
           "schedule": "执行计划",
           "environment": "运行环境",
           "content": "执行内容"
-        }
+        },
+        "systemScheduling": "系统级调度",
+        "enableSystemScheduling": "启用系统级调度",
+        "scope": {
+          "label": "运行范围",
+          "user": "用户级",
+          "system": "系统级",
+          "userWarning": "用户级任务在用户登出后不会执行",
+          "systemWarning": "系统级任务以 SYSTEM 账户运行，可能无法访问 ADB 设备。如任务依赖 ADB，建议使用用户级。"
+        },
+        "systemRegisterSuccess": "系统级注册成功",
+        "systemRegisterFail": "系统级注册失败",
+        "systemUnregisterSuccess": "已卸载系统级注册",
+        "systemUnregisterFail": "卸载系统级注册失败"
       },
       "rules": {
         "nameRequired": "请输入任务名称",
@@ -179,7 +196,11 @@
         "intervalRequired": "间隔时间必须大于 0",
         "endBeforeStart": "结束时间不能早于开始时间",
         "taskListRequired": "请至少选择一个任务"
-      }
+      },
+      "systemLevel": "调度方式",
+      "repairAll": "修复全部",
+      "repairSuccess": "修复完成",
+      "repairFail": "修复失败"
     },
     "ui": {
       "title": "界面设置",

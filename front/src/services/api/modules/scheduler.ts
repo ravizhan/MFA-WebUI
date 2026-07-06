@@ -2,6 +2,10 @@ import type {
   ScheduledTaskCreate,
   ScheduledTaskUpdate,
   SchedulerApiResponse,
+  SystemRegisterRequest,
+  SystemTaskRegistration,
+  SystemTaskRepairResult,
+  SystemTaskStatus,
 } from "@/types/schedulerModel"
 
 export function getSchedulerTasks(): Promise<SchedulerApiResponse> {
@@ -62,4 +66,53 @@ export function getSchedulerExecutions(limit: number = 50): Promise<SchedulerApi
   return fetch(`/api/scheduler/executions?limit=${limit}`, { method: "GET" }).then((res) =>
     res.json(),
   )
+}
+
+// ---------------------------------------------------------------------------
+// 系统级计划任务注册
+// ---------------------------------------------------------------------------
+
+export function registerSystemTask(
+  taskId: string,
+  request: SystemRegisterRequest,
+): Promise<{ status: string; data?: SystemTaskStatus; message?: string }> {
+  return fetch(`/api/scheduler/tasks/${taskId}/system-register`, {
+    method: "POST",
+    body: JSON.stringify(request),
+    headers: {
+      "Content-Type": "application/json",
+    },
+  }).then((res) => res.json())
+}
+
+export function unregisterSystemTask(
+  taskId: string,
+): Promise<{ status: string; message?: string }> {
+  return fetch(`/api/scheduler/tasks/${taskId}/system-register`, {
+    method: "DELETE",
+  }).then((res) => res.json())
+}
+
+export function getSystemTaskStatus(
+  taskId: string,
+): Promise<{ status: string; data?: SystemTaskStatus; message?: string }> {
+  return fetch(`/api/scheduler/tasks/${taskId}/system-status`, {
+    method: "GET",
+  }).then((res) => res.json())
+}
+
+export function getSystemTasks(): Promise<{
+  status: string
+  registrations?: SystemTaskRegistration[]
+  message?: string
+}> {
+  return fetch("/api/scheduler/system-tasks", { method: "GET" }).then((res) => res.json())
+}
+
+export function repairSystemTasks(): Promise<{
+  status: string
+  data?: SystemTaskRepairResult
+  message?: string
+}> {
+  return fetch("/api/scheduler/system-tasks/repair", { method: "POST" }).then((res) => res.json())
 }

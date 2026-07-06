@@ -39,6 +39,33 @@ type UpdateResult struct {
 	RestartRequired bool   `json:"restart_required"`
 }
 
+func updatingLockPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".mwu", "updating.lock"), nil
+}
+
+func createUpdatingLock() error {
+	lockPath, err := updatingLockPath()
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(lockPath, []byte("updating"), 0644)
+}
+
+func removeUpdatingLock() {
+	lockPath, err := updatingLockPath()
+	if err != nil {
+		return
+	}
+	os.Remove(lockPath)
+}
+
 func main() {
 	logFile, _ := os.OpenFile("updater.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if logFile != nil {
@@ -96,6 +123,13 @@ func main() {
 	if err := waitForLocks(installDir, cfg.RestartCmd); err != nil {
 		fail("Could not acquire file locks: %v", err)
 	}
+
+	log.Println("创建更新锁...")
+	if err := createUpdatingLock(); err != nil {
+		log.Printf("警告：无法创建更新锁文件：%v", err)
+		// Continue anyway — the lock is advisory, not mandatory
+	}
+	defer removeUpdatingLock()
 
 	log.Println("计算更改...")
 	changes, err := getChanges(installDir, extractDir)

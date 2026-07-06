@@ -1,4 +1,5 @@
 import uuid
+from enum import Enum
 
 from pydantic import BaseModel, Field, field_validator
 from typing import List, Dict, Optional, Literal
@@ -151,3 +152,84 @@ class TaskExecutionCreate(BaseModel):
     task_name: str
     status: Literal["running", "success", "failed", "stopped"]
     error_message: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# 系统级计划任务注册模型
+# ---------------------------------------------------------------------------
+
+
+class SystemTaskScope(str, Enum):
+    """系统级任务运行范围
+
+    - USER: 用户级，在用户会话中运行，用户登出后不执行
+    - SYSTEM: 系统级，以系统身份运行，用户登出后仍执行（注册需提权）
+    """
+
+    USER = "user"
+    SYSTEM = "system"
+
+
+class OSTriggerSpec(BaseModel):
+    """OS 级触发器规格，由 APScheduler 触发器映射而来"""
+
+    trigger_type: Literal["cron", "date", "interval"]
+    cron_expression: Optional[str] = Field(
+        None, description="cron 类型：5-field cron 表达式"
+    )
+    run_date: Optional[datetime] = Field(None, description="date 类型：一次性执行时间")
+    interval_minutes: Optional[int] = Field(
+        None, description="interval 类型：间隔分钟数（秒级降级为分钟）"
+    )
+
+
+class SystemTaskSpec(BaseModel):
+    """注册到 OS 调度器的任务规格"""
+
+    task_id: str
+    task_name: str
+    exe_path: str = Field(..., description="MWU 可执行文件路径 (sys.executable)")
+    cli_args: List[str] = Field(
+        ..., description="命令行参数，如 ['--headless', '--task', task_id]"
+    )
+    trigger: OSTriggerSpec
+    scope: SystemTaskScope
+    working_dir: str
+
+
+class SystemTaskRegistration(BaseModel):
+    """持久化的系统级任务注册记录"""
+
+    task_id: str
+    task_name: str
+    platform: Literal["windows", "macos", "linux"]
+    scope: SystemTaskScope
+    system_task_identifier: str = Field(
+        ..., description="schtasks 名称 / plist label / cron marker"
+    )
+    trigger_spec: OSTriggerSpec
+    registered_exe_path: str = Field(
+        ..., description="注册时的 exe 路径（用于自愈比对）"
+    )
+    last_registered_at: datetime
+    orphaned: bool = Field(False, description="APScheduler 任务已删除但 OS 注册仍存在")
+
+
+class SystemTaskStatusResponse(BaseModel):
+    """系统级注册状态查询响应"""
+
+    task_id: str
+    registered: bool
+    scope: Optional[SystemTaskScope] = None
+    platform: Optional[str] = None
+    next_run_time: Optional[datetime] = None
+    last_error: Optional[str] = None
+    path_valid: bool = Field(..., description="注册路径是否与当前 exe 一致")
+
+
+class SystemRegisterRequest(BaseModel):
+    """系统级注册请求"""
+
+    scope: SystemTaskScope = Field(
+        SystemTaskScope.USER, description="运行范围：用户级或系统级"
+    )

@@ -6,6 +6,9 @@ import type {
   ScheduledTaskCreate,
   ScheduledTaskUpdate,
   TaskExecution,
+  SystemTaskStatus,
+  SystemTaskRegistration,
+  SystemTaskScope,
 } from "@/types/schedulerModel"
 import {
   getSchedulerTasks,
@@ -15,6 +18,11 @@ import {
   pauseSchedulerTask,
   resumeSchedulerTask,
   getSchedulerExecutions,
+  registerSystemTask,
+  unregisterSystemTask,
+  getSystemTaskStatus,
+  getSystemTasks,
+  repairSystemTasks,
 } from "@/services/api"
 
 export const useSchedulerStore = defineStore("scheduler", () => {
@@ -23,6 +31,8 @@ export const useSchedulerStore = defineStore("scheduler", () => {
   const executions = ref<TaskExecution[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
+  const systemTaskStatuses = ref<Record<string, SystemTaskStatus>>({})
+  const systemRegistrations = ref<SystemTaskRegistration[]>([])
 
   // Computed
   const enabledTasks = computed(() => tasks.value.filter((t) => t.enabled))
@@ -47,7 +57,7 @@ export const useSchedulerStore = defineStore("scheduler", () => {
     loading.value = false
   }
 
-  async function createTask(task: ScheduledTaskCreate) {
+  async function createTask(task: ScheduledTaskCreate): Promise<ScheduledTask | null> {
     loading.value = true
     error.value = null
     const [response, err] = await tryCatch(() => createSchedulerTask(task))
@@ -55,16 +65,16 @@ export const useSchedulerStore = defineStore("scheduler", () => {
       error.value = "网络错误，请稍后重试"
       console.error("Failed to create task:", err)
       loading.value = false
-      return false
+      return null
     }
     if (response.status === "success" && response.task) {
       tasks.value.push(response.task)
       loading.value = false
-      return true
+      return response.task
     }
     error.value = response.message || "创建任务失败"
     loading.value = false
-    return false
+    return null
   }
 
   async function updateTask(taskId: string, taskUpdate: ScheduledTaskUpdate) {
@@ -154,12 +164,122 @@ export const useSchedulerStore = defineStore("scheduler", () => {
     loading.value = false
   }
 
+  // System-level scheduling actions
+  async function fetchSystemTaskStatus(taskId: string) {
+    const [response, err] = await tryCatch(() => getSystemTaskStatus(taskId))
+    if (err) {
+      console.error("Failed to fetch system task status:", err)
+      return
+    }
+    if (response.status === "success" && response.data) {
+      systemTaskStatuses.value[taskId] = response.data
+    }
+  }
+
+  async function registerSystem(taskId: string, scope: SystemTaskScope) {
+    const [response, err] = await tryCatch(() => registerSystemTask(taskId, { scope }))
+    if (err) {
+      error.value = "网络错误，请稍后重试"
+      console.error("Failed to register system task:", err)
+      return false
+    }
+    if (response.status === "success" && response.data) {
+      systemTaskStatuses.value[taskId] = response.data
+      return true
+    }
+    error.value = response.message || "系统级注册失败"
+    return false
+  }
+
+  async function unregisterSystem(taskId: string) {
+    const [response, err] = await tryCatch(() => unregisterSystemTask(taskId))
+    if (err) {
+      error.value = "网络错误，请稍后重试"
+      console.error("Failed to unregister system task:", err)
+      return false
+    }
+    if (response.status === "success") {
+      delete systemTaskStatuses.value[taskId]
+      return true
+    }
+    error.value = response.message || "卸载系统级注册失败"
+    return false
+  }
+
+  async function fetchSystemRegistrations() {
+    const [response, err] = await tryCatch(() => getSystemTasks())
+    if (err) {
+      console.error("Failed to fetch system registrations:", err)
+      return
+    }
+    if (response.status === "success" && response.registrations) {
+      systemRegistrations.value = response.registrations
+    }
+  }
+
+  async function fetchAllSystemStatuses() {
+    const [response, err] = await tryCatch(() => getSystemTasks())
+    if (err) {
+      console.error("Failed to fetch system statuses:", err)
+      return
+    }
+    if (response.status === "success" && response.registrations) {
+      const statuses: Record<string, SystemTaskStatus> = {}
+      for (const reg of response.registrations) {
+        statuses[reg.task_id] = {
+          task_id: reg.task_id,
+          registered: !reg.orphaned,
+          scope: reg.scope,
+          platform: reg.platform,
+          path_valid: true,
+          last_error: reg.orphaned ? "APScheduler 任务已删除" : undefined,
+        }
+      }
+      systemTaskStatuses.value = statuses
+    }
+  }
+
+  async function repairSystemTasksAll() {
+    loading.value = true
+    error.value = null
+    const [response, err] = await tryCatch(() => repairSystemTasks())
+    if (err) {
+      error.value = "网络错误，请稍后重试"
+      console.error("Failed to repair system tasks:", err)
+      loading.value = false
+      return false
+    }
+    if (response.status === "success") {
+      await fetchSystemRegistrations()
+      await fetchAllSystemStatuses()
+      loading.value = false
+      return true
+    }
+    error.value = response.message || "修复失败"
+    loading.value = false
+    return false
+  }
+
+  function getSystemStatus(taskId: string): SystemTaskStatus | undefined {
+    return systemTaskStatuses.value[taskId]
+  }
+
+  function getTaskById(taskId: string): ScheduledTask | undefined {
+    return tasks.value.find((t) => t.id === taskId)
+  }
+
+  function clearError() {
+    error.value = null
+  }
+
   return {
     // State
     tasks,
     executions,
     loading,
     error,
+    systemTaskStatuses,
+    systemRegistrations,
     // Computed
     enabledTasks,
     // Actions
@@ -169,5 +289,14 @@ export const useSchedulerStore = defineStore("scheduler", () => {
     deleteTask,
     toggleTask,
     fetchExecutions,
+    fetchSystemTaskStatus,
+    registerSystem,
+    unregisterSystem,
+    fetchSystemRegistrations,
+    fetchAllSystemStatuses,
+    repairSystemTasksAll,
+    getSystemStatus,
+    getTaskById,
+    clearError,
   }
 })

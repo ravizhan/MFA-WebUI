@@ -115,7 +115,11 @@
         "success": "Success",
         "failed": "Failed",
         "running": "Running",
-        "stopped": "Stopped"
+        "stopped": "Stopped",
+        "inProcess": "In-Process",
+        "systemUser": "System·User",
+        "systemSystem": "System·System",
+        "needsRepair": "Needs Repair"
       },
       "dialog": {
         "editTitle": "Edit Task",
@@ -167,7 +171,20 @@
           "schedule": "Schedule",
           "environment": "Environment",
           "content": "Tasks"
-        }
+        },
+        "systemScheduling": "System Scheduling",
+        "enableSystemScheduling": "Enable system-level scheduling",
+        "scope": {
+          "label": "Scope",
+          "user": "User",
+          "system": "System",
+          "userWarning": "User-level tasks will not run after user logout",
+          "systemWarning": "System-level tasks run as SYSTEM account and may not access ADB devices. If the task depends on ADB, use user-level."
+        },
+        "systemRegisterSuccess": "System registration successful",
+        "systemRegisterFail": "System registration failed",
+        "systemUnregisterSuccess": "System registration removed",
+        "systemUnregisterFail": "Failed to remove system registration"
       },
       "rules": {
         "nameRequired": "Please enter task name",
@@ -179,7 +196,11 @@
         "intervalRequired": "Interval must be greater than 0",
         "endBeforeStart": "End time cannot be earlier than start time",
         "taskListRequired": "Please select at least one task"
-      }
+      },
+      "systemLevel": "Scheduling",
+      "repairAll": "Repair All",
+      "repairSuccess": "Repair completed",
+      "repairFail": "Repair failed"
     },
     "ui": {
       "title": "UI Settings",

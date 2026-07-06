@@ -9,6 +9,11 @@ vi.mock("@/services/api", () => ({
   pauseSchedulerTask: vi.fn<() => void>(),
   resumeSchedulerTask: vi.fn<() => void>(),
   getSchedulerExecutions: vi.fn<() => void>(),
+  registerSystemTask: vi.fn<() => void>(),
+  unregisterSystemTask: vi.fn<() => void>(),
+  getSystemTaskStatus: vi.fn<() => void>(),
+  getSystemTasks: vi.fn<() => void>(),
+  repairSystemTasks: vi.fn<() => void>(),
 }))
 
 import { useSchedulerStore } from "@/stores/scheduler/scheduler"
@@ -83,7 +88,7 @@ describe("useSchedulerStore", () => {
   })
 
   describe("createTask", () => {
-    it("pushes task and returns true on success", async () => {
+    it("pushes task and returns created task on success", async () => {
       const created = mockTask("new", true)
       vi.mocked(api.createSchedulerTask).mockResolvedValue({
         status: "success",
@@ -99,11 +104,11 @@ describe("useSchedulerStore", () => {
         trigger_type: "cron",
         trigger_config: { type: "cron", cron: "* * * * *" },
       })
-      expect(result).toBe(true)
+      expect(result).toEqual(created)
       expect(store.tasks).toContainEqual(created)
     })
 
-    it("sets error and returns false on failure", async () => {
+    it("sets error and returns null on failure", async () => {
       vi.mocked(api.createSchedulerTask).mockResolvedValue({
         status: "failed",
         message: "create failed",
@@ -118,7 +123,7 @@ describe("useSchedulerStore", () => {
         trigger_type: "cron",
         trigger_config: { type: "cron", cron: "* * * * *" },
       })
-      expect(result).toBe(false)
+      expect(result).toBeNull()
       expect(store.error).toBe("create failed")
     })
   })

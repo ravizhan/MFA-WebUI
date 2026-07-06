@@ -100,3 +100,50 @@ export interface SchedulerApiResponse {
   task?: ScheduledTask
   executions?: TaskExecution[]
 }
+
+// ---------------------------------------------------------------------------
+// 系统级计划任务注册
+// ---------------------------------------------------------------------------
+
+export type SystemTaskScope = "user" | "system"
+
+export type SystemTaskPlatform = "windows" | "macos" | "linux"
+
+export interface OSTriggerSpec {
+  trigger_type: TriggerType
+  cron_expression?: string
+  run_date?: string
+  interval_minutes?: number
+}
+
+export interface SystemTaskStatus {
+  task_id: string
+  registered: boolean
+  scope?: SystemTaskScope
+  platform?: SystemTaskPlatform
+  next_run_time?: string
+  last_error?: string
+  path_valid: boolean
+}
+
+export interface SystemTaskRegistration {
+  task_id: string
+  task_name: string
+  platform: SystemTaskPlatform
+  scope: SystemTaskScope
+  system_task_identifier: string
+  trigger_spec: OSTriggerSpec
+  registered_exe_path: string
+  last_registered_at: string
+  orphaned: boolean
+}
+
+export interface SystemRegisterRequest {
+  scope: SystemTaskScope
+}
+
+export interface SystemTaskRepairResult {
+  repaired: number
+  failed: number
+  details: string[]
+}
