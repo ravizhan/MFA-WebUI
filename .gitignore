@@ -270,7 +270,7 @@ pyrightconfig.json
 docs/_book
 
 # TODO: where does this rule come from?
-test/
+#test/
 
 ### Vuejs ###
 # Recommended template: Node.gitignore
@@ -322,7 +322,6 @@ openspec*.*
 .opencode
 .roo
 interface.json
-test*.py
 *.psd
 *.bak
 *.exe
