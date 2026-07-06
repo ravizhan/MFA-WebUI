@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import re
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,11 @@ from models.interface import InterfaceModel, Option, OptionCase
 
 
 IMPORTABLE_KEYS = {"task", "option", "preset", "import"}
+
+# pathlib.Path is OS-aware: on POSIX it does not recognize Windows drive
+# letters (e.g. "C:/windows" parses as a relative path). Detect them
+# explicitly so absolute-path rejection is consistent across platforms.
+_WIN_DRIVE_RE = re.compile(r"^[A-Za-z]:")
 
 
 class InterfaceLoadError(ValueError):
@@ -172,7 +178,12 @@ def _normalize_root_relative_path(raw_path: str, *, field_name: str) -> str:
         raise ValueError(f"{field_name} 不能为空")
 
     candidate = Path(normalized_path)
-    if candidate.is_absolute() or candidate.drive or candidate.root:
+    if (
+        candidate.is_absolute()
+        or candidate.drive
+        or candidate.root
+        or _WIN_DRIVE_RE.match(normalized_path)
+    ):
         raise ValueError(f"{field_name} 不允许使用绝对路径: {raw_path}")
 
     if normalized_path in {".", ".."}:
