@@ -14,7 +14,16 @@
     "none": "None",
     "copy": "Copy",
     "start": "Start",
-    "pause": "Pause"
+    "pause": "Pause",
+    "darkMode": "Dark Mode",
+    "lightMode": "Light Mode"
+  },
+  "nav": {
+    "home": "Home",
+    "tasks": "Tasks",
+    "routines": "Routines",
+    "logs": "Logs",
+    "settings": "Settings"
   },
   "menu": {
     "home": "Home",

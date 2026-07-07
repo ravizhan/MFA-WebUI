@@ -331,6 +331,7 @@ version
 .codex
 deploy_result
 options
-tasks
+/tasks
 .sisyphus
 deps
+.explyt

@@ -1,4 +1,4 @@
-import "@/app/styles/main.css"
+import "@/app.css"
 import { createApp } from "vue"
 import { createPinia } from "pinia"
 import App from "@/app/App.vue"
@@ -13,7 +13,6 @@ import {
   showToastMessage,
 } from "@/services/realtime/events"
 import type { RealtimeEvent } from "@/types/realtime/model"
-import "virtual:uno.css"
 
 const app = createApp(App)
 const pinia = createPinia()

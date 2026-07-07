@@ -2,8 +2,8 @@ import type { TaskExecutionPayload } from "@/types/scheduler/model"
 import { showGlobalMessage } from "@/services/feedback/message"
 import type { ApiResponse } from "@/services/api/core/types"
 
-export function startTask(payload: TaskExecutionPayload): void {
-  fetch("/api/start", {
+export function startTask(payload: TaskExecutionPayload): Promise<boolean> {
+  return fetch("/api/start", {
     method: "POST",
     body: JSON.stringify(payload),
     headers: {
@@ -14,7 +14,14 @@ export function startTask(payload: TaskExecutionPayload): void {
     .then((data: ApiResponse) => {
       if (data.status !== "success") {
         showGlobalMessage("error", data.message || "任务启动失败")
+        return false
       }
+      return true
+    })
+    .catch((error) => {
+      console.error("Failed to start task:", error)
+      showGlobalMessage("error", "任务启动失败")
+      return false
     })
 }
 

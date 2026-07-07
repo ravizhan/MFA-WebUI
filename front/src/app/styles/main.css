@@ -7,14 +7,6 @@ body {
 #app {
   height: 100%;
 }
-.col-name {
-  text-align: center;
-  margin: 0.5rem 0 0.5rem 0;
-  font-size: 1.25rem;
-  font-weight: 600;
-  opacity: 0.9;
-}
-
 .fade-enter-active,
 .fade-leave-active {
   transition: opacity 0.15s ease;
@@ -50,4 +42,30 @@ body {
 .slide-right-leave-to {
   opacity: 0;
   transform: translateX(30px);
+}
+
+/* Custom scrollbar for log panels */
+.log-panel {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* Markdown viewer overrides */
+.markdown-body {
+  font-size: 0.9rem;
+  line-height: 1.6;
+}
+
+.markdown-body img {
+  max-width: 100%;
+  border-radius: 0.5rem;
+}
+
+/* Ghost class for draggable */
+.ghost {
+  opacity: 0.5;
+  background: oklch(85% 0.1 200);
 }

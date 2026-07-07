@@ -28,6 +28,7 @@ export interface IntervalTriggerConfig {
 export type TriggerConfig = CronTriggerConfig | DateTriggerConfig | IntervalTriggerConfig
 
 export type TaskOptionValue = string | string[] | Record<string, string>
+export type NullableTaskOptionValue = TaskOptionValue | null
 export type TaskOptionsByTask = Record<string, Record<string, TaskOptionValue>>
 
 export interface TaskExecutionPayload {

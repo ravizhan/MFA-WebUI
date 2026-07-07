@@ -3,7 +3,6 @@ import type {
   ConnectableDevice,
   DeviceControllerCapability,
   GamepadDevice,
-  PlayCoverDevice,
   Win32Device,
 } from "@/services/api"
 import type { PanelLastConnectedDevice } from "@/types/settings/model"
@@ -19,12 +18,6 @@ export function isWin32Device(value: unknown): value is Win32Device {
 export function isGamepadDevice(value: unknown): value is GamepadDevice {
   return (
     !!value && typeof value === "object" && (value as Partial<GamepadDevice>).type === "Gamepad"
-  )
-}
-
-export function isPlayCoverDevice(value: unknown): value is PlayCoverDevice {
-  return (
-    !!value && typeof value === "object" && (value as Partial<PlayCoverDevice>).type === "PlayCover"
   )
 }
 

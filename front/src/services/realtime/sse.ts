@@ -39,7 +39,6 @@ export class SSEClient {
     }
 
     this.eventSource.onopen = () => {
-      console.log("SSE连接成功")
       this.reconnectAttempts = 0
     }
 
@@ -64,7 +63,6 @@ export class SSEClient {
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null
       this.reconnectAttempts++
-      console.log(`SSE重连尝试 #${this.reconnectAttempts}，等待 ${delay}ms`)
       this.connect()
     }, delay)
   }

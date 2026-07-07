@@ -1,14 +1,12 @@
 <template>
-  <div class="col-name">{{ t("panel.taskDescription") }}</div>
-  <n-card hoverable content-style="padding: 0.5rem 1rem;" class="transition-all duration-300">
-    <MarkdownViewer :source="documentContent" :empty-text="t('panel.empty')" />
-  </n-card>
+  <div class="markdown-body min-h-20 max-h-52 overflow-y-auto" v-html="htmlContent" />
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from "vue"
 import { useI18n } from "vue-i18n"
-import MarkdownViewer from "@/components/panel/common/MarkdownViewer.vue"
+import DOMPurify from "dompurify"
+import { marked } from "marked"
 import { useIndexStore, useInterfaceStore } from "@/stores"
 import type { Task } from "@/types/interface/model"
 import { resolveInterfaceDocumentContent } from "@/utils/interface/content"
@@ -53,4 +51,9 @@ watch(
   },
   { immediate: true },
 )
+
+const htmlContent = computed(() => {
+  const source = documentContent.value?.trim() ? documentContent.value : t("panel.empty")
+  return DOMPurify.sanitize(marked.parse(source || "") as string)
+})
 </script>

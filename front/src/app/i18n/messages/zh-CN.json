@@ -14,7 +14,16 @@
     "none": "无",
     "copy": "复制",
     "start": "开始",
-    "pause": "暂停"
+    "pause": "暂停",
+    "darkMode": "暗黑模式",
+    "lightMode": "亮色模式"
+  },
+  "nav": {
+    "home": "首页",
+    "tasks": "任务",
+    "routines": "定时",
+    "logs": "日志",
+    "settings": "设置"
   },
   "menu": {
     "home": "首页",

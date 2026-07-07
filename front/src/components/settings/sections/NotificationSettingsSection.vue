@@ -1,160 +1,236 @@
 <template>
-  <n-card
-    id="notification-settings"
-    class="mb-6 scroll-mt-5 last:mb-0"
-    :title="t('settings.notification.title')"
-  >
-    <template #header-extra>
-      <n-button
-        size="small"
-        type="info"
-        @click="testNotification"
+  <div class="space-y-4">
+    <div class="flex justify-end">
+      <button
+        class="btn btn-info btn-sm"
         :disabled="isTestNotificationDisabled"
+        @click="testNotification"
       >
+        <Icon icon="mdi:bell-ring" class="mr-1 text-base" />
         {{ t("settings.notification.test") }}
-      </n-button>
-    </template>
-    <n-form label-placement="left" label-width="120">
-      <n-form-item :label="t('settings.notification.enable')">
-        <n-space>
-          <n-checkbox
-            v-model:checked="settings.notification.systemNotification"
-            @update:checked="
-              (val: boolean) => handleSettingChange('notification', 'systemNotification', val)
+      </button>
+    </div>
+
+    <div class="form-control">
+      <label class="label">
+        <span class="label-text">{{ t("settings.notification.enable") }}</span>
+      </label>
+      <div class="flex flex-wrap gap-4">
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            class="checkbox checkbox-primary"
+            :checked="settings.notification.systemNotification"
+            @change="
+              handleSettingChange(
+                'notification',
+                'systemNotification',
+                ($event.target as HTMLInputElement).checked,
+              )
             "
-          >
-            {{ t("settings.notification.system") }}
-          </n-checkbox>
-          <n-checkbox
+          />
+          <span class="text-sm">{{ t("settings.notification.system") }}</span>
+        </label>
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            class="checkbox checkbox-primary"
             :checked="settings.notification.browserNotification"
-            @update:checked="handleBrowserNotificationChange"
-          >
-            {{ t("settings.notification.browser") }}
-          </n-checkbox>
-          <n-checkbox
-            v-model:checked="settings.notification.externalNotification"
-            @update:checked="
-              (val: boolean) => handleSettingChange('notification', 'externalNotification', val)
+            @change="handleBrowserNotificationChange(($event.target as HTMLInputElement).checked)"
+          />
+          <span class="text-sm">{{ t("settings.notification.browser") }}</span>
+        </label>
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            class="checkbox checkbox-primary"
+            :checked="settings.notification.externalNotification"
+            @change="
+              handleSettingChange(
+                'notification',
+                'externalNotification',
+                ($event.target as HTMLInputElement).checked,
+              )
             "
-          >
-            {{ t("settings.notification.external") }}
-          </n-checkbox>
-        </n-space>
-      </n-form-item>
-    </n-form>
+          />
+          <span class="text-sm">{{ t("settings.notification.external") }}</span>
+        </label>
+      </div>
+    </div>
+
     <template v-if="settings.notification.externalNotification">
-      <n-form label-placement="top">
-        <n-form-item label="url *">
-          <n-input
-            v-model:value="settings.notification.webhook"
+      <div class="divider" />
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div class="form-control">
+          <label class="label"><span class="label-text">url *</span></label>
+          <input
+            :value="settings.notification.webhook"
+            type="text"
+            class="input input-bordered"
             placeholder="https://..."
-            @update:value="(val: string) => handleSettingChange('notification', 'webhook', val)"
-          />
-        </n-form-item>
-        <n-form-item label="content_type" v-if="settings.notification.method !== 'GET'">
-          <n-select
-            v-model:value="settings.notification.contentType"
-            :options="contentTypeOptions"
-            @update:value="
-              (val: string) =>
-                handleSettingChange(
-                  'notification',
-                  'contentType',
-                  val as SettingsModel['notification']['contentType'],
-                )
+            @input="
+              handleSettingChange(
+                'notification',
+                'webhook',
+                ($event.target as HTMLInputElement).value,
+              )
             "
           />
-        </n-form-item>
-        <n-form-item label="headers">
-          <n-input
-            v-model:value="settings.notification.headers"
+        </div>
+        <div v-if="settings.notification.method !== 'GET'" class="form-control">
+          <label class="label"><span class="label-text">content_type</span></label>
+          <select
+            :value="settings.notification.contentType"
+            class="select select-bordered"
+            @change="
+              handleSettingChange(
+                'notification',
+                'contentType',
+                ($event.target as HTMLSelectElement)
+                  .value as SettingsModel['notification']['contentType'],
+              )
+            "
+          >
+            <option value="application/json">application/json</option>
+            <option value="application/x-www-form-urlencoded">
+              application/x-www-form-urlencoded
+            </option>
+          </select>
+        </div>
+        <div class="form-control">
+          <label class="label"><span class="label-text">headers</span></label>
+          <input
+            :value="settings.notification.headers"
+            type="text"
+            class="input input-bordered"
             placeholder="HTTP headers in JSON format"
-            @update:value="(val: string) => handleSettingChange('notification', 'headers', val)"
-          />
-        </n-form-item>
-        <n-form-item label="body">
-          <n-input
-            v-model:value="settings.notification.body"
-            type="textarea"
-            placeholder='{"desp":"{{message}}","title":"{{title}}"}'
-            :autosize="{ minRows: 2, maxRows: 5 }"
-            @update:value="(val: string) => handleSettingChange('notification', 'body', val)"
-          />
-        </n-form-item>
-        <n-form-item label="username">
-          <n-input
-            v-model:value="settings.notification.username"
-            @update:value="(val: string) => handleSettingChange('notification', 'username', val)"
-          />
-        </n-form-item>
-        <n-form-item label="password">
-          <n-input
-            v-model:value="settings.notification.password"
-            type="password"
-            show-password-on="click"
-            @update:value="(val: string) => handleSettingChange('notification', 'password', val)"
-          />
-        </n-form-item>
-        <n-form-item label="method">
-          <n-select
-            v-model:value="settings.notification.method"
-            :options="methodOptions"
-            @update:value="
-              (val: string) =>
-                handleSettingChange(
-                  'notification',
-                  'method',
-                  val as SettingsModel['notification']['method'],
-                )
+            @input="
+              handleSettingChange(
+                'notification',
+                'headers',
+                ($event.target as HTMLInputElement).value,
+              )
             "
           />
-        </n-form-item>
-      </n-form>
+        </div>
+        <div class="form-control">
+          <label class="label"><span class="label-text">method</span></label>
+          <select
+            :value="settings.notification.method"
+            class="select select-bordered"
+            @change="
+              handleSettingChange(
+                'notification',
+                'method',
+                ($event.target as HTMLSelectElement)
+                  .value as SettingsModel['notification']['method'],
+              )
+            "
+          >
+            <option value="POST">POST</option>
+            <option value="GET">GET</option>
+          </select>
+        </div>
+        <div class="form-control md:col-span-2">
+          <label class="label"><span class="label-text">body</span></label>
+          <textarea
+            :value="settings.notification.body"
+            class="textarea textarea-bordered"
+            placeholder='{"desp":"{{message}}","title":"{{title}}"}'
+            rows="3"
+            @input="
+              handleSettingChange(
+                'notification',
+                'body',
+                ($event.target as HTMLTextAreaElement).value,
+              )
+            "
+          />
+        </div>
+        <div class="form-control">
+          <label class="label"><span class="label-text">username</span></label>
+          <input
+            :value="settings.notification.username"
+            type="text"
+            class="input input-bordered"
+            @input="
+              handleSettingChange(
+                'notification',
+                'username',
+                ($event.target as HTMLInputElement).value,
+              )
+            "
+          />
+        </div>
+        <div class="form-control">
+          <label class="label"><span class="label-text">password</span></label>
+          <input
+            :value="settings.notification.password"
+            type="password"
+            class="input input-bordered"
+            @input="
+              handleSettingChange(
+                'notification',
+                'password',
+                ($event.target as HTMLInputElement).value,
+              )
+            "
+          />
+        </div>
+      </div>
     </template>
-    <n-divider />
-    <n-form label-placement="left" label-width="120">
-      <n-form-item :label="t('settings.notification.onComplete')">
-        <n-switch
-          v-model:value="settings.notification.notifyOnComplete"
-          @update:value="
-            (val: boolean) => handleSettingChange('notification', 'notifyOnComplete', val)
+
+    <div class="divider" />
+
+    <div class="form-control">
+      <label class="label cursor-pointer">
+        <span class="label-text">{{ t("settings.notification.onComplete") }}</span>
+        <input
+          type="checkbox"
+          class="toggle toggle-primary"
+          :checked="settings.notification.notifyOnComplete"
+          @change="
+            handleSettingChange(
+              'notification',
+              'notifyOnComplete',
+              ($event.target as HTMLInputElement).checked,
+            )
           "
         />
-      </n-form-item>
-      <n-form-item :label="t('settings.notification.onError')">
-        <n-switch
-          v-model:value="settings.notification.notifyOnError"
-          @update:value="
-            (val: boolean) => handleSettingChange('notification', 'notifyOnError', val)
+      </label>
+    </div>
+    <div class="form-control">
+      <label class="label cursor-pointer">
+        <span class="label-text">{{ t("settings.notification.onError") }}</span>
+        <input
+          type="checkbox"
+          class="toggle toggle-primary"
+          :checked="settings.notification.notifyOnError"
+          @change="
+            handleSettingChange(
+              'notification',
+              'notifyOnError',
+              ($event.target as HTMLInputElement).checked,
+            )
           "
         />
-      </n-form-item>
-    </n-form>
-  </n-card>
+      </label>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from "vue"
-import { useMessage } from "naive-ui"
 import { useI18n } from "vue-i18n"
+import { Icon } from "@iconify/vue"
 import { testNotificationApi } from "@/services/api"
+import { showGlobalMessage } from "@/services/feedback/message"
 import { useSettingsStore } from "@/stores"
 import type { SettingsModel } from "@/types/settings/model"
 
 const { t } = useI18n()
-const message = useMessage()
 const settingsStore = useSettingsStore()
 const settings = computed(() => settingsStore.settings)
-
-const methodOptions = [
-  { label: "POST", value: "POST" },
-  { label: "GET", value: "GET" },
-]
-
-const contentTypeOptions = [
-  { label: "application/json", value: "application/json" },
-  { label: "application/x-www-form-urlencoded", value: "application/x-www-form-urlencoded" },
-]
 
 const isTestNotificationDisabled = computed(() => {
   const notification = settings.value.notification
@@ -196,7 +272,7 @@ async function handleBrowserNotificationChange(enabled: boolean) {
   }
 
   if (typeof Notification === "undefined") {
-    message.error(t("settings.notification.browserUnsupported"))
+    showGlobalMessage("error", t("settings.notification.browserUnsupported"))
     return
   }
 
@@ -206,7 +282,7 @@ async function handleBrowserNotificationChange(enabled: boolean) {
   }
 
   if (permission !== "granted") {
-    message.warning(t("settings.notification.browserPermissionDenied"))
+    showGlobalMessage("warning", t("settings.notification.browserPermissionDenied"))
     return
   }
 
@@ -214,14 +290,14 @@ async function handleBrowserNotificationChange(enabled: boolean) {
 }
 
 async function testNotification() {
-  message.info(t("settings.notification.testSending"))
+  showGlobalMessage("info", t("settings.notification.testSending"))
   try {
     const result = await testNotificationApi()
     if (result.status !== "success") {
-      message.error(t("settings.notification.testResult", { message: result.message }))
+      showGlobalMessage("error", t("settings.notification.testResult", { message: result.message }))
     }
   } catch (error) {
-    message.error(t("settings.notification.testError"))
+    showGlobalMessage("error", t("settings.notification.testError"))
     console.error(error)
   }
 }

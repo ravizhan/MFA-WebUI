@@ -3,6 +3,7 @@ import { getTaskConfig, resetTaskConfig, saveTaskConfig } from "@/services/api"
 import { useInterfaceStore } from "@/stores"
 import type { Option, PresetTaskOptionValue } from "@/types/interface/model"
 import type {
+  NullableTaskOptionValue,
   TaskExecutionPayload,
   TaskOptionValue,
   TaskOptionsByTask,
@@ -19,9 +20,12 @@ import {
   normalizeOptionValueForBoundary,
 } from "@/utils/task-config/options"
 
-type TaskOptionMap = Record<string, TaskOptionValue>
+type TaskOptionMap = Record<string, NullableTaskOptionValue>
 
-function cloneOptionValue(value: TaskOptionValue): TaskOptionValue {
+function cloneOptionValue(value: NullableTaskOptionValue): NullableTaskOptionValue {
+  if (value === null) {
+    return null
+  }
   if (Array.isArray(value)) {
     return [...value]
   }
@@ -161,7 +165,7 @@ function applyPresetOptionValue(
 
 export const useTaskConfigStore = defineStore("taskConfig", {
   state: () => ({
-    options: {} as TaskOptionsByTask,
+    options: {} as Record<string, TaskOptionMap>,
     taskList: [] as TaskListItem[],
     selectedPresetName: CUSTOM_PRESET_NAME,
     presetSnapshots: {} as Record<string, TaskPresetSnapshot>,
@@ -215,7 +219,7 @@ export const useTaskConfigStore = defineStore("taskConfig", {
         mergedTaskOptions[taskId] = {
           ...cloneOptionMap(defaults),
           ...cloneOptionMap(relevantOptions),
-        }
+        } as Record<string, TaskOptionValue>
       }
 
       return mergedTaskOptions
@@ -229,7 +233,7 @@ export const useTaskConfigStore = defineStore("taskConfig", {
       return {
         task_list,
         task_options: this.buildOptionsForTasks(task_list, overridesByTask),
-        preTasks: this.preTasks || [],
+        preTasks: this.preTasks ? [...this.preTasks] : [],
       }
     },
 
@@ -268,7 +272,7 @@ export const useTaskConfigStore = defineStore("taskConfig", {
           }
         }
 
-        mergedTaskOptions[taskId] = mergedOptions
+        mergedTaskOptions[taskId] = mergedOptions as Record<string, TaskOptionValue>
       }
 
       return mergedTaskOptions
@@ -356,7 +360,7 @@ export const useTaskConfigStore = defineStore("taskConfig", {
         for (const [optionName, optionValue] of Object.entries(presetTask.option || {})) {
           applyPresetOptionValue(optionName, optionValue, optionMap, taskOptionValues)
         }
-        taskOptions[taskItem.id] = taskOptionValues
+        taskOptions[taskItem.id] = taskOptionValues as Record<string, TaskOptionValue>
       }
 
       for (const task of defaultTaskList) {

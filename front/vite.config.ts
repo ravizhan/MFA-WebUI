@@ -1,11 +1,8 @@
 import { fileURLToPath, URL } from "node:url"
-import UnoCSS from "unocss/vite"
 import { defineConfig } from "vite"
 import vue from "@vitejs/plugin-vue"
-
+import tailwindcss from "@tailwindcss/vite"
 import AutoImport from "unplugin-auto-import/vite"
-import { NaiveUiResolver } from "unplugin-vue-components/resolvers"
-import Components from "unplugin-vue-components/vite"
 
 export default defineConfig({
   resolve: {
@@ -15,16 +12,34 @@ export default defineConfig({
   },
   plugins: [
     vue(),
-    UnoCSS(),
+    tailwindcss(),
     AutoImport({
       imports: ["vue"],
-    }),
-    Components({
-      resolvers: [NaiveUiResolver()],
     }),
   ],
   build: {
     outDir: "../page",
+    cssMinify: "lightningcss",
+    rollupOptions: {
+      output: {
+        manualChunks: (id) => {
+          if (
+            id.includes("/node_modules/vue/") ||
+            id.includes("/node_modules/vue-router/") ||
+            id.includes("/node_modules/pinia/") ||
+            id.includes("/node_modules/vue-i18n/")
+          ) {
+            return "vendor-vue"
+          }
+          if (id.includes("/node_modules/marked/") || id.includes("/node_modules/dompurify/")) {
+            return "vendor-markdown"
+          }
+          if (id.includes("/node_modules/vue-draggable-plus/")) {
+            return "vendor-drag"
+          }
+        },
+      },
+    },
   },
   server: {
     proxy: {

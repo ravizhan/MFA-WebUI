@@ -25,8 +25,6 @@ export const useSchedulerStore = defineStore("scheduler", () => {
 
   // Computed
   const enabledTasks = computed(() => tasks.value.filter((t) => t.enabled))
-  const disabledTasks = computed(() => tasks.value.filter((t) => !t.enabled))
-  const recentExecutions = computed(() => executions.value.slice(0, 50))
 
   // Actions
   async function fetchTasks() {
@@ -157,14 +155,6 @@ export const useSchedulerStore = defineStore("scheduler", () => {
     }
   }
 
-  function getTaskById(taskId: string): ScheduledTask | undefined {
-    return tasks.value.find((t) => t.id === taskId)
-  }
-
-  function clearError() {
-    error.value = null
-  }
-
   return {
     // State
     tasks,
@@ -173,8 +163,6 @@ export const useSchedulerStore = defineStore("scheduler", () => {
     error,
     // Computed
     enabledTasks,
-    disabledTasks,
-    recentExecutions,
     // Actions
     fetchTasks,
     createTask,
@@ -182,7 +170,5 @@ export const useSchedulerStore = defineStore("scheduler", () => {
     deleteTask,
     toggleTask,
     fetchExecutions,
-    getTaskById,
-    clearError,
   }
 })
