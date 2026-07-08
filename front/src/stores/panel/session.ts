@@ -5,6 +5,7 @@ export const useIndexStore = defineStore("index", {
     SelectedTaskID: "",
     RunningLog: "",
     Connected: false,
+    TaskRunning: false,
     TaskSettingsDrawerVisible: false,
   }),
   actions: {
@@ -28,6 +29,9 @@ export const useIndexStore = defineStore("index", {
     },
     setConnected(status: boolean) {
       this.Connected = status
+    },
+    setTaskRunning(running: boolean) {
+      this.TaskRunning = running
     },
   },
 })

@@ -21,11 +21,19 @@
           />
         </div>
         <div class="flex justify-center gap-2 pt-3 shrink-0">
-          <button class="btn btn-primary min-w-[8rem]" @click="handleStart">
+          <button
+            class="btn btn-primary min-w-[8rem]"
+            :disabled="indexStore.TaskRunning"
+            @click="handleStart"
+          >
             <Icon icon="mdi:play" />
             {{ t("panel.start") }}
           </button>
-          <button class="btn btn-secondary min-w-[8rem]" @click="handleStop">
+          <button
+            class="btn btn-secondary min-w-[8rem]"
+            :disabled="!indexStore.TaskRunning"
+            @click="handleStop"
+          >
             <Icon icon="mdi:stop" />
             {{ t("panel.stop") }}
           </button>
@@ -102,6 +110,7 @@ async function handleStart() {
 
 function handleStop() {
   stopTask()
+  indexStore.setTaskRunning(false)
 }
 
 onMounted(() => {

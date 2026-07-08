@@ -33,6 +33,9 @@
     "title": "设置",
     "theme": "主题",
     "general": "通用",
+    "saveSuccess": "设置已保存",
+    "saveFailed": "保存失败",
+    "networkError": "网络错误，请稍后重试",
     "anchor": {
       "update": "更新设置",
       "runtime": "运行设置",
@@ -226,6 +229,7 @@
     "stop": "中止任务",
     "resetConfig": "重置配置",
     "noDevice": "无可用设备",
+    "noMatchingDevice": "无匹配设备",
     "recentDevices": "最近使用",
     "discoveredDevices": "已发现设备",
     "selectTask": "请至少选择一个任务",

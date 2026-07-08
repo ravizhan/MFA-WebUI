@@ -567,7 +567,11 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
       }
 
       const payload = configStore.buildExecutionPayload(compatibleTaskIds)
-      return await startTask(payload)
+      const success = await startTask(payload)
+      if (success) {
+        indexStore.setTaskRunning(true)
+      }
+      return success
     },
 
     resetConfig() {

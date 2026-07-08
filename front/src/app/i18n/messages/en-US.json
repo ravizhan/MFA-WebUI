@@ -33,6 +33,9 @@
     "title": "Settings",
     "theme": "Theme",
     "general": "General",
+    "saveSuccess": "Settings saved",
+    "saveFailed": "Save failed",
+    "networkError": "Network error, please try again later",
     "anchor": {
       "update": "Update Settings",
       "runtime": "Runtime Settings",
@@ -226,6 +229,7 @@
     "stop": "Stop Task",
     "resetConfig": "Reset Config",
     "noDevice": "No available device",
+    "noMatchingDevice": "No matching device",
     "recentDevices": "Recent",
     "discoveredDevices": "Discovered",
     "selectTask": "Please select at least one task",

@@ -118,6 +118,7 @@ async function handleSettingChange<K extends EditableCategory, P extends keyof S
   value: EditableSettingValue<K, P>,
 ) {
   if (value === null) return
+  if (typeof value === "number" && Number.isNaN(value)) return
   await settingsStore.updateSetting(category, key, value as SettingsModel[K][P])
 }
 </script>

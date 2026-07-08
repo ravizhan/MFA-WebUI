@@ -153,6 +153,8 @@ export const useSettingsStore = defineStore("settings", {
       key: P,
       value: SettingsModel[K][P],
     ) {
+      const previousSettings = deepClone(this.settings)
+
       const updatedSettings = {
         ...this.settings,
         [category]: {
@@ -168,7 +170,15 @@ export const useSettingsStore = defineStore("settings", {
       }
 
       // 后台保存
-      return this.saveSettings(updatedSettings)
+      const success = await this.saveSettings(updatedSettings)
+      if (!success) {
+        // 保存失败时回滚到之前的状态
+        this.settings = previousSettings
+        if (category === "ui" && key === "darkMode") {
+          localStorage.setItem(DARK_MODE_KEY, String(previousSettings.ui.darkMode))
+        }
+      }
+      return success
     },
 
     addRecentDevice(deviceConfig: PanelLastConnectedDevice) {

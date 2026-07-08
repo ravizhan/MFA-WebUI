@@ -118,11 +118,13 @@ function handleBlur() {
 }
 
 function handleInput(event: Event) {
-  const value = (event.target as HTMLInputElement).value
-  searchText.value = value
+  // Only update the local filter text — do NOT emit update:modelValue.
+  // Emitting raw filter text would corrupt the bound value (e.g. a device
+  // fingerprint) with a partial label that no option matches. The real
+  // value is only emitted when an option is explicitly selected.
+  searchText.value = (event.target as HTMLInputElement).value
   isOpen.value = true
   highlightedIndex.value = -1
-  emit("update:modelValue", value || null)
 }
 
 function toggleDropdown() {
