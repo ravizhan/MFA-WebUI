@@ -62,7 +62,9 @@
       <div class="divider" />
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div class="form-control">
-          <label class="label"><span class="label-text">url *</span></label>
+          <label class="label">
+            <span class="label-text">{{ t("settings.notification.fields.url") }}</span>
+          </label>
           <input
             :value="settings.notification.webhook"
             type="text"
@@ -78,7 +80,9 @@
           />
         </div>
         <div v-if="settings.notification.method !== 'GET'" class="form-control">
-          <label class="label"><span class="label-text">content_type</span></label>
+          <label class="label">
+            <span class="label-text">{{ t("settings.notification.fields.contentType") }}</span>
+          </label>
           <select
             :value="settings.notification.contentType"
             class="select select-bordered"
@@ -91,14 +95,16 @@
               )
             "
           >
-            <option value="application/json">application/json</option>
+            <option value="application/json">{{ t("settings.notification.fields.json") }}</option>
             <option value="application/x-www-form-urlencoded">
-              application/x-www-form-urlencoded
+              {{ t("settings.notification.fields.formUrlencoded") }}
             </option>
           </select>
         </div>
         <div class="form-control">
-          <label class="label"><span class="label-text">headers</span></label>
+          <label class="label">
+            <span class="label-text">{{ t("settings.notification.fields.headers") }}</span>
+          </label>
           <input
             :value="settings.notification.headers"
             type="text"
@@ -114,7 +120,9 @@
           />
         </div>
         <div class="form-control">
-          <label class="label"><span class="label-text">method</span></label>
+          <label class="label">
+            <span class="label-text">{{ t("settings.notification.fields.method") }}</span>
+          </label>
           <select
             :value="settings.notification.method"
             class="select select-bordered"
@@ -127,12 +135,14 @@
               )
             "
           >
-            <option value="POST">POST</option>
-            <option value="GET">GET</option>
+            <option value="POST">{{ t("settings.notification.fields.post") }}</option>
+            <option value="GET">{{ t("settings.notification.fields.get") }}</option>
           </select>
         </div>
         <div class="form-control md:col-span-2">
-          <label class="label"><span class="label-text">body</span></label>
+          <label class="label">
+            <span class="label-text">{{ t("settings.notification.fields.body") }}</span>
+          </label>
           <textarea
             :value="settings.notification.body"
             class="textarea textarea-bordered"
@@ -148,7 +158,9 @@
           />
         </div>
         <div class="form-control">
-          <label class="label"><span class="label-text">username</span></label>
+          <label class="label">
+            <span class="label-text">{{ t("settings.notification.fields.username") }}</span>
+          </label>
           <input
             :value="settings.notification.username"
             type="text"
@@ -163,7 +175,9 @@
           />
         </div>
         <div class="form-control">
-          <label class="label"><span class="label-text">password</span></label>
+          <label class="label">
+            <span class="label-text">{{ t("settings.notification.fields.password") }}</span>
+          </label>
           <input
             :value="settings.notification.password"
             type="password"
@@ -226,7 +240,8 @@ import { Icon } from "@iconify/vue"
 import { testNotificationApi } from "@/services/api"
 import { showGlobalMessage } from "@/services/feedback/message"
 import { useSettingsStore } from "@/stores"
-import type { SettingsModel } from "@/types/settings/model"
+import { tryCatch } from "@/utils/tryCatch"
+import type { SettingsModel } from "@/types/settingsModel"
 
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
@@ -243,16 +258,12 @@ const isTestNotificationDisabled = computed(() => {
     return true
   }
 
-  if (
+  return (
     notification.externalNotification &&
     !notification.webhook &&
     !notification.systemNotification &&
     !notification.browserNotification
-  ) {
-    return true
-  }
-
-  return false
+  )
 })
 
 type EditableCategory = Exclude<keyof SettingsModel, "about">
@@ -291,14 +302,14 @@ async function handleBrowserNotificationChange(enabled: boolean) {
 
 async function testNotification() {
   showGlobalMessage("info", t("settings.notification.testSending"))
-  try {
-    const result = await testNotificationApi()
-    if (result.status !== "success") {
-      showGlobalMessage("error", t("settings.notification.testResult", { message: result.message }))
-    }
-  } catch (error) {
+  const [result, err] = await tryCatch(() => testNotificationApi())
+  if (err) {
     showGlobalMessage("error", t("settings.notification.testError"))
-    console.error(error)
+    console.error(err)
+    return
+  }
+  if (result.status !== "success") {
+    showGlobalMessage("error", t("settings.notification.testResult", { message: result.message }))
   }
 }
 </script>

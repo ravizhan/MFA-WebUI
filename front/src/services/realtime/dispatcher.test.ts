@@ -1,18 +1,20 @@
 import { describe, expect, it, vi, beforeEach } from "vitest"
 import { setActivePinia, createPinia } from "pinia"
-import type { RealtimeEvent } from "@/types/realtime/model"
+import type { RealtimeEvent } from "@/types/realtimeModel"
 import { dispatchRealtimeEvent, type RealtimeStoreRefs } from "@/services/realtime/dispatcher"
 import { useIndexStore } from "@/stores/panel/session"
 import { useSettingsStore } from "@/stores/settings/settings"
 
 vi.mock("@/services/feedback/message", () => ({
-  showGlobalMessage: vi.fn(),
+  showGlobalMessage: vi.fn<() => void>(),
 }))
 
 vi.mock("@/services/realtime/events", () => ({
-  formatRealtimeLog: vi.fn((e: RealtimeEvent) => `${e.time} ${e.message}`),
-  showToastMessage: vi.fn(),
-  showBrowserRealtimeNotification: vi.fn(),
+  formatRealtimeLog: vi.fn<(e: RealtimeEvent) => string>(
+    (e: RealtimeEvent) => `${e.time} ${e.message}`,
+  ),
+  showToastMessage: vi.fn<() => void>(),
+  showBrowserRealtimeNotification: vi.fn<() => void>(),
 }))
 
 import { showToastMessage, showBrowserRealtimeNotification } from "@/services/realtime/events"

@@ -7,7 +7,7 @@ import i18n from "@/app/i18n"
 import { useIndexStore, useSettingsStore } from "@/stores"
 import { sse } from "@/services/realtime/sse"
 import { dispatchRealtimeEvent } from "@/services/realtime/dispatcher"
-import type { RealtimeEventName } from "@/types/realtime/model"
+import type { RealtimeEventName } from "@/types/realtimeModel"
 
 const app = createApp(App)
 const pinia = createPinia()

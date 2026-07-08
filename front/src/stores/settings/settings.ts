@@ -1,6 +1,7 @@
 import { defineStore } from "pinia"
+import { tryCatch } from "@/utils/tryCatch"
 import { getSettings, updateSettings } from "@/services/api"
-import type { PanelLastConnectedDevice, SettingsModel } from "@/types/settings/model"
+import type { PanelLastConnectedDevice, SettingsModel } from "@/types/settingsModel"
 
 const defaultSettings: SettingsModel = {
   update: {
@@ -65,18 +66,21 @@ function deepClone<T>(obj: T): T {
 }
 
 export const useSettingsStore = defineStore("settings", {
-  state: () => ({
-    settings: {
+  state: () => {
+    const settings: SettingsModel = {
       ...deepClone(defaultSettings),
       ui: { darkMode: getCachedDarkMode() },
-    } as SettingsModel,
-    loading: false,
-    initialized: false,
-    systemPrefersDark:
-      typeof window !== "undefined" && window.matchMedia
-        ? window.matchMedia("(prefers-color-scheme: dark)").matches
-        : false,
-  }),
+    }
+    return {
+      settings,
+      loading: false,
+      initialized: false,
+      systemPrefersDark:
+        typeof window !== "undefined" && window.matchMedia
+          ? window.matchMedia("(prefers-color-scheme: dark)").matches
+          : false,
+    }
+  },
 
   getters: {
     isDarkMode(state): boolean {
@@ -102,50 +106,49 @@ export const useSettingsStore = defineStore("settings", {
 
     async fetchSettings() {
       this.loading = true
-      try {
-        const data = await getSettings()
-        if (data) {
-          this.settings = {
-            update: { ...defaultSettings.update, ...data.update },
-            notification: { ...defaultSettings.notification, ...data.notification },
-            ui: { ...defaultSettings.ui, ...data.ui },
-            runtime: { ...defaultSettings.runtime, ...data.runtime },
-            about: { ...defaultSettings.about, ...data.about },
-            panel: {
-              ...defaultSettings.panel,
-              ...data.panel,
-              lastConnectedDevice: data.panel?.lastConnectedDevice ?? null,
-              recentDevices: data.panel?.recentDevices ?? [],
-            },
-          }
-          // 确保本地缓存与服务器设置同步
-          localStorage.setItem(DARK_MODE_KEY, String(this.settings.ui.darkMode))
-        }
-        this.initialized = true
-      } catch (error) {
-        console.error("Failed to fetch settings:", error)
-      } finally {
+      const [data, err] = await tryCatch(() => getSettings())
+      if (err) {
+        console.error("Failed to fetch settings:", err)
         this.loading = false
+        return
       }
+      if (data) {
+        this.settings = {
+          update: { ...defaultSettings.update, ...data.update },
+          notification: { ...defaultSettings.notification, ...data.notification },
+          ui: { ...defaultSettings.ui, ...data.ui },
+          runtime: { ...defaultSettings.runtime, ...data.runtime },
+          about: { ...defaultSettings.about, ...data.about },
+          panel: {
+            ...defaultSettings.panel,
+            ...data.panel,
+            lastConnectedDevice: data.panel?.lastConnectedDevice ?? null,
+            recentDevices: data.panel?.recentDevices ?? [],
+          },
+        }
+        // 确保本地缓存与服务器设置同步
+        localStorage.setItem(DARK_MODE_KEY, String(this.settings.ui.darkMode))
+      }
+      this.initialized = true
+      this.loading = false
     },
 
     async saveSettings(newSettings?: SettingsModel) {
       this.loading = true
-      try {
-        const payload = newSettings || this.settings
-        const success = await updateSettings(payload)
-        if (success) {
-          this.settings = deepClone(payload)
-          // 保存成功后更新本地缓存
-          localStorage.setItem(DARK_MODE_KEY, String(this.settings.ui.darkMode))
-        }
-        return success
-      } catch (error) {
-        console.error("Failed to save settings:", error)
-        return false
-      } finally {
+      const payload = newSettings || this.settings
+      const [success, err] = await tryCatch(() => updateSettings(payload))
+      if (err) {
+        console.error("Failed to save settings:", err)
         this.loading = false
+        return false
       }
+      if (success) {
+        this.settings = deepClone(payload)
+        // 保存成功后更新本地缓存
+        localStorage.setItem(DARK_MODE_KEY, String(this.settings.ui.darkMode))
+      }
+      this.loading = false
+      return success
     },
 
     async updateSetting<K extends keyof SettingsModel, P extends keyof SettingsModel[K]>(

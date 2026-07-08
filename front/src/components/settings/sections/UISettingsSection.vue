@@ -11,8 +11,8 @@
         class="select select-bordered w-full md:w-auto"
         @change="handleLocaleChange(($event.target as HTMLSelectElement).value)"
       >
-        <option value="zh-CN">简体中文</option>
-        <option value="en-US">English</option>
+        <option value="zh-CN">{{ t("settings.ui.languages.zhCN") }}</option>
+        <option value="en-US">{{ t("settings.ui.languages.enUS") }}</option>
       </select>
     </div>
 
@@ -39,7 +39,7 @@
 import { computed } from "vue"
 import { useI18n } from "vue-i18n"
 import { useSettingsStore } from "@/stores"
-import type { SettingsModel } from "@/types/settings/model"
+import type { SettingsModel } from "@/types/settingsModel"
 
 const { t, locale } = useI18n()
 const settingsStore = useSettingsStore()
@@ -61,14 +61,14 @@ function handleLocaleChange(val: string) {
 }
 
 function handleDarkModeChange(val: string) {
-  let parsed: SettingsModel["ui"]["darkMode"]
   if (val === "auto") {
-    parsed = "auto"
-  } else if (val === "true") {
-    parsed = true
-  } else {
-    parsed = false
+    void handleSettingChange("ui", "darkMode", "auto")
+    return
   }
-  void handleSettingChange("ui", "darkMode", parsed)
+  if (val === "true") {
+    void handleSettingChange("ui", "darkMode", true)
+    return
+  }
+  void handleSettingChange("ui", "darkMode", false)
 }
 </script>

@@ -5,7 +5,7 @@
         :id="`pre-task-${embedded ? 'embedded' : 'standalone'}`"
         type="checkbox"
         :checked="expanded"
-        @change="expanded = ($event.target as HTMLInputElement).checked"
+        @change="handleExpandedChange($event)"
       />
       <div class="collapse-title text-sm font-medium py-2 px-3 min-h-0 flex items-center gap-2">
         <Icon icon="mdi:playlist-play" class="text-primary text-lg" />
@@ -52,7 +52,7 @@
                 type="checkbox"
                 class="toggle toggle-primary toggle-sm"
                 :checked="item.enabled"
-                @change="item.enabled = ($event.target as HTMLInputElement).checked"
+                @change="item.enabled = getChecked($event)"
               />
               <button
                 class="btn btn-ghost btn-circle btn-xs text-error"
@@ -77,26 +77,21 @@
 import { computed, ref } from "vue"
 import { VueDraggable } from "vue-draggable-plus"
 import { Icon } from "@iconify/vue"
-import type { PreTaskCommand } from "@/types/task-config/model"
+import type { PreTaskCommand } from "@/types/taskConfigModel"
 
 interface Props {
-  modelValue: PreTaskCommand[]
   embedded?: boolean
 }
 
-const props = withDefaults(defineProps<Props>(), {
-  embedded: false,
-})
+const { embedded = false } = defineProps<Props>()
 
-const emit = defineEmits<{
-  (e: "update:modelValue", value: PreTaskCommand[]): void
-}>()
+const modelValue = defineModel<PreTaskCommand[]>()
 
-const expanded = ref(props.embedded)
+const expanded = ref(embedded)
 
 const preTasks = computed<PreTaskCommand[]>({
-  get: () => props.modelValue,
-  set: (value) => emit("update:modelValue", value),
+  get: () => modelValue.value || [],
+  set: (value) => (modelValue.value = value),
 })
 
 function handleAdd() {
@@ -113,6 +108,16 @@ function handleAdd() {
 
 function handleDelete(index: number) {
   preTasks.value = preTasks.value.filter((_, i) => i !== index)
+}
+
+function handleExpandedChange(event: Event) {
+  expanded.value = getChecked(event)
+}
+
+function getChecked(event: Event): boolean {
+  const target = event.target
+  if (target instanceof HTMLInputElement) return target.checked
+  return false
 }
 </script>
 

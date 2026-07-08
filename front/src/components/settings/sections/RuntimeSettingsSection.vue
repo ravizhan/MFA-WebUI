@@ -99,7 +99,7 @@
 import { computed } from "vue"
 import { useI18n } from "vue-i18n"
 import { useSettingsStore } from "@/stores"
-import type { SettingsModel } from "@/types/settings/model"
+import type { SettingsModel } from "@/types/settingsModel"
 
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
@@ -119,6 +119,6 @@ async function handleSettingChange<K extends EditableCategory, P extends keyof S
 ) {
   if (value === null) return
   if (typeof value === "number" && Number.isNaN(value)) return
-  await settingsStore.updateSetting(category, key, value as SettingsModel[K][P])
+  await settingsStore.updateSetting(category, key, value)
 }
 </script>

@@ -23,11 +23,11 @@
               <div class="text-xs opacity-60">{{ task.description }}</div>
               <div class="flex flex-wrap gap-x-3 text-xs opacity-50 mt-1">
                 <span>
-                  {{ t("settings.scheduler.trigger") }}:
+                  {{ t("settings.scheduler.trigger") }}{{ t("common.colon") }}
                   {{ formatTriggerText(task.trigger_type, task.trigger_config) }}
                 </span>
                 <span>
-                  {{ t("settings.scheduler.nextRun") }}:
+                  {{ t("settings.scheduler.nextRun") }}{{ t("common.colon") }}
                   {{ formatDateTimeText(task.next_run_time) }}
                 </span>
               </div>
@@ -51,9 +51,9 @@
 import { useI18n } from "vue-i18n"
 import { Icon } from "@iconify/vue"
 import { formatDateTime, formatTrigger } from "@/utils/scheduler/display"
-import type { ScheduledTask, TriggerConfig, TriggerType } from "@/types/scheduler/model"
+import type { ScheduledTask, TriggerConfig, TriggerType } from "@/types/schedulerModel"
 
-const props = defineProps<{
+const { tasks } = defineProps<{
   tasks: ScheduledTask[]
 }>()
 

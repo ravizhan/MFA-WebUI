@@ -1,8 +1,51 @@
-import type { RealtimeEvent, RealtimeEventLevel, RealtimeEventName } from "@/types/realtime/model"
+import type { RealtimeEvent, RealtimeEventLevel, RealtimeEventName } from "@/types/realtimeModel"
+import { tryCatch } from "@/utils/tryCatch"
 
-type SSEPayload =
-  | RealtimeEvent
-  | { type?: string; message?: string; time?: string; notify?: string[] }
+const VALID_EVENT_LEVELS: ReadonlySet<string> = new Set(["info", "success", "error"])
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
+}
+
+function isRealtimeEventName(value: unknown): value is RealtimeEventName {
+  return typeof value === "string"
+}
+
+function isValidEventLevel(level: unknown): level is RealtimeEventLevel {
+  return typeof level === "string" && VALID_EVENT_LEVELS.has(level)
+}
+
+function extractString(data: unknown, key: string): string | undefined {
+  if (!isRecord(data)) return undefined
+  const value = data[key]
+  return typeof value === "string" ? value : undefined
+}
+
+function extractStringArray(data: unknown, key: string): string[] {
+  if (!isRecord(data)) return []
+  const value = data[key]
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : []
+}
+
+function extractEventType(data: unknown): RealtimeEventName {
+  if (!isRecord(data)) return "log"
+  const raw = ("event" in data ? data.event : data.type) ?? "log"
+  return isRealtimeEventName(raw) ? raw : "log"
+}
+
+function extractLevel(data: unknown): RealtimeEventLevel {
+  if (!isRecord(data)) return "info"
+  const raw = "level" in data ? data.level : undefined
+  return isValidEventLevel(raw) ? raw : "info"
+}
+
+function extractDetails(data: unknown): Record<string, unknown> | null {
+  if (!isRecord(data)) return null
+  const details = "details" in data ? data.details : null
+  return isRecord(details) ? details : null
+}
 
 export class SSEClient {
   private eventSource: EventSource | null = null
@@ -27,15 +70,16 @@ export class SSEClient {
     this.eventSource = new EventSource(this.url)
 
     this.eventSource.onmessage = (event) => {
-      try {
-        const data = this.normalizeEvent(JSON.parse(event.data) as SSEPayload)
-        if (!data) {
-          return
-        }
-        this.dispatchEvent(data.event, data)
-      } catch (error) {
-        console.error("SSE消息解析错误:", error)
+      const [parsed, parseErr] = tryCatch(() => JSON.parse(event.data))
+      if (parseErr) {
+        console.error("SSE消息解析错误:", parseErr)
+        return
       }
+      const data = this.normalizeEvent(parsed)
+      if (!data) {
+        return
+      }
+      this.dispatchEvent(data.event, data)
     }
 
     this.eventSource.onopen = () => {
@@ -84,25 +128,24 @@ export class SSEClient {
     this.listeners.get(type)?.delete(callback)
   }
 
-  private normalizeEvent(data: SSEPayload): RealtimeEvent | null {
-    if (!data || typeof data.message !== "string") {
+  private normalizeEvent(data: unknown): RealtimeEvent | null {
+    if (!isRecord(data)) {
       return null
     }
 
-    const eventType = ("event" in data ? data.event : data.type) ?? "log"
-    const level = ("level" in data ? data.level : undefined) ?? "info"
+    const message = extractString(data, "message")
+    if (!message) {
+      return null
+    }
 
     return {
-      event: (eventType as RealtimeEventName) || "log",
-      level: (level as RealtimeEventLevel) || "info",
-      message: data.message,
-      time: ("time" in data && typeof data.time === "string" ? data.time : "") || "",
-      notify: Array.isArray(data.notify) ? data.notify : [],
-      title: "title" in data && typeof data.title === "string" ? data.title : null,
-      details:
-        "details" in data && data.details && typeof data.details === "object"
-          ? (data.details as Record<string, unknown>)
-          : null,
+      event: extractEventType(data),
+      level: extractLevel(data),
+      message,
+      time: extractString(data, "time") ?? "",
+      notify: extractStringArray(data, "notify"),
+      title: extractString(data, "title") ?? null,
+      details: extractDetails(data),
       display: "display" in data ? Boolean(data.display) : true,
     }
   }

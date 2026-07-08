@@ -1,4 +1,4 @@
-import type { RealtimeEvent, RealtimeEventName } from "@/types/realtime/model"
+import type { RealtimeEvent, RealtimeEventName } from "@/types/realtimeModel"
 import type { useIndexStore } from "@/stores/panel/session"
 import type { useSettingsStore } from "@/stores/settings/settings"
 import { formatRealtimeLog, showBrowserRealtimeNotification, showToastMessage } from "./events"
@@ -75,7 +75,7 @@ export function dispatchRealtimeEvent(event: RealtimeEvent, stores: RealtimeStor
   const handler = typeHandlers[event.event]
   if (handler) {
     handler(event, stores)
-  } else {
-    handleCommon(event, stores)
+    return
   }
+  handleCommon(event, stores)
 }

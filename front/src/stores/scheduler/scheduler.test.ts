@@ -2,32 +2,31 @@ import { describe, expect, it, beforeEach, vi } from "vitest"
 import { setActivePinia, createPinia } from "pinia"
 
 vi.mock("@/services/api", () => ({
-  getSchedulerTasks: vi.fn(),
-  createSchedulerTask: vi.fn(),
-  updateSchedulerTask: vi.fn(),
-  deleteSchedulerTask: vi.fn(),
-  pauseSchedulerTask: vi.fn(),
-  resumeSchedulerTask: vi.fn(),
-  getSchedulerExecutions: vi.fn(),
+  getSchedulerTasks: vi.fn<() => void>(),
+  createSchedulerTask: vi.fn<() => void>(),
+  updateSchedulerTask: vi.fn<() => void>(),
+  deleteSchedulerTask: vi.fn<() => void>(),
+  pauseSchedulerTask: vi.fn<() => void>(),
+  resumeSchedulerTask: vi.fn<() => void>(),
+  getSchedulerExecutions: vi.fn<() => void>(),
 }))
 
 import { useSchedulerStore } from "@/stores/scheduler/scheduler"
 import * as api from "@/services/api"
-import type { ScheduledTask, TaskExecution } from "@/types/scheduler/model"
+import type { ScheduledTask, TaskExecution } from "@/types/schedulerModel"
 
-const mockTask = (id: string, enabled: boolean): ScheduledTask =>
-  ({
-    id,
-    name: `task-${id}`,
-    enabled,
-    task_list: [],
-    task_options: {},
-    preTasks: [],
-    trigger_type: "cron",
-    trigger_config: { type: "cron", cron: "* * * * *" },
-    created_at: "2024-01-01T00:00:00Z",
-    updated_at: "2024-01-01T00:00:00Z",
-  }) as ScheduledTask
+const mockTask = (id: string, enabled: boolean): ScheduledTask => ({
+  id,
+  name: `task-${id}`,
+  enabled,
+  task_list: [],
+  task_options: {},
+  preTasks: [],
+  trigger_type: "cron",
+  trigger_config: { type: "cron", cron: "* * * * *" },
+  created_at: "2024-01-01T00:00:00Z",
+  updated_at: "2024-01-01T00:00:00Z",
+})
 
 describe("useSchedulerStore", () => {
   beforeEach(() => {

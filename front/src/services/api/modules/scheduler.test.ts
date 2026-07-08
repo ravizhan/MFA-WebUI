@@ -10,7 +10,7 @@ import {
   resumeSchedulerTask,
   getSchedulerExecutions,
 } from "@/services/api/modules/scheduler"
-import type { ScheduledTaskCreate, ScheduledTaskUpdate } from "@/types/scheduler/model"
+import type { ScheduledTaskCreate, ScheduledTaskUpdate } from "@/types/schedulerModel"
 
 describe("scheduler API module", () => {
   beforeEach(() => {
@@ -43,7 +43,8 @@ describe("scheduler API module", () => {
       let capturedBody: Record<string, unknown> | null = null
       server.use(
         http.post("/api/scheduler/tasks", async ({ request }) => {
-          capturedBody = await request.json()
+          // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+          capturedBody = (await request.json()) as Record<string, unknown>
           return HttpResponse.json({ status: "success", task: { id: "new", name: "new-task" } })
         }),
       )
@@ -68,7 +69,8 @@ describe("scheduler API module", () => {
       let capturedBody: Record<string, unknown> | null = null
       server.use(
         http.put("/api/scheduler/tasks/1", async ({ request }) => {
-          capturedBody = await request.json()
+          // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+          capturedBody = (await request.json()) as Record<string, unknown>
           return HttpResponse.json({ status: "success", task: { id: "1", name: "updated" } })
         }),
       )

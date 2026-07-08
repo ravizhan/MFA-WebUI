@@ -8,7 +8,7 @@ import { useI18n } from "vue-i18n"
 import DOMPurify from "dompurify"
 import { marked } from "marked"
 import { useIndexStore, useInterfaceStore } from "@/stores"
-import type { Task } from "@/types/interface/model"
+import type { Task } from "@/types/interfaceModel"
 import { resolveInterfaceDocumentContent } from "@/utils/interface/content"
 
 const { t } = useI18n()
@@ -54,6 +54,7 @@ watch(
 
 const htmlContent = computed(() => {
   const source = documentContent.value?.trim() ? documentContent.value : t("panel.empty")
-  return DOMPurify.sanitize(marked.parse(source || "") as string)
+  const parsed = marked.parse(source || "")
+  return DOMPurify.sanitize(typeof parsed === "string" ? parsed : "")
 })
 </script>

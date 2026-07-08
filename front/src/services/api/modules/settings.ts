@@ -1,4 +1,4 @@
-import type { SettingsModel } from "@/types/settings/model"
+import type { SettingsModel } from "@/types/settingsModel"
 import { showGlobalMessage } from "@/services/feedback/message"
 import type { ApiResponse } from "@/services/api/core/types"
 import i18n from "@/app/i18n"

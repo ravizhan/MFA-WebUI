@@ -8,9 +8,7 @@ describe("message service", () => {
     vi.resetModules()
     const messageModule = await import("@/services/feedback/message")
     showGlobalMessage = messageModule.showGlobalMessage
-    useToasts = messageModule.useToasts as () => {
-      value: { id: number; type: string; content: string }[]
-    }
+    useToasts = messageModule.useToasts
   })
 
   describe("showGlobalMessage", () => {

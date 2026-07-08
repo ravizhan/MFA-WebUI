@@ -16,7 +16,9 @@
     "start": "Start",
     "pause": "Pause",
     "darkMode": "Dark Mode",
-    "lightMode": "Light Mode"
+    "lightMode": "Light Mode",
+    "colon": ":",
+    "slash": "/"
   },
   "nav": {
     "home": "Home",
@@ -180,7 +182,11 @@
         "on": "On",
         "off": "Off"
       },
-      "language": "Language"
+      "language": "Language",
+      "languages": {
+        "zhCN": "简体中文",
+        "enUS": "English"
+      }
     },
     "notification": {
       "title": "Notification",
@@ -196,7 +202,20 @@
       "testResult": "Send failed: {message}",
       "testError": "Error sending test notification",
       "browserUnsupported": "Browser notifications are not supported in this environment",
-      "browserPermissionDenied": "Browser notification permission was not granted"
+      "browserPermissionDenied": "Browser notification permission was not granted",
+      "fields": {
+        "url": "url *",
+        "contentType": "content_type",
+        "json": "application/json",
+        "formUrlencoded": "application/x-www-form-urlencoded",
+        "headers": "headers",
+        "method": "method",
+        "post": "POST",
+        "get": "GET",
+        "body": "body",
+        "username": "username",
+        "password": "password"
+      }
     },
     "about": {
       "title": "About",
@@ -210,7 +229,8 @@
       "defaultDescription": "General GUI for MaaFramework based on Vue",
       "reset": "Reset All Settings",
       "resetConfirm": "Are you sure you want to reset all settings? This cannot be undone.",
-      "resetSuccess": "Settings have been reset to default"
+      "resetSuccess": "Settings have been reset to default",
+      "githubIssues": "GitHub Issues"
     }
   },
   "panel": {
@@ -258,6 +278,21 @@
       "modified": "Modified",
       "noDescription": "No preset description",
       "customDescription": "You are using a custom task snapshot and can continue editing it manually."
+    },
+    "health": {
+      "paused": "Paused",
+      "label": "Health",
+      "running": "Running:",
+      "total": "Total:"
+    },
+    "connection": {
+      "connected": "Connected",
+      "disconnected": "Disconnected"
+    },
+    "preview": {
+      "fps15": "15 FPS",
+      "fps30": "30 FPS",
+      "fps60": "60 FPS"
     }
   },
   "taskConfig": {

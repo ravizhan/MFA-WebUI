@@ -61,45 +61,38 @@ interface Option {
   value: string
 }
 
-const props = defineProps<{
-  modelValue: string | null
+const { options, placeholder, disabled } = defineProps<{
   options: Option[]
   placeholder?: string
   disabled?: boolean
 }>()
 
-const emit = defineEmits<{
-  (e: "update:modelValue", value: string | null): void
-}>()
+const modelValue = defineModel<string | null>()
 
 const { t } = useI18n()
 const isOpen = ref(false)
 const searchText = ref("")
 const highlightedIndex = ref(-1)
-const inputRef = ref<HTMLInputElement | null>(null)
+const inputRef = useTemplateRef<HTMLInputElement>("inputRef")
 
 const displayValue = computed(() => {
   if (searchText.value) return searchText.value
-  const opt = props.options.find((o) => o.value === props.modelValue)
-  return opt?.label || props.modelValue || ""
+  const opt = options.find((o) => o.value === modelValue.value)
+  return opt?.label || modelValue.value || ""
 })
 
 const filteredOptions = computed(() => {
   const text = searchText.value.toLowerCase()
-  if (!text) return props.options
-  return props.options.filter(
+  if (!text) return options
+  return options.filter(
     (opt) => opt.label.toLowerCase().includes(text) || opt.value.toLowerCase().includes(text),
   )
 })
 
 watch(
-  () => props.modelValue,
-  (val) => {
+  () => modelValue.value,
+  () => {
     searchText.value = ""
-    const opt = props.options.find((o) => o.value === val)
-    if (opt) {
-      searchText.value = ""
-    }
   },
   { immediate: true },
 )
@@ -117,18 +110,24 @@ function handleBlur() {
   }, 200)
 }
 
+function getInputValue(event: Event): string {
+  const target = event.target
+  if (target instanceof HTMLInputElement) return target.value
+  return ""
+}
+
 function handleInput(event: Event) {
   // Only update the local filter text — do NOT emit update:modelValue.
   // Emitting raw filter text would corrupt the bound value (e.g. a device
   // fingerprint) with a partial label that no option matches. The real
   // value is only emitted when an option is explicitly selected.
-  searchText.value = (event.target as HTMLInputElement).value
+  searchText.value = getInputValue(event)
   isOpen.value = true
   highlightedIndex.value = -1
 }
 
 function toggleDropdown() {
-  if (props.disabled) return
+  if (disabled) return
   isOpen.value = !isOpen.value
   if (isOpen.value) {
     nextTick(() => inputRef.value?.focus())
@@ -137,7 +136,7 @@ function toggleDropdown() {
 
 function selectOption(opt: Option) {
   searchText.value = ""
-  emit("update:modelValue", opt.value)
+  modelValue.value = opt.value
   isOpen.value = false
 }
 
@@ -155,8 +154,8 @@ function highlightPrev() {
 function selectHighlighted() {
   if (highlightedIndex.value >= 0 && highlightedIndex.value < filteredOptions.value.length) {
     selectOption(filteredOptions.value[highlightedIndex.value])
-  } else {
-    isOpen.value = false
+    return
   }
+  isOpen.value = false
 }
 </script>

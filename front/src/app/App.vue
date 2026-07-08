@@ -105,8 +105,9 @@ import UpdateDialog from "@/components/settings/dialogs/UpdateDialog.vue"
 import { checkUpdateApi, type UpdateInfo } from "@/services/api"
 import { useToasts } from "@/services/feedback/message"
 import { useInterfaceStore, useSettingsStore, useTaskConfigStore } from "@/stores"
+import { tryCatch } from "@/utils/tryCatch"
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const route = useRoute()
 const interfaceStore = useInterfaceStore()
 const configStore = useTaskConfigStore()
@@ -142,7 +143,7 @@ const navItems = computed(() => [
 ])
 
 function toggleDarkMode() {
-  const newValue = settingsStore.isDarkMode ? false : true
+  const newValue = !settingsStore.isDarkMode
   void settingsStore.updateSetting("ui", "darkMode", newValue)
 }
 
@@ -151,8 +152,8 @@ const updateInfo = ref<UpdateInfo | null>(null)
 
 function ensureMarkdownStylesheet(href: string) {
   const id = "github-markdown-theme"
-  let el = document.getElementById(id) as HTMLLinkElement | null
-  if (!el) {
+  let el = document.getElementById(id)
+  if (!(el instanceof HTMLLinkElement)) {
     el = document.createElement("link")
     el.id = id
     el.rel = "stylesheet"
@@ -172,15 +173,15 @@ const checkForUpdatesOnLoad = async () => {
     return
   }
 
-  try {
-    const result = await checkUpdateApi()
-    sessionStorage.setItem("mwu-update-checked", "true")
-    if (result.status === "success" && result.update_info?.is_update_available) {
-      updateInfo.value = result.update_info
-      showUpdateDialog.value = true
-    }
-  } catch (error) {
-    console.error("Failed to check for updates on load:", error)
+  const [result, err] = await tryCatch(() => checkUpdateApi())
+  if (err) {
+    console.error("Failed to check for updates on load:", err)
+    return
+  }
+  sessionStorage.setItem("mwu-update-checked", "true")
+  if (result.status === "success" && result.update_info?.is_update_available) {
+    updateInfo.value = result.update_info
+    showUpdateDialog.value = true
   }
 }
 
@@ -203,16 +204,18 @@ watch(
   { immediate: true },
 )
 
+function markdownHref(mode: boolean | "auto"): string {
+  if (mode === "auto") {
+    return "https://cdn.jsdelivr.net/npm/github-markdown-css@5/github-markdown-auto.css"
+  }
+  if (mode) {
+    return "https://cdn.jsdelivr.net/npm/github-markdown-css@5/github-markdown-dark.css"
+  }
+  return "https://cdn.jsdelivr.net/npm/github-markdown-css@5/github-markdown-light.css"
+}
+
 watchEffect(() => {
   const mode = settingsStore.settings.ui.darkMode
-  let href: string
-  if (mode === "auto") {
-    href = "https://cdn.jsdelivr.net/npm/github-markdown-css@5/github-markdown-auto.css"
-  } else {
-    href = mode
-      ? "https://cdn.jsdelivr.net/npm/github-markdown-css@5/github-markdown-dark.css"
-      : "https://cdn.jsdelivr.net/npm/github-markdown-css@5/github-markdown-light.css"
-  }
-  ensureMarkdownStylesheet(href)
+  ensureMarkdownStylesheet(markdownHref(mode))
 })
 </script>

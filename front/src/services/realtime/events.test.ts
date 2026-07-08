@@ -1,6 +1,6 @@
-import { describe, expect, it, vi, beforeEach } from "vitest"
-import type { RealtimeEvent } from "@/types/realtime/model"
-import type { NotificationSettings } from "@/types/settings/model"
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest"
+import type { RealtimeEvent } from "@/types/realtimeModel"
+import type { NotificationSettings } from "@/types/settingsModel"
 import {
   formatRealtimeLog,
   showRealtimeMessage,
@@ -9,7 +9,7 @@ import {
 } from "@/services/realtime/events"
 
 vi.mock("@/services/feedback/message", () => ({
-  showGlobalMessage: vi.fn(),
+  showGlobalMessage: vi.fn<() => void>(),
 }))
 
 import { showGlobalMessage } from "@/services/feedback/message"
@@ -62,7 +62,7 @@ describe("showToastMessage", () => {
     ["error", "error"],
     ["success", "success"],
     ["info", "info"],
-  ] as [RealtimeEvent["level"], "error" | "success" | "info"][])(
+  ] satisfies [RealtimeEvent["level"], "error" | "success" | "info"][])(
     "maps level %s to toast type %s",
     (level, expectedType) => {
       const event: RealtimeEvent = { ...baseEvent, level }
@@ -73,11 +73,12 @@ describe("showToastMessage", () => {
 })
 
 describe("showBrowserRealtimeNotification", () => {
-  const notificationMock = vi.fn()
+  const notificationMock = vi.fn<() => void>()
 
   beforeEach(() => {
     notificationMock.mockClear()
-    vi.stubGlobal("Notification", notificationMock as unknown as typeof Notification)
+
+    vi.stubGlobal("Notification", notificationMock)
     Object.defineProperty(Notification, "permission", {
       value: "granted",
       configurable: true,

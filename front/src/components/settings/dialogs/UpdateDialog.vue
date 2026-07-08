@@ -73,6 +73,7 @@ import { Icon } from "@iconify/vue"
 import { marked } from "marked"
 import { performUpdateApi, getUpdateStatusApi, type UpdateInfo } from "@/services/api"
 import DOMPurify from "dompurify"
+import { tryCatch } from "@/utils/tryCatch"
 
 const { t } = useI18n()
 
@@ -81,25 +82,25 @@ interface Props {
   updateInfo: UpdateInfo | null
 }
 
-const version_info = computed(() => {
-  return (
-    t("settings.update.currentVersion") +
-    ": " +
-    (props.updateInfo?.current_version || "-") +
-    " | " +
-    t("settings.update.latestVersion") +
-    ": " +
-    (props.updateInfo?.latest_version || "-")
-  )
-})
-
-const props = defineProps<Props>()
+const { show, updateInfo } = defineProps<Props>()
 const emit = defineEmits<{
   (e: "update:show", value: boolean): void
 }>()
 
+const version_info = computed(() => {
+  return (
+    t("settings.update.currentVersion") +
+    ": " +
+    (updateInfo?.current_version || "-") +
+    " | " +
+    t("settings.update.latestVersion") +
+    ": " +
+    (updateInfo?.latest_version || "-")
+  )
+})
+
 const showModal = computed({
-  get: () => props.show,
+  get: () => show,
   set: (value) => emit("update:show", value),
 })
 
@@ -129,46 +130,50 @@ const dialogTitle = computed(() => {
 })
 
 const renderedMarkdown = computed(() => {
-  if (!props.updateInfo?.release_notes) {
+  if (!updateInfo?.release_notes) {
     return "<p>" + t("panel.empty") + "</p>"
   }
-  return DOMPurify.sanitize(marked.parse(props.updateInfo.release_notes) as string)
+  const raw = marked.parse(updateInfo.release_notes)
+  return typeof raw === "string" ? DOMPurify.sanitize(raw) : ""
 })
 
 let pollTimer: number | null = null
 
 const pollUpdateStatus = async () => {
-  try {
-    const status = await getUpdateStatusApi()
-    statusMessage.value = status.message
+  const [status, err] = await tryCatch(() => getUpdateStatusApi())
+  if (err) {
+    console.error("Failed to poll update status:", err)
+    return
+  }
 
-    switch (status.status) {
-      case "downloading":
-        updateState.value = "downloading"
-        break
-      case "updating":
-        updateState.value = "updating"
-        break
-      case "success":
-        updateState.value = "success"
-        stopPolling()
-        waitForBackendRestart()
-        break
-      case "failed":
-        updateState.value = "failed"
-        stopPolling()
-        break
-      case "idle":
-        break
-    }
-  } catch (error) {
-    console.error("Failed to poll update status:", error)
+  statusMessage.value = status.message
+
+  switch (status.status) {
+    case "downloading":
+      updateState.value = "downloading"
+      break
+    case "updating":
+      updateState.value = "updating"
+      break
+    case "success":
+      updateState.value = "success"
+      stopPolling()
+      waitForBackendRestart()
+      break
+    case "failed":
+      updateState.value = "failed"
+      stopPolling()
+      break
+    case "idle":
+      break
   }
 }
 
 const startPolling = () => {
   if (pollTimer) return
-  pollTimer = window.setInterval(pollUpdateStatus, 1000)
+  pollTimer = window.setInterval(() => {
+    void pollUpdateStatus()
+  }, 1000)
 }
 
 const stopPolling = () => {
@@ -178,25 +183,21 @@ const stopPolling = () => {
   }
 }
 
-const waitForBackendRestart = async () => {
+const waitForBackendRestart = () => {
   statusMessage.value = t("settings.update.waitingRestart")
   let retries = 0
   const maxRetries = 60
 
   const checkBackend = async () => {
-    try {
-      const response = await fetch("/api/settings", { method: "GET" })
-      if (response.ok) {
-        statusMessage.value = t("settings.update.restarting")
-        setTimeout(() => {
-          window.location.reload()
-        }, 1000)
-        return true
-      }
-    } catch {
-      // Backend not ready yet
+    const [response, err] = await tryCatch(() => fetch("/api/settings", { method: "GET" }))
+    if (err || !response?.ok) {
+      return false
     }
-    return false
+    statusMessage.value = t("settings.update.restarting")
+    setTimeout(() => {
+      window.location.reload()
+    }, 1000)
+    return true
   }
 
   const pollBackend = async () => {
@@ -216,23 +217,23 @@ const waitForBackendRestart = async () => {
 }
 
 const handleUpdate = async () => {
-  try {
-    updateState.value = "downloading"
-    statusMessage.value = t("settings.update.downloading")
+  updateState.value = "downloading"
+  statusMessage.value = t("settings.update.downloading")
 
-    const result = await performUpdateApi()
-
-    if (result.status === "success") {
-      startPolling()
-    } else {
-      updateState.value = "failed"
-      statusMessage.value = result.message || t("settings.update.updateFailed")
-    }
-  } catch (error) {
+  const [result, err] = await tryCatch(() => performUpdateApi())
+  if (err) {
     updateState.value = "failed"
-    statusMessage.value = String(error)
-    console.error("Failed to perform update:", error)
+    statusMessage.value = String(err)
+    console.error("Failed to perform update:", err)
+    return
   }
+
+  if (result.status === "success") {
+    startPolling()
+    return
+  }
+  updateState.value = "failed"
+  statusMessage.value = result.message || t("settings.update.updateFailed")
 }
 
 const handleClose = () => {
@@ -241,14 +242,14 @@ const handleClose = () => {
 }
 
 watch(
-  () => props.show,
+  () => show,
   (newShow) => {
     if (newShow) {
       updateState.value = "available"
       statusMessage.value = ""
-    } else {
-      stopPolling()
+      return
     }
+    stopPolling()
   },
 )
 

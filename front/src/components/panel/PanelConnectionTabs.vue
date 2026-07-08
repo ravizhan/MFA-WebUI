@@ -5,7 +5,7 @@
       :value="selectedController"
       class="select select-bordered select-sm flex-1 min-w-[8rem]"
       :disabled="deviceDisabled"
-      @change="handleControllerUpdate(($event.target as HTMLSelectElement).value)"
+      @change="handleControllerUpdate(getSelectValue($event))"
     >
       <option value="" disabled>{{ t("panel.selectDeviceType") }}</option>
       <option
@@ -23,7 +23,7 @@
       class="input input-bordered input-sm flex-1 min-w-[10rem]"
       :placeholder="t('panel.playcoverAddress')"
       :disabled="deviceDisabled"
-      @input="emit('update:playCoverAddress', ($event.target as HTMLInputElement).value)"
+      @input="emit('update:play-cover-address', getInputValue($event))"
     />
     <SearchableSelect
       v-else
@@ -32,7 +32,7 @@
       :placeholder="t('panel.selectDevice')"
       :disabled="!selectedController || selectedControllerDisabled || deviceDisabled"
       class="flex-1 min-w-[10rem]"
-      @update:model-value="emit('update:selectedDeviceKey', $event)"
+      @update:model-value="emit('update:selected-device-key', $event)"
     />
     <button
       class="btn btn-outline btn-sm"
@@ -49,7 +49,7 @@
       :value="resource"
       class="select select-bordered select-sm flex-1 min-w-[12rem]"
       :disabled="resourceDisabled"
-      @change="emit('update:resource', ($event.target as HTMLSelectElement).value || null)"
+      @change="emit('update:resource', getSelectValue($event) || null)"
     >
       <option value="" disabled>{{ t("panel.selectResource") }}</option>
       <option v-for="opt in resourcesList" :key="opt.value" :value="opt.value">
@@ -84,7 +84,7 @@
             :value="selectedController"
             class="select select-bordered select-sm flex-1 min-w-[8rem]"
             :disabled="deviceDisabled"
-            @change="handleControllerUpdate(($event.target as HTMLSelectElement).value)"
+            @change="handleControllerUpdate(getSelectValue($event))"
           >
             <option value="" disabled>{{ t("panel.selectDeviceType") }}</option>
             <option
@@ -102,7 +102,7 @@
             class="input input-bordered input-sm flex-1 min-w-[10rem]"
             :placeholder="t('panel.playcoverAddress')"
             :disabled="deviceDisabled"
-            @input="emit('update:playCoverAddress', ($event.target as HTMLInputElement).value)"
+            @input="emit('update:play-cover-address', getInputValue($event))"
           />
           <SearchableSelect
             v-else
@@ -111,7 +111,7 @@
             :placeholder="t('panel.selectDevice')"
             :disabled="!selectedController || selectedControllerDisabled || deviceDisabled"
             class="flex-1 min-w-[10rem]"
-            @update:model-value="emit('update:selectedDeviceKey', $event)"
+            @update:model-value="emit('update:selected-device-key', $event)"
           />
           <button
             class="btn btn-outline btn-sm"
@@ -127,7 +127,7 @@
             :value="resource"
             class="select select-bordered select-sm flex-1 min-w-[12rem]"
             :disabled="resourceDisabled"
-            @change="emit('update:resource', ($event.target as HTMLSelectElement).value || null)"
+            @change="emit('update:resource', getSelectValue($event) || null)"
           >
             <option value="" disabled>{{ t("panel.selectResource") }}</option>
             <option v-for="opt in resourcesList" :key="opt.value" :value="opt.value">
@@ -145,35 +145,44 @@ import { ref, computed } from "vue"
 import { useI18n } from "vue-i18n"
 import SearchableSelect from "@/components/common/SearchableSelect.vue"
 
-const props = withDefaults(
-  defineProps<{
-    selectedController: string | null
-    selectedDeviceKey: string | null
-    playCoverAddress: string
-    controllerOptions: Array<{ label: string; value: string; disabled?: boolean }>
-    deviceOptions: Array<{
-      label: string
-      value: string
-      type?: string
-      key?: string
-      children?: Array<{ label: string; value: string }>
-    }>
-    loading: boolean
-    deviceDisabled: boolean
-    resourceDisabled: boolean
-    selectedControllerDisabled: boolean
-    isPlayCover: boolean
-    resource: string | null
-    resourcesList: Array<{ label: string; value: string }>
-    mode?: "device" | "resource" | "tabs"
-  }>(),
-  { mode: "tabs" },
-)
+const {
+  selectedController,
+  selectedDeviceKey,
+  playCoverAddress,
+  controllerOptions,
+  deviceOptions,
+  deviceDisabled,
+  resourceDisabled,
+  selectedControllerDisabled,
+  isPlayCover,
+  resource,
+  resourcesList,
+  mode = "tabs",
+} = defineProps<{
+  selectedController: string | null
+  selectedDeviceKey: string | null
+  playCoverAddress: string
+  controllerOptions: Array<{ label: string; value: string; disabled?: boolean }>
+  deviceOptions: Array<{
+    label: string
+    value: string
+    type?: string
+    key?: string
+    children?: Array<{ label: string; value: string }>
+  }>
+  deviceDisabled: boolean
+  resourceDisabled: boolean
+  selectedControllerDisabled: boolean
+  isPlayCover: boolean
+  resource: string | null
+  resourcesList: Array<{ label: string; value: string }>
+  mode?: "device" | "resource" | "tabs"
+}>()
 
 const emit = defineEmits<{
-  (e: "update:selectedController", value: string | null): void
-  (e: "update:selectedDeviceKey", value: string | null): void
-  (e: "update:playCoverAddress", value: string): void
+  (e: "update:selected-controller", value: string | null): void
+  (e: "update:selected-device-key", value: string | null): void
+  (e: "update:play-cover-address", value: string): void
   (e: "update:resource", value: string | null): void
   (e: "controller-change"): void
   (e: "refresh-devices"): void
@@ -182,28 +191,45 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const activeTab = ref<"device" | "resource">("device")
 
+type DeviceOptionGroup = {
+  label: string
+  key: string
+  children: Array<{ label: string; value: string }>
+}
+
+function pushGroup(
+  groups: DeviceOptionGroup[],
+  label: string,
+  key: string,
+  children: Array<{ label: string; value: string }> = [],
+): DeviceOptionGroup {
+  const group: DeviceOptionGroup = { label, key, children }
+  groups.push(group)
+  return group
+}
+
+function ensureDefaultGroup(groups: DeviceOptionGroup[]): DeviceOptionGroup {
+  const last = groups[groups.length - 1]
+  if (last && last.key === "default") return last
+  return pushGroup(groups, "", "default")
+}
+
 const deviceOptionGroups = computed(() => {
-  const groups: Array<{
-    label: string
-    key: string
-    children: Array<{ label: string; value: string }>
-  }> = []
-  let currentGroup: (typeof groups)[0] | null = null
-  for (const opt of props.deviceOptions) {
-    if (opt.type === "group" && opt.children) {
-      groups.push({ label: opt.label, key: opt.key || opt.label, children: opt.children })
-    } else if (opt.type === "group" && !opt.children) {
-      currentGroup = { label: opt.label, key: opt.key || opt.label, children: [] }
-      groups.push(currentGroup)
-    } else if (currentGroup && opt.value !== undefined) {
-      currentGroup.children.push({ label: opt.label, value: opt.value })
-    } else if (opt.value !== undefined) {
-      // Flat option without group
-      if (groups.length === 0 || groups[groups.length - 1].key !== "default") {
-        groups.push({ label: "", key: "default", children: [] })
-      }
-      groups[groups.length - 1].children.push({ label: opt.label, value: opt.value })
+  const groups: DeviceOptionGroup[] = []
+  let currentGroup: DeviceOptionGroup | null = null
+  for (const opt of deviceOptions) {
+    if (opt.type === "group") {
+      currentGroup = opt.children
+        ? pushGroup(groups, opt.label, opt.key || opt.label, opt.children)
+        : pushGroup(groups, opt.label, opt.key || opt.label)
+      continue
     }
+    if (opt.value === undefined) continue
+    if (currentGroup) {
+      currentGroup.children.push({ label: opt.label, value: opt.value })
+      continue
+    }
+    ensureDefaultGroup(groups).children.push({ label: opt.label, value: opt.value })
   }
   return groups
 })
@@ -222,9 +248,21 @@ const flatDeviceOptions = computed(() => {
 })
 
 function handleControllerUpdate(value: string | null) {
-  emit("update:selectedController", value)
-  if (value !== props.selectedController) {
+  emit("update:selected-controller", value)
+  if (value !== selectedController) {
     emit("controller-change")
   }
+}
+
+function getSelectValue(event: Event): string {
+  const target = event.target
+  if (target instanceof HTMLSelectElement) return target.value
+  return ""
+}
+
+function getInputValue(event: Event): string {
+  const target = event.target
+  if (target instanceof HTMLInputElement) return target.value
+  return ""
 }
 </script>

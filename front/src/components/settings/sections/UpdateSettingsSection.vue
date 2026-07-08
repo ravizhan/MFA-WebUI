@@ -37,13 +37,7 @@
       <select
         :value="settings.update.updateChannel"
         class="select select-bordered w-full md:w-auto"
-        @change="
-          handleSettingChange(
-            'update',
-            'updateChannel',
-            ($event.target as HTMLSelectElement).value as SettingsModel['update']['updateChannel'],
-          )
-        "
+        @change="handleUpdateChannelChange($event)"
       >
         <option value="stable">{{ t("settings.update.channelOptions.stable") }}</option>
         <option value="beta">{{ t("settings.update.channelOptions.beta") }}</option>
@@ -101,11 +95,16 @@ import { Icon } from "@iconify/vue"
 import { checkUpdateApi, type UpdateInfo } from "@/services/api"
 import { showGlobalMessage } from "@/services/feedback/message"
 import { useInterfaceStore, useSettingsStore } from "@/stores"
-import type { SettingsModel } from "@/types/settings/model"
+import { tryCatch } from "@/utils/tryCatch"
+import type { SettingsModel } from "@/types/settingsModel"
 
 const emit = defineEmits<{
   (e: "show-update", updateInfo: UpdateInfo): void
 }>()
+
+function isUpdateChannel(value: string): value is SettingsModel["update"]["updateChannel"] {
+  return value === "stable" || value === "beta"
+}
 
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
@@ -126,22 +125,32 @@ async function handleSettingChange<K extends EditableCategory, P extends keyof S
   value: EditableSettingValue<K, P>,
 ) {
   if (value === null) return
-  await settingsStore.updateSetting(category, key, value as SettingsModel[K][P])
+  await settingsStore.updateSetting(category, key, value)
+}
+
+function handleUpdateChannelChange(event: Event) {
+  const target = event.target
+  if (!(target instanceof HTMLSelectElement)) return
+  const value = target.value
+  if (!isUpdateChannel(value)) return
+  void handleSettingChange("update", "updateChannel", value)
 }
 
 async function checkForUpdate() {
   checkingUpdate.value = true
-  try {
-    const result = await checkUpdateApi()
-    if (result.status === "success" && result.update_info?.is_update_available) {
-      emit("show-update", result.update_info)
-    } else {
-      showGlobalMessage("success", t("settings.update.latest"))
-    }
-  } catch {
+  const [result, err] = await tryCatch(() => checkUpdateApi())
+  if (err) {
     showGlobalMessage("error", t("settings.update.failed"))
-  } finally {
     checkingUpdate.value = false
+    return
   }
+
+  if (result.status === "success" && result.update_info?.is_update_available) {
+    emit("show-update", result.update_info)
+    checkingUpdate.value = false
+    return
+  }
+  showGlobalMessage("success", t("settings.update.latest"))
+  checkingUpdate.value = false
 }
 </script>

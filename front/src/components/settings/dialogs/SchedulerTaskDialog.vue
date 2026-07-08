@@ -83,7 +83,7 @@
               type="text"
               class="input input-bordered"
               :placeholder="t('settings.scheduler.dialog.cronPlaceholder')"
-              @input="updateTriggerConfig({ cron: ($event.target as HTMLInputElement).value })"
+              @input="updateTriggerConfig({ cron: getInputValue($event) })"
             />
           </div>
           <div class="flex flex-wrap gap-2">
@@ -114,7 +114,7 @@
               :value="dateConfigLocal"
               @input="
                 updateTriggerConfig({
-                  run_date: new Date(($event.target as HTMLInputElement).value).toISOString(),
+                  run_date: new Date(getInputValue($event)).toISOString(),
                 })
               "
             />
@@ -135,7 +135,7 @@
                 min="0"
                 @input="
                   updateTriggerConfig({
-                    weeks: Number(($event.target as HTMLInputElement).value) || 0,
+                    weeks: Number(getInputValue($event)) || 0,
                   })
                 "
               />
@@ -151,7 +151,7 @@
                 min="0"
                 @input="
                   updateTriggerConfig({
-                    days: Number(($event.target as HTMLInputElement).value) || 0,
+                    days: Number(getInputValue($event)) || 0,
                   })
                 "
               />
@@ -167,7 +167,7 @@
                 min="0"
                 @input="
                   updateTriggerConfig({
-                    hours: Number(($event.target as HTMLInputElement).value) || 0,
+                    hours: Number(getInputValue($event)) || 0,
                   })
                 "
               />
@@ -185,7 +185,7 @@
                 min="0"
                 @input="
                   updateTriggerConfig({
-                    minutes: Number(($event.target as HTMLInputElement).value) || 0,
+                    minutes: Number(getInputValue($event)) || 0,
                   })
                 "
               />
@@ -203,7 +203,7 @@
                 min="0"
                 @input="
                   updateTriggerConfig({
-                    seconds: Number(($event.target as HTMLInputElement).value) || 0,
+                    seconds: Number(getInputValue($event)) || 0,
                   })
                 "
               />
@@ -219,8 +219,8 @@
               :value="intervalStartLocal"
               @input="
                 updateTriggerConfig({
-                  start_date: ($event.target as HTMLInputElement).value
-                    ? new Date(($event.target as HTMLInputElement).value).toISOString()
+                  start_date: getInputValue($event)
+                    ? new Date(getInputValue($event)).toISOString()
                     : undefined,
                 })
               "
@@ -236,8 +236,8 @@
               :value="intervalEndLocal"
               @input="
                 updateTriggerConfig({
-                  end_date: ($event.target as HTMLInputElement).value
-                    ? new Date(($event.target as HTMLInputElement).value).toISOString()
+                  end_date: getInputValue($event)
+                    ? new Date(getInputValue($event)).toISOString()
                     : undefined,
                 })
               "
@@ -380,7 +380,7 @@ import {
   useSettingsStore,
   useTaskConfigStore,
 } from "@/stores"
-import type { TaskListItem } from "@/types/task-config/model"
+import type { TaskListItem } from "@/types/taskConfigModel"
 import TaskSelectList from "@/components/panel/task/TaskSelectList.vue"
 import TaskOptionPanel from "@/components/panel/task/TaskOptionPanel.vue"
 import PreTaskList from "@/components/panel/task/PreTaskList.vue"
@@ -388,7 +388,7 @@ import { resolveInterfaceText } from "@/utils/interface/content"
 import { getDevices, getResource } from "@/services/api"
 import type { ConnectableDevice, DeviceControllerType } from "@/services/api"
 import { buildDeviceLabel } from "@/utils/panel/device"
-import type { PanelLastConnectedDevice } from "@/types/settings/model"
+import type { PanelLastConnectedDevice } from "@/types/settingsModel"
 import type {
   ScheduledTask,
   ScheduledTaskCreate,
@@ -397,8 +397,9 @@ import type {
   CronTriggerConfig,
   DateTriggerConfig,
   IntervalTriggerConfig,
-} from "@/types/scheduler/model"
+} from "@/types/schedulerModel"
 import { showGlobalMessage } from "@/services/feedback/message"
+import { tryCatch } from "@/utils/tryCatch"
 
 interface Props {
   show: boolean
@@ -410,7 +411,7 @@ interface Emits {
   (e: "saved"): void
 }
 
-const props = defineProps<Props>()
+const { show, task } = defineProps<Props>()
 const emit = defineEmits<Emits>()
 
 const { t, locale } = useI18n()
@@ -430,19 +431,21 @@ const availableResources = ref<Array<{ name: string; label?: string; controller?
 const loadingDevices = ref(false)
 const loadingResources = ref(false)
 
-const SUPPORTED_DEVICE_TYPES = new Set<DeviceControllerType>([
-  "Adb",
-  "Win32",
-  "Gamepad",
-  "PlayCover",
-])
+function isDeviceControllerType(type: string): type is DeviceControllerType {
+  return type === "Adb" || type === "Win32" || type === "Gamepad" || type === "PlayCover"
+}
+
+function getInputValue(event: Event): string {
+  const target = event.target
+  return target instanceof HTMLInputElement ? target.value : ""
+}
 
 const showDialog = computed({
-  get: () => props.show,
+  get: () => show,
   set: (value) => emit("update:show", value),
 })
 
-const isEditMode = computed(() => !!props.task)
+const isEditMode = computed(() => !!task)
 const availableTasks = computed(() => configStore.taskList)
 
 const selectedControllerType = computed(() => {
@@ -456,7 +459,7 @@ const isPlayCover = computed(() => selectedControllerType.value === "PlayCover")
 
 const deviceControllerOptions = computed(() =>
   (interfaceStore.interface?.controller || [])
-    .filter((controller) => SUPPORTED_DEVICE_TYPES.has(controller.type as DeviceControllerType))
+    .filter((controller) => isDeviceControllerType(controller.type))
     .map((controller) => ({
       label: resolveInterfaceText(
         interfaceStore.interface,
@@ -516,23 +519,36 @@ const selectedDeviceAddress = computed<string | null>({
       formData.value.device = null
       return
     }
+    if (!isDeviceControllerType(controller.type)) {
+      formData.value.device = null
+      return
+    }
     formData.value.device = {
       controller_name: controller.name,
-      device_type: controller.type as DeviceControllerType,
+      device_type: controller.type,
       device_address: value,
     }
   },
 })
 
-const cronConfig = computed(() => formData.value.trigger_config as CronTriggerConfig)
-const dateConfig = computed(() => formData.value.trigger_config as DateTriggerConfig)
+const cronConfig = computed<CronTriggerConfig>(() => {
+  const config = formData.value.trigger_config
+  return config.type === "cron" ? config : { type: "cron", cron: "" }
+})
+const dateConfig = computed<DateTriggerConfig>(() => {
+  const config = formData.value.trigger_config
+  return config.type === "date" ? config : { type: "date", run_date: "" }
+})
 const dateConfigLocal = computed(() => {
   if (!dateConfig.value.run_date) return ""
   const d = new Date(dateConfig.value.run_date)
   d.setMinutes(d.getMinutes() - d.getTimezoneOffset())
   return d.toISOString().slice(0, 16)
 })
-const intervalConfig = computed(() => formData.value.trigger_config as IntervalTriggerConfig)
+const intervalConfig = computed<IntervalTriggerConfig>(() => {
+  const config = formData.value.trigger_config
+  return config.type === "interval" ? config : { type: "interval" }
+})
 const intervalStartLocal = computed(() => {
   if (!intervalConfig.value.start_date) return ""
   const d = new Date(intervalConfig.value.start_date)
@@ -546,7 +562,7 @@ const intervalEndLocal = computed(() => {
   return d.toISOString().slice(0, 16)
 })
 
-const formData = ref<ScheduledTaskCreate>(initFormData(props.task))
+const formData = ref<ScheduledTaskCreate>(initFormData(task))
 const taskListData = ref<TaskListItem[]>([])
 
 watch(
@@ -557,10 +573,10 @@ watch(
 )
 
 watch(
-  () => props.task,
-  (task) => {
+  () => task,
+  (newTask) => {
     suppressFormInit.value = true
-    formData.value = initFormData(task)
+    formData.value = initFormData(newTask)
     syncTaskListData(formData.value.task_list)
     void nextTick(() => {
       suppressFormInit.value = false
@@ -582,10 +598,10 @@ watch(
     if (newVal && type) {
       void fetchDevices(newVal)
       void fetchResources(type)
-    } else {
-      availableDevices.value = []
-      availableResources.value = []
+      return
     }
+    availableDevices.value = []
+    availableResources.value = []
   },
 )
 
@@ -704,41 +720,67 @@ function initFormData(task?: ScheduledTask | null): ScheduledTaskCreate {
   }
 }
 
+function buildCronConfig(existing?: Partial<TriggerConfig>): CronTriggerConfig {
+  const config = existing?.type === "cron" ? existing : undefined
+  return { type: "cron", cron: config?.cron ?? "0 0 * * *" }
+}
+
+function buildDateConfig(existing?: Partial<TriggerConfig>): DateTriggerConfig {
+  const config = existing?.type === "date" ? existing : undefined
+  return { type: "date", run_date: config?.run_date ?? new Date().toISOString() }
+}
+
+function buildIntervalConfig(existing?: Partial<TriggerConfig>): IntervalTriggerConfig {
+  const config = existing?.type === "interval" ? existing : undefined
+  const result: IntervalTriggerConfig = {
+    type: "interval",
+    weeks: 0,
+    days: 0,
+    hours: 1,
+    minutes: 0,
+    seconds: 0,
+  }
+  if (config === undefined) {
+    return result
+  }
+  if (config.weeks !== undefined) {
+    result.weeks = config.weeks
+  }
+  if (config.days !== undefined) {
+    result.days = config.days
+  }
+  if (config.hours !== undefined) {
+    result.hours = config.hours
+  }
+  if (config.minutes !== undefined) {
+    result.minutes = config.minutes
+  }
+  if (config.seconds !== undefined) {
+    result.seconds = config.seconds
+  }
+  result.start_date = config.start_date
+  result.end_date = config.end_date
+  return result
+}
+
 function getTriggerConfigByType(
   type: TriggerType,
   existing?: Partial<TriggerConfig>,
 ): TriggerConfig {
   switch (type) {
     case "cron":
-      return { type: "cron", cron: (existing as CronTriggerConfig)?.cron ?? "0 0 * * *" }
+      return buildCronConfig(existing)
     case "date":
-      return {
-        type: "date",
-        run_date: (existing as DateTriggerConfig)?.run_date ?? new Date().toISOString(),
-      }
-    case "interval": {
-      const interval = existing as IntervalTriggerConfig | undefined
-      return {
-        type: "interval",
-        weeks: interval?.weeks ?? 0,
-        days: interval?.days ?? 0,
-        hours: interval?.hours ?? 1,
-        minutes: interval?.minutes ?? 0,
-        seconds: interval?.seconds ?? 0,
-        start_date: interval?.start_date,
-        end_date: interval?.end_date,
-      } as IntervalTriggerConfig
-    }
+      return buildDateConfig(existing)
+    case "interval":
+      return buildIntervalConfig(existing)
     default:
-      return { type: "cron", cron: "0 0 * * *" }
+      return buildCronConfig()
   }
 }
 
 function updateTriggerConfig(updates: Partial<TriggerConfig>) {
-  formData.value.trigger_config = {
-    ...formData.value.trigger_config,
-    ...updates,
-  } as TriggerConfig
+  formData.value.trigger_config = Object.assign({}, formData.value.trigger_config, updates)
 }
 
 function setCronPreset(preset: string) {
@@ -816,84 +858,128 @@ function buildStoredDeviceLabel(device: PanelLastConnectedDevice): string {
 
 async function fetchDevices(controllerName: string) {
   loadingDevices.value = true
-  try {
-    const data = await getDevices(controllerName)
-    availableDevices.value = data.devices
-  } catch (error) {
-    console.error("Failed to fetch devices:", error)
+  const [data, err] = await tryCatch(() => getDevices(controllerName))
+  loadingDevices.value = false
+  if (err) {
+    console.error("Failed to fetch devices:", err)
     availableDevices.value = []
-  } finally {
-    loadingDevices.value = false
+    return
   }
+  availableDevices.value = data.devices
 }
 
 async function fetchResources(controllerType: string) {
   loadingResources.value = true
-  try {
-    availableResources.value = await getResource(controllerType)
-  } catch (error) {
-    console.error("Failed to fetch resources:", error)
+  const [data, err] = await tryCatch(() => getResource(controllerType))
+  loadingResources.value = false
+  if (err) {
+    console.error("Failed to fetch resources:", err)
     availableResources.value = []
-  } finally {
-    loadingResources.value = false
+    return
   }
+  availableResources.value = data
 }
 
-function validateForm(): boolean {
-  if (!formData.value.name.trim()) {
+function validateName(): boolean {
+  const name = formData.value.name.trim()
+  if (!name) {
     showGlobalMessage("error", t("settings.scheduler.rules.nameRequired"))
     return false
   }
-  if (formData.value.name.length > 100) {
+  if (name.length > 100) {
     showGlobalMessage("error", t("settings.scheduler.rules.nameLength"))
     return false
   }
-  if (formData.value.trigger_type === "cron") {
-    const cron = (formData.value.trigger_config as CronTriggerConfig).cron
-    if (!cron) {
-      showGlobalMessage("error", t("settings.scheduler.rules.cronRequired"))
-      return false
-    }
-    const pattern =
-      /^(\*|[0-9\-*,/]+)\s+(\*|[0-9\-*,/]+)\s+(\*|[0-9\-*,/]+)\s+(\*|[0-9\-*,/]+)\s+(\*|[0-9\-*,/]+)$/
-    if (!pattern.test(cron)) {
-      showGlobalMessage("error", t("settings.scheduler.rules.cronInvalid"))
+  return true
+}
+
+function validateCron(): boolean {
+  const config = formData.value.trigger_config
+  if (config.type !== "cron") {
+    return false
+  }
+  if (!config.cron) {
+    showGlobalMessage("error", t("settings.scheduler.rules.cronRequired"))
+    return false
+  }
+  const pattern =
+    /^(\*|[0-9\-*,/]+)\s+(\*|[0-9\-*,/]+)\s+(\*|[0-9\-*,/]+)\s+(\*|[0-9\-*,/]+)\s+(\*|[0-9\-*,/]+)$/
+  if (!pattern.test(config.cron)) {
+    showGlobalMessage("error", t("settings.scheduler.rules.cronInvalid"))
+    return false
+  }
+  return true
+}
+
+function validateDate(): boolean {
+  const config = formData.value.trigger_config
+  if (config.type !== "date") {
+    return false
+  }
+  if (!config.run_date) {
+    showGlobalMessage("error", t("settings.scheduler.rules.dateRequired"))
+    return false
+  }
+  if (new Date(config.run_date).getTime() < Date.now()) {
+    showGlobalMessage("error", t("settings.scheduler.rules.dateInPast"))
+    return false
+  }
+  return true
+}
+
+function nonNegative(value: number | undefined): number {
+  return value || 0
+}
+
+function validateInterval(): boolean {
+  const config = formData.value.trigger_config
+  if (config.type !== "interval") {
+    return false
+  }
+  const total =
+    nonNegative(config.weeks) +
+    nonNegative(config.days) +
+    nonNegative(config.hours) +
+    nonNegative(config.minutes) +
+    nonNegative(config.seconds)
+  if (total <= 0) {
+    showGlobalMessage("error", t("settings.scheduler.rules.intervalRequired"))
+    return false
+  }
+  if (config.start_date && config.end_date) {
+    const startAt = new Date(config.start_date).getTime()
+    const endAt = new Date(config.end_date).getTime()
+    if (endAt < startAt) {
+      showGlobalMessage("error", t("settings.scheduler.rules.endBeforeStart"))
       return false
     }
   }
-  if (formData.value.trigger_type === "date") {
-    const runDate = (formData.value.trigger_config as DateTriggerConfig).run_date
-    if (!runDate) {
-      showGlobalMessage("error", t("settings.scheduler.rules.dateRequired"))
-      return false
-    }
-    if (new Date(runDate).getTime() < Date.now()) {
-      showGlobalMessage("error", t("settings.scheduler.rules.dateInPast"))
-      return false
-    }
-  }
-  if (formData.value.trigger_type === "interval") {
-    const ic = formData.value.trigger_config as IntervalTriggerConfig
-    const total =
-      (ic.weeks || 0) + (ic.days || 0) + (ic.hours || 0) + (ic.minutes || 0) + (ic.seconds || 0)
-    if (total <= 0) {
-      showGlobalMessage("error", t("settings.scheduler.rules.intervalRequired"))
-      return false
-    }
-    if (ic.start_date && ic.end_date) {
-      const startAt = new Date(ic.start_date).getTime()
-      const endAt = new Date(ic.end_date).getTime()
-      if (endAt < startAt) {
-        showGlobalMessage("error", t("settings.scheduler.rules.endBeforeStart"))
-        return false
-      }
-    }
-  }
+  return true
+}
+
+function validateTaskList(): boolean {
   if (formData.value.task_list.length === 0) {
     showGlobalMessage("error", t("settings.scheduler.rules.taskListRequired"))
     return false
   }
   return true
+}
+
+function validateForm(): boolean {
+  if (!validateName()) {
+    return false
+  }
+  const { trigger_type } = formData.value
+  if (trigger_type === "cron" && !validateCron()) {
+    return false
+  }
+  if (trigger_type === "date" && !validateDate()) {
+    return false
+  }
+  if (trigger_type === "interval" && !validateInterval()) {
+    return false
+  }
+  return validateTaskList()
 }
 
 async function handleSave() {
@@ -902,38 +988,31 @@ async function handleSave() {
   }
 
   loading.value = true
-  try {
-    const taskPayload = {
-      ...formData.value,
-      ...configStore.buildExecutionPayload(formData.value.task_list, formData.value.task_options),
-      preTasks: formData.value.preTasks ?? [],
-    }
-    let success
-    if (isEditMode.value && props.task) {
-      success = await schedulerStore.updateTask(props.task.id, taskPayload)
-    } else {
-      success = await schedulerStore.createTask(taskPayload)
-    }
-
-    if (success) {
-      showGlobalMessage(
-        "success",
-        isEditMode.value
-          ? t("settings.scheduler.dialog.taskUpdated")
-          : t("settings.scheduler.dialog.taskCreated"),
-      )
-      showDialog.value = false
-      emit("saved")
-      resetForm()
-    } else {
-      showGlobalMessage("error", schedulerStore.error || t("settings.scheduler.dialog.saveFail"))
-    }
-  } catch (e) {
-    showGlobalMessage("error", t("settings.scheduler.dialog.saveFail"))
-    console.error("Failed to save task:", e)
-  } finally {
-    loading.value = false
+  const taskPayload = {
+    ...formData.value,
+    ...configStore.buildExecutionPayload(formData.value.task_list, formData.value.task_options),
+    preTasks: formData.value.preTasks ?? [],
   }
+  const [success, err] = await tryCatch(() =>
+    isEditMode.value && task
+      ? schedulerStore.updateTask(task.id, taskPayload)
+      : schedulerStore.createTask(taskPayload),
+  )
+  loading.value = false
+  if (err || !success) {
+    showGlobalMessage("error", schedulerStore.error || t("settings.scheduler.dialog.saveFail"))
+    return
+  }
+
+  showGlobalMessage(
+    "success",
+    isEditMode.value
+      ? t("settings.scheduler.dialog.taskUpdated")
+      : t("settings.scheduler.dialog.taskCreated"),
+  )
+  showDialog.value = false
+  emit("saved")
+  resetForm()
 }
 
 function handleCancel() {

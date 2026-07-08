@@ -9,7 +9,7 @@ import {
   getStoredDeviceFingerprint,
 } from "@/utils/panel/device"
 import type { AdbDevice, GamepadDevice, PlayCoverDevice, Win32Device } from "@/services/api"
-import type { PanelLastConnectedDevice } from "@/types/settings/model"
+import type { PanelLastConnectedDevice } from "@/types/settingsModel"
 
 const adbDevice: AdbDevice = {
   type: "Adb",
@@ -143,6 +143,7 @@ describe("buildDeviceFingerprint", () => {
 
 describe("getPlayCoverDefaultAddress", () => {
   it("returns default_address when PlayCover capability exists", () => {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
     const capabilities = [
       { type: "Adb", default_address: "adb-addr" },
       { type: "PlayCover", default_address: "playcover-addr" },
@@ -151,6 +152,7 @@ describe("getPlayCoverDefaultAddress", () => {
   })
 
   it("returns fallback when PlayCover capability is absent", () => {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
     const capabilities = [{ type: "Adb", default_address: "adb-addr" }] as never[]
     expect(getPlayCoverDefaultAddress(capabilities)).toBe("127.0.0.1:1717")
   })
@@ -158,11 +160,13 @@ describe("getPlayCoverDefaultAddress", () => {
 
 describe("getStoredDeviceFingerprint", () => {
   it("returns fingerprint when present", () => {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
     const stored = { fingerprint: "fp-001" } as PanelLastConnectedDevice
     expect(getStoredDeviceFingerprint(stored)).toBe("fp-001")
   })
 
   it("builds fingerprint for Adb stored device", () => {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
     const stored = {
       type: "Adb",
       adb_path: "/usr/bin/adb",
@@ -172,6 +176,7 @@ describe("getStoredDeviceFingerprint", () => {
   })
 
   it("builds fingerprint for Win32 stored device", () => {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
     const stored = {
       type: "Win32",
       hWnd: 12345,
@@ -180,6 +185,7 @@ describe("getStoredDeviceFingerprint", () => {
   })
 
   it("builds fingerprint for Gamepad stored device", () => {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
     const stored = {
       type: "Gamepad",
       hWnd: 67890,
@@ -189,6 +195,7 @@ describe("getStoredDeviceFingerprint", () => {
   })
 
   it("builds fingerprint for PlayCover stored device", () => {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
     const stored = {
       type: "PlayCover",
       address: "127.0.0.1:1717",

@@ -5,20 +5,18 @@ import type {
   GamepadDevice,
   Win32Device,
 } from "@/services/api"
-import type { PanelLastConnectedDevice } from "@/types/settings/model"
+import type { PanelLastConnectedDevice } from "@/types/settingsModel"
 
 export function isAdbDevice(value: unknown): value is AdbDevice {
-  return !!value && typeof value === "object" && (value as Partial<AdbDevice>).type === "Adb"
+  return !!value && typeof value === "object" && "type" in value && value.type === "Adb"
 }
 
 export function isWin32Device(value: unknown): value is Win32Device {
-  return !!value && typeof value === "object" && (value as Partial<Win32Device>).type === "Win32"
+  return !!value && typeof value === "object" && "type" in value && value.type === "Win32"
 }
 
 export function isGamepadDevice(value: unknown): value is GamepadDevice {
-  return (
-    !!value && typeof value === "object" && (value as Partial<GamepadDevice>).type === "Gamepad"
-  )
+  return !!value && typeof value === "object" && "type" in value && value.type === "Gamepad"
 }
 
 export function buildDeviceLabel(deviceInfo: ConnectableDevice): string {

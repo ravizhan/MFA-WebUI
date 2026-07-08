@@ -3,22 +3,22 @@ import { setActivePinia, createPinia } from "pinia"
 import { nextTick } from "vue"
 
 vi.mock("@/services/api", () => ({
-  getDeviceState: vi.fn(),
-  getDevices: vi.fn(),
-  getResource: vi.fn(),
-  postDevices: vi.fn(),
-  postResource: vi.fn(),
-  startTask: vi.fn(),
-  getSettings: vi.fn(),
-  updateSettings: vi.fn(),
-  getTaskConfig: vi.fn(),
-  saveTaskConfig: vi.fn(),
-  getInterface: vi.fn(),
-  rescanScanSelectOption: vi.fn(),
+  getDeviceState: vi.fn<() => void>(),
+  getDevices: vi.fn<() => void>(),
+  getResource: vi.fn<() => void>(),
+  postDevices: vi.fn<() => void>(),
+  postResource: vi.fn<() => void>(),
+  startTask: vi.fn<() => void>(),
+  getSettings: vi.fn<() => void>(),
+  updateSettings: vi.fn<() => void>(),
+  getTaskConfig: vi.fn<() => void>(),
+  saveTaskConfig: vi.fn<() => void>(),
+  getInterface: vi.fn<() => void>(),
+  rescanScanSelectOption: vi.fn<() => void>(),
 }))
 
 vi.mock("@/services/feedback/message", () => ({
-  showGlobalMessage: vi.fn(),
+  showGlobalMessage: vi.fn<() => void>(),
 }))
 
 vi.mock("vue-i18n", () => ({
@@ -36,9 +36,10 @@ import type {
   ConnectableDevice,
   DeviceControllerCapability,
   DeviceRuntimeState,
+  DeviceSearchData,
+  ResourceInfo,
 } from "@/services/api"
-import type { InterfaceModel } from "@/types/interface/model"
-import type { PanelLastConnectedDevice } from "@/types/settings/model"
+import type { PanelLastConnectedDevice } from "@/types/settingsModel"
 
 const disconnectedState: DeviceRuntimeState = {
   connected: false,
@@ -223,9 +224,10 @@ describe("useDeviceConnectionStore", () => {
       store.resource = "res1"
       configStore.configLoaded = true
       configStore.taskList = [{ id: "task1", name: "Task 1", order: 0, checked: true }]
+
       interfaceStore.interface = {
         task: [{ name: "Task 1", entry: "task1", controller: ["win32"] }],
-      } as unknown as InterfaceModel
+      }
       vi.mocked(api.getDeviceState).mockResolvedValue(lockedAdbState)
       vi.spyOn(store, "connectDevices").mockResolvedValue({ success: true, message: "ok" })
       vi.spyOn(store, "postResourceSelection").mockResolvedValue({
@@ -246,9 +248,10 @@ describe("useDeviceConnectionStore", () => {
       store.resource = "res1"
       configStore.configLoaded = true
       configStore.taskList = [{ id: "task1", name: "Task 1", order: 0, checked: false }]
+
       interfaceStore.interface = {
         task: [{ name: "Task 1", entry: "task1" }],
-      } as unknown as InterfaceModel
+      }
       vi.mocked(api.getDeviceState).mockResolvedValue(lockedAdbState)
       vi.spyOn(store, "connectDevices").mockResolvedValue({ success: true, message: "ok" })
       vi.spyOn(store, "postResourceSelection").mockResolvedValue({
@@ -270,9 +273,10 @@ describe("useDeviceConnectionStore", () => {
       store.resource = "res1"
       configStore.configLoaded = true
       configStore.taskList = [{ id: "task1", name: "Task 1", order: 0, checked: true }]
+
       interfaceStore.interface = {
         task: [{ name: "Task 1", entry: "task1" }],
-      } as unknown as InterfaceModel
+      }
       vi.mocked(api.getDeviceState).mockResolvedValue(lockedAdbState)
       vi.spyOn(configStore, "buildExecutionPayload").mockReturnValue(payload)
       vi.mocked(api.startTask).mockResolvedValue(true)
@@ -291,9 +295,10 @@ describe("useDeviceConnectionStore", () => {
       store.resource = "res1"
       configStore.configLoaded = true
       configStore.taskList = [{ id: "task1", name: "Task 1", order: 0, checked: true }]
+
       interfaceStore.interface = {
         task: [{ name: "Task 1", entry: "task1" }],
-      } as unknown as InterfaceModel
+      }
       vi.mocked(api.getDeviceState).mockResolvedValue(lockedAdbState)
       vi.spyOn(configStore, "buildExecutionPayload").mockReturnValue(payload)
       const connectSpy = vi.spyOn(store, "connectDevices").mockResolvedValue({
@@ -315,12 +320,12 @@ describe("useDeviceConnectionStore", () => {
   describe("fetchDevices", () => {
     it("ignores stale response when a newer request completes first", async () => {
       const store = useDeviceConnectionStore()
-      let resolve1: (value: any) => void
-      let resolve2: (value: any) => void
-      const p1 = new Promise((r) => {
+      let resolve1: (value: DeviceSearchData) => void
+      let resolve2: (value: DeviceSearchData) => void
+      const p1 = new Promise<DeviceSearchData>((r) => {
         resolve1 = r
       })
-      const p2 = new Promise((r) => {
+      const p2 = new Promise<DeviceSearchData>((r) => {
         resolve2 = r
       })
       vi.mocked(api.getDevices)
@@ -351,12 +356,12 @@ describe("useDeviceConnectionStore", () => {
       const store = useDeviceConnectionStore()
       store.controllerCapabilities = [adbCapability]
       store.selectedController = "ADB"
-      let resolve1: (value: any) => void
-      let resolve2: (value: any) => void
-      const p1 = new Promise((r) => {
+      let resolve1: (value: ResourceInfo[]) => void
+      let resolve2: (value: ResourceInfo[]) => void
+      const p1 = new Promise<ResourceInfo[]>((r) => {
         resolve1 = r
       })
-      const p2 = new Promise((r) => {
+      const p2 = new Promise<ResourceInfo[]>((r) => {
         resolve2 = r
       })
       vi.mocked(api.getResource)

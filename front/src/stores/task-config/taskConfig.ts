@@ -1,27 +1,26 @@
 import { defineStore } from "pinia"
 import { getTaskConfig, resetTaskConfig, saveTaskConfig } from "@/services/api"
 import { useInterfaceStore } from "@/stores"
-import type { Option, PresetTaskOptionValue } from "@/types/interface/model"
+import type { Option, PresetTaskOptionValue } from "@/types/interfaceModel"
 import type {
   NullableTaskOptionValue,
   TaskExecutionPayload,
-  TaskOptionValue,
   TaskOptionsByTask,
-} from "@/types/scheduler/model"
+  TaskOptionValue,
+} from "@/types/schedulerModel"
 import {
   CUSTOM_PRESET_NAME,
   type PersistedTaskConfig,
   type PreTaskCommand,
   type TaskListItem,
   type TaskPresetSnapshot,
-} from "@/types/task-config/model"
+} from "@/types/taskConfigModel"
 import {
   buildDefaultsFromOptionMap,
   normalizeOptionValueForBoundary,
 } from "@/utils/task-config/options"
 
-type TaskOptionMap = Record<string, NullableTaskOptionValue>
-
+function cloneOptionValue(value: TaskOptionValue): TaskOptionValue
 function cloneOptionValue(value: NullableTaskOptionValue): NullableTaskOptionValue {
   if (value === null) {
     return null
@@ -35,8 +34,10 @@ function cloneOptionValue(value: NullableTaskOptionValue): NullableTaskOptionVal
   return value
 }
 
-function cloneOptionMap(optionMap: TaskOptionMap | null | undefined): TaskOptionMap {
-  const clonedOptions: TaskOptionMap = {}
+function cloneTaskOptionMap(
+  optionMap: Record<string, TaskOptionValue> | null | undefined,
+): Record<string, TaskOptionValue> {
+  const clonedOptions: Record<string, TaskOptionValue> = {}
   if (!optionMap) {
     return clonedOptions
   }
@@ -56,7 +57,11 @@ function cloneTaskOptionsByTask(
   }
 
   for (const [taskId, optionMap] of Object.entries(optionsByTask)) {
-    cloned[taskId] = cloneOptionMap(optionMap)
+    const taskOptions: Record<string, TaskOptionValue> = {}
+    for (const [key, value] of Object.entries(optionMap)) {
+      taskOptions[key] = cloneOptionValue(value)
+    }
+    cloned[taskId] = taskOptions
   }
   return cloned
 }
@@ -116,11 +121,34 @@ function buildTaskListFromOrder(
   return reorderedTasks
 }
 
+function isRecordStringString(value: unknown): value is Record<string, string> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+function applyPresetInputValue(
+  optionName: string,
+  inputs: Array<{ name: string }>,
+  value: Record<string, string>,
+  targetOptions: Record<string, TaskOptionValue>,
+) {
+  const currentValue = targetOptions[optionName]
+  const nextValue = isRecordStringString(currentValue) ? { ...currentValue } : {}
+
+  for (const input of inputs) {
+    const inputValue = value[input.name]
+    if (typeof inputValue === "string") {
+      nextValue[input.name] = inputValue
+    }
+  }
+
+  targetOptions[optionName] = nextValue
+}
+
 function applyPresetOptionValue(
   optionName: string,
   value: PresetTaskOptionValue,
   optionMap: Record<string, Option>,
-  targetOptions: TaskOptionMap,
+  targetOptions: Record<string, TaskOptionValue>,
 ) {
   const option = optionMap[optionName]
   if (!option) {
@@ -128,26 +156,10 @@ function applyPresetOptionValue(
   }
 
   if (option.type === "input") {
-    if (typeof value !== "object" || Array.isArray(value) || value === null) {
+    if (!isRecordStringString(value)) {
       return
     }
-
-    const inputValues = value as Record<string, string>
-    const nextValue =
-      typeof targetOptions[optionName] === "object" &&
-      targetOptions[optionName] !== null &&
-      !Array.isArray(targetOptions[optionName])
-        ? { ...(targetOptions[optionName] as Record<string, string>) }
-        : {}
-
-    for (const input of option.inputs) {
-      const inputValue = inputValues[input.name]
-      if (typeof inputValue === "string") {
-        nextValue[input.name] = inputValue
-      }
-    }
-
-    targetOptions[optionName] = nextValue
+    applyPresetInputValue(optionName, option.inputs, value, targetOptions)
     return
   }
 
@@ -164,14 +176,22 @@ function applyPresetOptionValue(
 }
 
 export const useTaskConfigStore = defineStore("taskConfig", {
-  state: () => ({
-    options: {} as Record<string, TaskOptionMap>,
-    taskList: [] as TaskListItem[],
+  state: (): {
+    options: TaskOptionsByTask
+    taskList: TaskListItem[]
+    selectedPresetName: string
+    presetSnapshots: Record<string, TaskPresetSnapshot>
+    configLoaded: boolean
+    saveTimer: ReturnType<typeof setTimeout> | null
+    preTasks: PreTaskCommand[]
+  } => ({
+    options: {},
+    taskList: [],
     selectedPresetName: CUSTOM_PRESET_NAME,
-    presetSnapshots: {} as Record<string, TaskPresetSnapshot>,
+    presetSnapshots: {},
     configLoaded: false,
-    saveTimer: null as ReturnType<typeof setTimeout> | null,
-    preTasks: [] as PreTaskCommand[],
+    saveTimer: null,
+    preTasks: [],
   }),
   actions: {
     normalizeTaskIds(taskIds: string[]): string[] {
@@ -181,7 +201,7 @@ export const useTaskConfigStore = defineStore("taskConfig", {
       return [...new Set(taskIds)].filter((taskId) => validTaskIds.has(taskId))
     },
 
-    buildDefaultOptionsForTask(taskId: string): TaskOptionMap {
+    buildDefaultOptionsForTask(taskId: string): Record<string, TaskOptionValue> {
       const interfaceStore = useInterfaceStore()
       const optionMap = interfaceStore.getOptionList(taskId)
       return buildDefaultsFromOptionMap(optionMap)
@@ -198,28 +218,24 @@ export const useTaskConfigStore = defineStore("taskConfig", {
         const defaults = this.buildDefaultOptionsForTask(taskId)
         const currentTaskOptions = this.options[taskId] || {}
         const overrideTaskOptions = overridesByTask[taskId] || {}
-        const relevantOptions: TaskOptionMap = {}
+        const relevantOptions: Record<string, TaskOptionValue> = {}
 
         for (const key of Object.keys(defaults)) {
-          const currentValue = normalizeOptionValueForBoundary(
-            currentTaskOptions[key] as TaskOptionValue | null | undefined,
-          )
+          const currentValue = normalizeOptionValueForBoundary(currentTaskOptions[key])
           if (currentValue !== undefined) {
             relevantOptions[key] = currentValue
           }
 
-          const overrideValue = normalizeOptionValueForBoundary(
-            overrideTaskOptions[key] as TaskOptionValue | null | undefined,
-          )
+          const overrideValue = normalizeOptionValueForBoundary(overrideTaskOptions[key])
           if (overrideValue !== undefined) {
             relevantOptions[key] = overrideValue
           }
         }
 
         mergedTaskOptions[taskId] = {
-          ...cloneOptionMap(defaults),
-          ...cloneOptionMap(relevantOptions),
-        } as Record<string, TaskOptionValue>
+          ...cloneTaskOptionMap(defaults),
+          ...cloneTaskOptionMap(relevantOptions),
+        }
       }
 
       return mergedTaskOptions
@@ -259,20 +275,18 @@ export const useTaskConfigStore = defineStore("taskConfig", {
       for (const taskId of normalizedTaskIds) {
         const defaults = this.buildDefaultOptionsForTask(taskId)
         const persistedTaskOptions = optionsByTask?.[taskId]
-        const mergedOptions: TaskOptionMap = cloneOptionMap(defaults)
+        const mergedOptions: Record<string, TaskOptionValue> = cloneTaskOptionMap(defaults)
 
         if (persistedTaskOptions) {
           for (const key of Object.keys(defaults)) {
-            const normalizedValue = normalizeOptionValueForBoundary(
-              persistedTaskOptions[key] as TaskOptionValue | null | undefined,
-            )
+            const normalizedValue = normalizeOptionValueForBoundary(persistedTaskOptions[key])
             if (normalizedValue !== undefined) {
               mergedOptions[key] = normalizedValue
             }
           }
         }
 
-        mergedTaskOptions[taskId] = mergedOptions as Record<string, TaskOptionValue>
+        mergedTaskOptions[taskId] = mergedOptions
       }
 
       return mergedTaskOptions
@@ -304,7 +318,7 @@ export const useTaskConfigStore = defineStore("taskConfig", {
       const taskOptions = this.buildOptionsFromPersisted(taskIds, snapshot?.taskOptions)
 
       const preTasks = Array.isArray(snapshot?.preTasks)
-        ? snapshot!.preTasks
+        ? snapshot.preTasks
             .filter((pt) => typeof pt.command === "string" && pt.command.length > 0)
             .map((pt) => ({
               id: pt.id || crypto.randomUUID(),
@@ -322,26 +336,41 @@ export const useTaskConfigStore = defineStore("taskConfig", {
       }
     },
 
-    buildPresetSnapshot(presetName: string): TaskPresetSnapshot | null {
-      const interfaceStore = useInterfaceStore()
-      const preset = interfaceStore.getPresetByName(presetName)
-      if (!preset) {
-        return null
-      }
-
-      const defaultTaskList = this.buildDefaultTaskList()
-      const taskMap = new Map(defaultTaskList.map((task) => [task.id, task]))
-      const taskChecked = buildTaskCheckedMap(defaultTaskList)
-      const orderedTaskIds: string[] = []
-      const usedTaskIds = new Set<string>()
-      const optionMap = interfaceStore.interface?.option || {}
+    buildDefaultTaskOptionsByTask(taskList: TaskListItem[]): TaskOptionsByTask {
       const taskOptions: TaskOptionsByTask = {}
-
-      for (const task of defaultTaskList) {
+      for (const task of taskList) {
         taskOptions[task.id] = this.buildDefaultOptionsForTask(task.id)
       }
+      return taskOptions
+    },
 
-      for (const presetTask of preset.task || []) {
+    appendUnusedTaskIds(
+      taskList: TaskListItem[],
+      usedTaskIds: Set<string>,
+      orderedTaskIds: string[],
+    ) {
+      for (const task of taskList) {
+        if (!usedTaskIds.has(task.id)) {
+          orderedTaskIds.push(task.id)
+        }
+      }
+    },
+
+    processPresetTasks(
+      presetTasks: Array<{
+        name: string
+        enabled?: boolean
+        option?: Record<string, PresetTaskOptionValue>
+      }>,
+      taskMap: Map<string, TaskListItem>,
+      optionMap: Record<string, Option>,
+      taskOptions: TaskOptionsByTask,
+      taskChecked: Record<string, boolean>,
+      orderedTaskIds: string[],
+      usedTaskIds: Set<string>,
+    ) {
+      const interfaceStore = useInterfaceStore()
+      for (const presetTask of presetTasks) {
         const interfaceTask = interfaceStore.getTaskByName(presetTask.name)
         if (!interfaceTask) {
           continue
@@ -360,14 +389,35 @@ export const useTaskConfigStore = defineStore("taskConfig", {
         for (const [optionName, optionValue] of Object.entries(presetTask.option || {})) {
           applyPresetOptionValue(optionName, optionValue, optionMap, taskOptionValues)
         }
-        taskOptions[taskItem.id] = taskOptionValues as Record<string, TaskOptionValue>
+        taskOptions[taskItem.id] = taskOptionValues
+      }
+    },
+
+    buildPresetSnapshot(presetName: string): TaskPresetSnapshot | null {
+      const interfaceStore = useInterfaceStore()
+      const preset = interfaceStore.getPresetByName(presetName)
+      if (!preset) {
+        return null
       }
 
-      for (const task of defaultTaskList) {
-        if (!usedTaskIds.has(task.id)) {
-          orderedTaskIds.push(task.id)
-        }
-      }
+      const defaultTaskList = this.buildDefaultTaskList()
+      const taskMap = new Map(defaultTaskList.map((task) => [task.id, task]))
+      const taskChecked = buildTaskCheckedMap(defaultTaskList)
+      const orderedTaskIds: string[] = []
+      const usedTaskIds = new Set<string>()
+      const optionMap = interfaceStore.interface?.option || {}
+      const taskOptions = this.buildDefaultTaskOptionsByTask(defaultTaskList)
+
+      this.processPresetTasks(
+        preset.task || [],
+        taskMap,
+        optionMap,
+        taskOptions,
+        taskChecked,
+        orderedTaskIds,
+        usedTaskIds,
+      )
+      this.appendUnusedTaskIds(defaultTaskList, usedTaskIds, orderedTaskIds)
 
       return this.normalizeSnapshot({
         taskOrder: orderedTaskIds,
@@ -435,13 +485,11 @@ export const useTaskConfigStore = defineStore("taskConfig", {
       const taskConfig = await getTaskConfig()
       this.presetSnapshots = this.seedPresetSnapshots(taskConfig.presets)
 
-      const selectedPresetName =
+      this.selectedPresetName =
         taskConfig.selectedPreset && this.presetSnapshots[taskConfig.selectedPreset]
           ? taskConfig.selectedPreset
           : CUSTOM_PRESET_NAME
-
-      this.selectedPresetName = selectedPresetName
-      this.hydrateSnapshot(this.presetSnapshots[this.selectedPresetName]!)
+      this.hydrateSnapshot(this.presetSnapshots[this.selectedPresetName])
       this.configLoaded = true
     },
 
@@ -463,7 +511,7 @@ export const useTaskConfigStore = defineStore("taskConfig", {
       this.presetSnapshots = this.seedPresetSnapshots()
       this.selectedPresetName = CUSTOM_PRESET_NAME
       this.preTasks = []
-      this.hydrateSnapshot(this.presetSnapshots[CUSTOM_PRESET_NAME]!)
+      this.hydrateSnapshot(this.presetSnapshots[CUSTOM_PRESET_NAME])
     },
   },
 })

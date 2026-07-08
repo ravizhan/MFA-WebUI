@@ -2,16 +2,16 @@ import { describe, expect, it, beforeEach, afterEach, vi } from "vitest"
 import { setActivePinia, createPinia } from "pinia"
 
 vi.mock("@/services/api", () => ({
-  getTaskConfig: vi.fn(),
-  saveTaskConfig: vi.fn(),
-  resetTaskConfig: vi.fn(),
+  getTaskConfig: vi.fn<() => void>(),
+  saveTaskConfig: vi.fn<() => void>(),
+  resetTaskConfig: vi.fn<() => void>(),
 }))
 
 import { useTaskConfigStore } from "@/stores/task-config/taskConfig"
 import { useInterfaceStore } from "@/stores/interface/interface"
 import * as api from "@/services/api"
-import { CUSTOM_PRESET_NAME } from "@/types/task-config/model"
-import type { InterfaceModel } from "@/types/interface/model"
+import { CUSTOM_PRESET_NAME } from "@/types/taskConfigModel"
+import type { InterfaceModel } from "@/types/interfaceModel"
 
 function buildTestInterface(): InterfaceModel {
   return {
@@ -84,14 +84,14 @@ function setupInterface() {
 function initTaskConfigStore() {
   const store = useTaskConfigStore()
   store.presetSnapshots = store.seedPresetSnapshots()
-  store.hydrateSnapshot(store.presetSnapshots[CUSTOM_PRESET_NAME]!)
+  store.hydrateSnapshot(store.presetSnapshots[CUSTOM_PRESET_NAME])
   return store
 }
 
 describe("useTaskConfigStore", () => {
   beforeEach(() => {
     setActivePinia(createPinia())
-    vi.stubGlobal("crypto", { randomUUID: vi.fn(() => "mock-uuid") })
+    vi.stubGlobal("crypto", { randomUUID: vi.fn<() => string>(() => "mock-uuid") })
     vi.clearAllMocks()
     setupInterface()
   })
@@ -171,11 +171,11 @@ describe("useTaskConfigStore", () => {
 
       store.selectPreset(CUSTOM_PRESET_NAME)
 
-      const preset1Snapshot = store.presetSnapshots["preset1"]!
+      const preset1Snapshot = store.presetSnapshots["preset1"]
       expect(preset1Snapshot.taskChecked["task-b"]).toBe(true)
       expect(preset1Snapshot.taskOptions["task-a"]).toMatchObject({ difficulty: "easy" })
       expect(preset1Snapshot.preTasks).toHaveLength(1)
-      expect(preset1Snapshot.preTasks[0]!.command).toBe("echo preset1")
+      expect(preset1Snapshot.preTasks[0].command).toBe("echo preset1")
     })
 
     it("syncs current state before switching between two real presets", () => {
@@ -188,7 +188,7 @@ describe("useTaskConfigStore", () => {
       const result = store.selectPreset("preset2")
 
       expect(result).toBe(true)
-      const preset1Snapshot = store.presetSnapshots["preset1"]!
+      const preset1Snapshot = store.presetSnapshots["preset1"]
       expect(preset1Snapshot.taskChecked["task-c"]).toBe(true)
       expect(preset1Snapshot.taskOptions["task-b"]).toMatchObject({ mode: ["auto", "manual"] })
 
@@ -202,9 +202,9 @@ describe("useTaskConfigStore", () => {
   describe("serializeCurrentSnapshot", () => {
     it("serializes task order, checked state, merged options and a copy of preTasks", () => {
       const store = initTaskConfigStore()
-      store.taskList = [store.taskList[2]!, store.taskList[0]!, store.taskList[1]!]
-      store.taskList[0]!.checked = true
-      store.taskList[1]!.checked = true
+      store.taskList = [store.taskList[2], store.taskList[0], store.taskList[1]]
+      store.taskList[0].checked = true
+      store.taskList[1].checked = true
       store.options["task-a"] = { ...store.options["task-a"], difficulty: "hard" }
       store.preTasks = [{ id: "pt1", command: "echo hello", enabled: true, timeout: 30 }]
 
@@ -256,6 +256,7 @@ describe("useTaskConfigStore", () => {
         preTasks: [
           { id: "", command: "", enabled: true, timeout: 30 },
           { id: "", command: "valid-command", enabled: false, timeout: 10 },
+          // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
           { id: "has-id", command: "another", enabled: "yes" as unknown as boolean, timeout: -1 },
         ],
       })
@@ -360,7 +361,7 @@ describe("useTaskConfigStore", () => {
     it("ignores option keys that are not present in defaults", () => {
       const store = initTaskConfigStore()
       const result = store.buildOptionsForTasks(["task-a"], {
-        "task-a": { unknownKey: "ignored" } as never,
+        "task-a": { unknownKey: "ignored" },
       })
 
       expect(result["task-a"]).not.toHaveProperty("unknownKey")
@@ -383,7 +384,7 @@ describe("useTaskConfigStore", () => {
     it("filters unknown persisted keys", () => {
       const store = initTaskConfigStore()
       const result = store.buildOptionsFromPersisted(["task-a"], {
-        "task-a": { difficulty: "hard", unknownKey: "ignored" } as never,
+        "task-a": { difficulty: "hard", unknownKey: "ignored" },
       })
 
       expect(result["task-a"]).not.toHaveProperty("unknownKey")
@@ -470,7 +471,7 @@ describe("useTaskConfigStore", () => {
       const store = initTaskConfigStore()
       store.selectPreset("preset1")
       store.preTasks = [{ id: "pt1", command: "echo old", enabled: true, timeout: 30 }]
-      vi.mocked(api.resetTaskConfig).mockResolvedValue(undefined)
+      vi.mocked(api.resetTaskConfig).mockResolvedValue(true)
 
       await store.resetConfig()
 
@@ -491,7 +492,7 @@ describe("useTaskConfigStore", () => {
 
       store.syncCurrentPresetSnapshot()
 
-      const snapshot = store.presetSnapshots[CUSTOM_PRESET_NAME]!
+      const snapshot = store.presetSnapshots[CUSTOM_PRESET_NAME]
       expect(snapshot.taskChecked["task-a"]).toBe(true)
       expect(snapshot.taskOptions["task-a"]).toMatchObject({ difficulty: "hard" })
       expect(snapshot.preTasks).toEqual(store.preTasks)

@@ -48,7 +48,7 @@
                 class="link link-primary flex items-center gap-1"
               >
                 <Icon icon="mdi:bug" class="text-lg" />
-                GitHub Issues
+                {{ t("settings.about.githubIssues") }}
               </a>
             </td>
           </tr>

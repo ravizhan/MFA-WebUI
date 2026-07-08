@@ -1,4 +1,4 @@
-import type { TaskExecutionPayload } from "@/types/scheduler/model"
+import type { TaskExecutionPayload } from "@/types/schedulerModel"
 import { showGlobalMessage } from "@/services/feedback/message"
 import type { ApiResponse } from "@/services/api/core/types"
 
@@ -36,8 +36,12 @@ export function stopTask(): void {
     .then((data: ApiResponse) => {
       if (data.status === "success") {
         showGlobalMessage("success", "正在中止任务，请稍后")
-      } else {
-        showGlobalMessage("error", data.message || "任务停止失败")
+        return
       }
+      showGlobalMessage("error", data.message || "任务停止失败")
+    })
+    .catch((error) => {
+      console.error("Failed to stop task:", error)
+      showGlobalMessage("error", "任务停止失败")
     })
 }

@@ -21,7 +21,7 @@
           </div>
         </div>
         <div class="text-xs opacity-60 shrink-0">
-          {{ task.enabled ? formatDateTimeText(task.next_run_time) : "已暂停" }}
+          {{ task.enabled ? formatDateTimeText(task.next_run_time) : t("panel.health.paused") }}
         </div>
       </div>
     </div>
@@ -29,14 +29,16 @@
     <!-- Health score -->
     <div class="mt-4 p-3 rounded-lg bg-base-200">
       <div class="flex items-center justify-between mb-2">
-        <span class="text-sm font-medium">{{ t("nav.routines") }}健康度</span>
+        <span class="text-sm font-medium">
+          {{ t("nav.routines") }}{{ t("panel.health.label") }}
+        </span>
         <span
           class="text-sm font-bold"
           :class="
             healthScore >= 80 ? 'text-success' : healthScore >= 50 ? 'text-warning' : 'text-error'
           "
         >
-          {{ healthScore }}%
+          {{ healthScoreText }}
         </span>
       </div>
       <progress
@@ -52,8 +54,8 @@
         max="100"
       />
       <div class="flex justify-between text-xs opacity-60 mt-1">
-        <span>运行中: {{ schedulerStore.enabledTasks.length }}</span>
-        <span>总计: {{ schedulerStore.tasks.length }}</span>
+        <span>{{ t("panel.health.running") }} {{ schedulerStore.enabledTasks.length }}</span>
+        <span>{{ t("panel.health.total") }} {{ schedulerStore.tasks.length }}</span>
       </div>
     </div>
 
@@ -72,7 +74,7 @@ import { useI18n } from "vue-i18n"
 import { Icon } from "@iconify/vue"
 import { useSchedulerStore } from "@/stores"
 import { formatDateTime, formatTrigger } from "@/utils/scheduler/display"
-import type { TriggerConfig, TriggerType } from "@/types/scheduler/model"
+import type { TriggerConfig, TriggerType } from "@/types/schedulerModel"
 
 const { t, locale } = useI18n()
 const schedulerStore = useSchedulerStore()
@@ -82,6 +84,8 @@ const healthScore = computed(() => {
   const enabled = schedulerStore.enabledTasks.length
   return Math.round((enabled / schedulerStore.tasks.length) * 100)
 })
+
+const healthScoreText = computed(() => `${healthScore.value}%`)
 
 function formatTriggerText(triggerType: TriggerType, triggerConfig: TriggerConfig): string {
   return formatTrigger(t, locale.value, triggerType, triggerConfig)

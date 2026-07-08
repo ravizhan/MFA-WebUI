@@ -1,15 +1,14 @@
 {
   "extends": "@vue/tsconfig/tsconfig.dom.json",
-  "include": ["env.d.ts", "src/**/*", "src/**/*.vue", "vite.config.*"],
+  "include": ["env.d.ts", "src/**/*", "src/**/*.vue", "*.config.ts"],
   "exclude": ["src/**/__tests__/*"],
   "compilerOptions": {
-    "baseUrl": ".",
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["./src/*"]
     },
-    "types": ["node"],
+    "types": ["node", "vite/client"],
     "isolatedModules": true,
     "noEmit": true
   }

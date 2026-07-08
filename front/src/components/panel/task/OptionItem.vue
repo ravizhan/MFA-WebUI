@@ -13,11 +13,7 @@
             :true-value="checkedValue"
             :false-value="uncheckedValue"
             :checked="taskOptions[name] === checkedValue"
-            @change="
-              taskOptions[name] = ($event.target as HTMLInputElement).checked
-                ? checkedValue
-                : uncheckedValue
-            "
+            @change="handleSwitchChange($event)"
           />
         </template>
 
@@ -63,7 +59,7 @@
                 type="text"
                 class="input input-bordered input-sm"
                 :value="getInputValue(input.name)"
-                @input="setInputValue(input.name, ($event.target as HTMLInputElement).value)"
+                @input="setInputValue(input.name, getInputEventValue($event))"
               />
             </div>
           </div>
@@ -81,7 +77,7 @@
                 class="checkbox checkbox-primary checkbox-sm"
                 :value="checkbox.name"
                 :checked="checkboxValue.includes(checkbox.name)"
-                @change="toggleCheckbox(checkbox.name, ($event.target as HTMLInputElement).checked)"
+                @change="toggleCheckbox(checkbox.name, getChecked($event))"
               />
               <span class="text-sm">{{ resolveCaseLabel(checkbox.label, checkbox.name) }}</span>
             </label>
@@ -108,10 +104,15 @@ import { useI18n } from "vue-i18n"
 import { Icon } from "@iconify/vue"
 import { showGlobalMessage } from "@/services/feedback/message"
 import { useInterfaceStore } from "@/stores"
-import type { NullableTaskOptionValue, TaskOptionValue } from "@/types/scheduler/model"
+import type { NullableTaskOptionValue } from "@/types/schedulerModel"
 import { resolveInterfaceText } from "@/utils/interface/content"
+import { tryCatch } from "@/utils/tryCatch"
 
-const props = defineProps<{
+const {
+  name,
+  level,
+  taskOptions: rawTaskOptions,
+} = defineProps<{
   name: string
   level?: number
   taskOptions: Record<string, NullableTaskOptionValue>
@@ -119,11 +120,11 @@ const props = defineProps<{
 // sync setup
 const { locale } = useI18n()
 const interfaceStore = useInterfaceStore()
-const taskOptions = computed(() => props.taskOptions)
+const taskOptions = computed(() => rawTaskOptions)
 
-const option = computed(() => interfaceStore.interface?.option?.[props.name])
+const option = computed(() => interfaceStore.interface?.option?.[name])
 const resolvedLabel = computed(() =>
-  resolveInterfaceText(interfaceStore.interface, locale.value, option.value?.label, props.name),
+  resolveInterfaceText(interfaceStore.interface, locale.value, option.value?.label, name),
 )
 const scanSelectRefreshing = ref(false)
 
@@ -156,7 +157,7 @@ function resolveInputLabel(label: string | undefined, fallback: string) {
 }
 
 function getInputValue(inputName: string): string {
-  const currentValue = taskOptions.value[props.name]
+  const currentValue = taskOptions.value[name]
   if (currentValue && typeof currentValue === "object" && !Array.isArray(currentValue)) {
     const inputValue = currentValue[inputName]
     return typeof inputValue === "string" ? inputValue : ""
@@ -165,14 +166,14 @@ function getInputValue(inputName: string): string {
 }
 
 function setInputValue(inputName: string, value: string): void {
-  const currentValue = taskOptions.value[props.name]
+  const currentValue = taskOptions.value[name]
   const nextValue: Record<string, string> =
     currentValue && typeof currentValue === "object" && !Array.isArray(currentValue)
       ? { ...currentValue }
       : {}
 
   nextValue[inputName] = value
-  taskOptions.value[props.name] = nextValue
+  taskOptions.value[name] = nextValue
 }
 
 async function handleRescanScanSelect() {
@@ -181,19 +182,23 @@ async function handleRescanScanSelect() {
     return
   }
 
-  const previousValue = taskOptions.value[props.name]
+  const previousValue = taskOptions.value[name]
   scanSelectRefreshing.value = true
-  try {
-    taskOptions.value[props.name] = null
-    await interfaceStore.rescanScanSelectOption(props.name)
-  } catch (error) {
-    taskOptions.value[props.name] = previousValue
-    if (error instanceof Error && error.message) {
-      showGlobalMessage("error", error.message)
+  taskOptions.value[name] = null
+  const [, err] = await tryCatch(() => interfaceStore.rescanScanSelectOption(name))
+  if (err) {
+    taskOptions.value[name] = previousValue
+    if (err.message) {
+      showGlobalMessage("error", err.message)
     }
-  } finally {
-    scanSelectRefreshing.value = false
   }
+  scanSelectRefreshing.value = false
+}
+
+function parseStringArray(value: string): string[] {
+  const [parsed, err] = tryCatch(() => JSON.parse(value))
+  if (err || !Array.isArray(parsed)) return []
+  return parsed.filter((item): item is string => typeof item === "string")
 }
 
 function normalizeCheckboxValue(
@@ -205,18 +210,11 @@ function normalizeCheckboxValue(
   if (Array.isArray(value)) {
     selectedValues = value.filter((item): item is string => typeof item === "string")
   } else if (typeof value === "string") {
-    try {
-      const parsed = JSON.parse(value)
-      if (Array.isArray(parsed)) {
-        selectedValues = parsed.filter((item): item is string => typeof item === "string")
-      }
-    } catch {
-      selectedValues = []
-    }
+    selectedValues = parseStringArray(value)
   }
 
   const selectedSet = new Set(selectedValues)
-  return caseOrder.filter((name) => selectedSet.has(name))
+  return caseOrder.filter((caseName) => selectedSet.has(caseName))
 }
 
 const checkboxValue = computed<string[]>({
@@ -227,7 +225,7 @@ const checkboxValue = computed<string[]>({
     }
 
     return normalizeCheckboxValue(
-      taskOptions.value[props.name],
+      taskOptions.value[name],
       currentOption.cases.map((item) => item.name),
     )
   },
@@ -237,21 +235,38 @@ const checkboxValue = computed<string[]>({
       return
     }
 
-    taskOptions.value[props.name] = normalizeCheckboxValue(
+    taskOptions.value[name] = normalizeCheckboxValue(
       value,
       currentOption.cases.map((item) => item.name),
     )
   },
 })
 
-function toggleCheckbox(name: string, checked: boolean) {
+function toggleCheckbox(checkboxName: string, checked: boolean) {
   const current = new Set(checkboxValue.value)
   if (checked) {
-    current.add(name)
-  } else {
-    current.delete(name)
+    current.add(checkboxName)
+    checkboxValue.value = Array.from(current)
+    return
   }
+  current.delete(checkboxName)
   checkboxValue.value = Array.from(current)
+}
+
+function handleSwitchChange(event: Event) {
+  taskOptions.value[name] = getChecked(event) ? checkedValue.value : uncheckedValue.value
+}
+
+function getInputEventValue(event: Event): string {
+  const target = event.target
+  if (target instanceof HTMLInputElement) return target.value
+  return ""
+}
+
+function getChecked(event: Event): boolean {
+  const target = event.target
+  if (target instanceof HTMLInputElement) return target.checked
+  return false
 }
 
 const selectOptions = computed(() => {
@@ -271,7 +286,7 @@ const isSelectValueInvalid = computed(() => {
     return false
   }
 
-  const currentValue = taskOptions.value[props.name]
+  const currentValue = taskOptions.value[name]
   if (currentValue == null || typeof currentValue !== "string") {
     return false
   }
@@ -283,52 +298,61 @@ watch(
   () => isSelectValueInvalid.value,
   (invalid) => {
     if (invalid) {
-      taskOptions.value[props.name] = null
+      taskOptions.value[name] = null
     }
   },
   { immediate: true },
 )
 
+function getSwitchNestedOptions(currentOption: NonNullable<typeof option.value>): string[] {
+  const currentValue = taskOptions.value[name]
+  const activeCase = currentOption.cases.find((caseItem) => caseItem.name === currentValue)
+  return activeCase?.option || []
+}
+
+function getSelectNestedOptions(currentOption: NonNullable<typeof option.value>): string[] {
+  const currentValue = taskOptions.value[name]
+  const activeCase = currentOption.cases.find((caseItem) => caseItem.name === currentValue)
+  return activeCase?.option || []
+}
+
+function getCheckboxNestedOptions(currentOption: NonNullable<typeof option.value>): string[] {
+  const activeNames = new Set(
+    normalizeCheckboxValue(
+      taskOptions.value[name],
+      currentOption.cases.map((item) => item.name),
+    ),
+  )
+  const childNames: string[] = []
+  const seen = new Set<string>()
+
+  for (const caseItem of currentOption.cases) {
+    if (!activeNames.has(caseItem.name)) continue
+
+    for (const childName of caseItem.option || []) {
+      if (seen.has(childName)) continue
+      seen.add(childName)
+      childNames.push(childName)
+    }
+  }
+
+  return childNames
+}
+
 const nestedOptions = computed(() => {
   const currentOption = option.value
   if (!currentOption) return []
-  const currentValue = taskOptions.value[props.name]
 
   if (currentOption.type === "switch") {
-    const activeCase = currentOption.cases.find((caseItem) => caseItem.name === currentValue)
-    return activeCase?.option || []
+    return getSwitchNestedOptions(currentOption)
   }
 
   if (currentOption.type === "select" || currentOption.type === "scan_select") {
-    const activeCase = currentOption.cases.find((caseItem) => caseItem.name === currentValue)
-    return activeCase?.option || []
+    return getSelectNestedOptions(currentOption)
   }
 
   if (currentOption.type === "checkbox") {
-    const activeNames = new Set(
-      normalizeCheckboxValue(
-        taskOptions.value[props.name],
-        currentOption.cases.map((item) => item.name),
-      ),
-    )
-    const childNames: string[] = []
-    const seen = new Set<string>()
-
-    for (const caseItem of currentOption.cases) {
-      if (!activeNames.has(caseItem.name)) {
-        continue
-      }
-
-      for (const childName of caseItem.option || []) {
-        if (seen.has(childName)) {
-          continue
-        }
-        seen.add(childName)
-        childNames.push(childName)
-      }
-    }
-
-    return childNames
+    return getCheckboxNestedOptions(currentOption)
   }
 
   return []

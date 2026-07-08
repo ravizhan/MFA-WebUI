@@ -16,7 +16,9 @@
     "start": "开始",
     "pause": "暂停",
     "darkMode": "暗黑模式",
-    "lightMode": "亮色模式"
+    "lightMode": "亮色模式",
+    "colon": "：",
+    "slash": "/"
   },
   "nav": {
     "home": "首页",
@@ -180,7 +182,11 @@
         "on": "开",
         "off": "关"
       },
-      "language": "语言"
+      "language": "语言",
+      "languages": {
+        "zhCN": "简体中文",
+        "enUS": "English"
+      }
     },
     "notification": {
       "title": "通知设置",
@@ -196,7 +202,20 @@
       "testResult": "发送失败: {message}",
       "testError": "发送测试通知时发生错误",
       "browserUnsupported": "当前环境不支持浏览器通知",
-      "browserPermissionDenied": "浏览器通知权限未授予，无法启用浏览器通知"
+      "browserPermissionDenied": "浏览器通知权限未授予，无法启用浏览器通知",
+      "fields": {
+        "url": "url *",
+        "contentType": "content_type",
+        "json": "application/json",
+        "formUrlencoded": "application/x-www-form-urlencoded",
+        "headers": "headers",
+        "method": "method",
+        "post": "POST",
+        "get": "GET",
+        "body": "body",
+        "username": "username",
+        "password": "password"
+      }
     },
     "about": {
       "title": "关于我们",
@@ -210,7 +229,8 @@
       "defaultDescription": "基于 Vue 的 MAAFramework 通用 GUI 项目",
       "reset": "重置所有设置",
       "resetConfirm": "确定要将所有设置重置为默认值吗？此操作不可撤销。",
-      "resetSuccess": "设置已重置为默认值"
+      "resetSuccess": "设置已重置为默认值",
+      "githubIssues": "GitHub Issues"
     }
   },
   "panel": {
@@ -258,6 +278,21 @@
       "modified": "已修改",
       "noDescription": "暂无预设说明",
       "customDescription": "当前为自定义任务快照，可继续手动调整。"
+    },
+    "health": {
+      "paused": "已暂停",
+      "label": "健康度",
+      "running": "运行中:",
+      "total": "总计:"
+    },
+    "connection": {
+      "connected": "已连接",
+      "disconnected": "未连接"
+    },
+    "preview": {
+      "fps15": "15 FPS",
+      "fps30": "30 FPS",
+      "fps60": "60 FPS"
     }
   },
   "taskConfig": {

@@ -11,10 +11,10 @@ import type {
   DateTriggerConfig,
   ExecutionStatus,
   IntervalTriggerConfig,
-} from "@/types/scheduler/model"
+} from "@/types/schedulerModel"
 
 describe("formatTrigger", () => {
-  const t = vi.fn((key: string) => key)
+  const t = vi.fn<(key: string) => string>((key: string) => key)
 
   it("formats cron trigger", () => {
     const config: CronTriggerConfig = { type: "cron", cron: "0 0 * * *" }
@@ -23,7 +23,7 @@ describe("formatTrigger", () => {
   })
 
   it("returns unknown when cron config type mismatches", () => {
-    const config = { type: "interval", days: 1 } as IntervalTriggerConfig
+    const config: IntervalTriggerConfig = { type: "interval", days: 1 }
     const result = formatTrigger(t, "zh-CN", "cron", config)
     expect(result).toBe("common.unknown")
   })
@@ -36,7 +36,7 @@ describe("formatTrigger", () => {
   })
 
   it("returns unknown when date config type mismatches", () => {
-    const config = { type: "cron", cron: "* * * * *" } as CronTriggerConfig
+    const config: CronTriggerConfig = { type: "cron", cron: "* * * * *" }
     const result = formatTrigger(t, "zh-CN", "date", config)
     expect(result).toBe("common.unknown")
   })
@@ -83,13 +83,14 @@ describe("formatTrigger", () => {
   })
 
   it("returns unknown for unknown trigger type", () => {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
     const result = formatTrigger(t, "zh-CN", "unknown" as never, { type: "cron", cron: "" })
     expect(result).toBe("common.unknown")
   })
 })
 
 describe("formatDateTime", () => {
-  const t = vi.fn((key: string) => key)
+  const t = vi.fn<(key: string) => string>((key: string) => key)
 
   it("formats valid date string", () => {
     const result = formatDateTime(t, "zh-CN", "2024-06-15T08:30:00Z")
@@ -115,7 +116,7 @@ describe("getStatusType", () => {
     ["failed", "error"],
     ["running", "info"],
     ["stopped", "warning"],
-  ] as [ExecutionStatus, ReturnType<typeof getStatusType>][])(
+  ] satisfies [ExecutionStatus, ReturnType<typeof getStatusType>][])(
     "maps %s to %s",
     (status, expected) => {
       expect(getStatusType(status)).toBe(expected)
@@ -123,6 +124,7 @@ describe("getStatusType", () => {
   )
 
   it("returns default for unknown status", () => {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
     expect(getStatusType("unknown" as ExecutionStatus)).toBe("default")
   })
 })
@@ -133,28 +135,30 @@ describe("getStatusIcon", () => {
     ["failed", "i-mdi-close-circle"],
     ["running", "i-mdi-loading"],
     ["stopped", "i-mdi-pause-circle"],
-  ] as [ExecutionStatus, string][])("maps %s to %s", (status, expected) => {
+  ] satisfies [ExecutionStatus, string][])("maps %s to %s", (status, expected) => {
     expect(getStatusIcon(status)).toBe(expected)
   })
 
   it("returns default icon for unknown status", () => {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
     expect(getStatusIcon("unknown" as ExecutionStatus)).toBe("i-mdi-help-circle")
   })
 })
 
 describe("getStatusLabel", () => {
-  const t = vi.fn((key: string) => key)
+  const t = vi.fn<(key: string) => string>((key: string) => key)
 
   it.each([
     ["success", "settings.scheduler.status.success"],
     ["failed", "settings.scheduler.status.failed"],
     ["running", "settings.scheduler.status.running"],
     ["stopped", "settings.scheduler.status.stopped"],
-  ] as [ExecutionStatus, string][])("maps %s to %s", (status, expected) => {
+  ] satisfies [ExecutionStatus, string][])("maps %s to %s", (status, expected) => {
     expect(getStatusLabel(t, status)).toBe(expected)
   })
 
   it("returns unknown for unknown status", () => {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
     expect(getStatusLabel(t, "unknown" as ExecutionStatus)).toBe("common.unknown")
   })
 })

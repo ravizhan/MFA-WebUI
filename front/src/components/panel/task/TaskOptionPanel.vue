@@ -28,11 +28,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, watch } from "vue"
+import { computed, ref, watch } from "vue"
 import { useI18n } from "vue-i18n"
 import { Icon } from "@iconify/vue"
 import { useInterfaceStore } from "@/stores"
-import type { TaskOptionsByTask } from "@/types/scheduler/model"
+import type { TaskOptionsByTask } from "@/types/schedulerModel"
 import OptionItem from "@/components/panel/task/OptionItem.vue"
 import { resolveInterfaceText } from "@/utils/interface/content"
 
@@ -46,44 +46,54 @@ interface Props {
   scrollbarClass?: string
 }
 
-const props = withDefaults(defineProps<Props>(), {
-  showHeader: false,
-  headerLabel: "",
-  emptyText: "",
-  noOptionsText: "",
-  scrollbarClass: "max-h-65 overflow-y-auto rounded-xl",
-})
+const {
+  currentTaskId,
+  options,
+  showHeader = false,
+  headerLabel = "",
+  emptyText = "",
+  noOptionsText = "",
+  scrollbarClass = "max-h-65 overflow-y-auto rounded-xl",
+} = defineProps<Props>()
 
 const interfaceStore = useInterfaceStore()
 const { locale } = useI18n()
 
+const taskOptionsMap = ref<TaskOptionsByTask>({})
+watch(
+  () => options,
+  (newOptions) => {
+    taskOptionsMap.value = newOptions
+  },
+  { immediate: true },
+)
+
 const currentTaskName = computed(() => {
-  if (!props.currentTaskId) return ""
-  const task = interfaceStore.getTaskByEntry(props.currentTaskId)
+  if (!currentTaskId) return ""
+  const task = interfaceStore.getTaskByEntry(currentTaskId)
   return resolveInterfaceText(interfaceStore.interface, locale.value, task?.label, task?.name || "")
 })
 
 const currentTaskOptions = computed(() => {
-  const taskId = props.currentTaskId
-  if (!taskId) {
+  if (!currentTaskId) {
     return {}
   }
-  return props.options[taskId] || {}
+  return taskOptionsMap.value[currentTaskId] || {}
 })
 
 watch(
-  () => props.currentTaskId,
+  () => currentTaskId,
   (taskId) => {
-    if (taskId && !props.options[taskId]) {
-      props.options[taskId] = {}
+    if (taskId && !taskOptionsMap.value[taskId]) {
+      taskOptionsMap.value[taskId] = {}
     }
   },
   { immediate: true },
 )
 
 const taskOptions = computed(() => {
-  if (!props.currentTaskId) return []
-  const task = interfaceStore.getTaskByEntry(props.currentTaskId)
+  if (!currentTaskId) return []
+  const task = interfaceStore.getTaskByEntry(currentTaskId)
   return task?.option || []
 })
 </script>

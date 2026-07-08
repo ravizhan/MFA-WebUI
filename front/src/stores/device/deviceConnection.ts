@@ -1,6 +1,7 @@
 import { defineStore } from "pinia"
 import { watch } from "vue"
 import { useI18n } from "vue-i18n"
+import { tryCatch } from "@/utils/tryCatch"
 import {
   getDeviceState,
   getDevices,
@@ -19,8 +20,8 @@ import { useIndexStore } from "@/stores/panel/session"
 import { useInterfaceStore } from "@/stores/interface/interface"
 import { useSettingsStore } from "@/stores/settings/settings"
 import { useTaskConfigStore } from "@/stores/task-config/taskConfig"
-import type { TaskListItem } from "@/types/task-config/model"
-import type { PanelLastConnectedDevice } from "@/types/settings/model"
+import type { TaskListItem } from "@/types/taskConfigModel"
+import type { PanelLastConnectedDevice } from "@/types/settingsModel"
 import {
   buildDeviceFingerprint,
   buildDeviceLabel,
@@ -34,19 +35,35 @@ import {
 let watcherStopHandles: (() => void)[] = []
 
 export const useDeviceConnectionStore = defineStore("deviceConnection", {
-  state: () => ({
-    selectedController: null as string | null,
-    selectedDeviceKey: null as string | null,
-    availableDevices: [] as ConnectableDevice[],
-    controllerCapabilities: [] as DeviceControllerCapability[],
+  state: (): {
+    selectedController: string | null
+    selectedDeviceKey: string | null
+    availableDevices: ConnectableDevice[]
+    controllerCapabilities: DeviceControllerCapability[]
+    playCoverAddress: string
+    resource: string | null
+    resourcesList: Array<{ label: string; value: string }>
+    loading: boolean
+    isDeviceResourceLocked: boolean
+    connectedControllerName: string | null
+    connectedResourceName: string | null
+    deviceStatePollTimer: number | null
+    initialized: boolean
+    _fetchDevicesRequestId: number
+    _fetchResourcesRequestId: number
+  } => ({
+    selectedController: null,
+    selectedDeviceKey: null,
+    availableDevices: [],
+    controllerCapabilities: [],
     playCoverAddress: "",
-    resource: null as string | null,
-    resourcesList: [] as Array<{ label: string; value: string }>,
+    resource: null,
+    resourcesList: [],
     loading: false,
     isDeviceResourceLocked: false,
-    connectedControllerName: null as string | null,
-    connectedResourceName: null as string | null,
-    deviceStatePollTimer: null as number | null,
+    connectedControllerName: null,
+    connectedResourceName: null,
+    deviceStatePollTimer: null,
     initialized: false,
     _fetchDevicesRequestId: 0,
     _fetchResourcesRequestId: 0,
@@ -82,9 +99,10 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
 
     deviceOptions(): Array<{
       label: string
-      value: string
+      value?: string
       type?: string
       key?: string
+      disabled?: boolean
       children?: Array<{ label: string; value: string }>
     }> {
       const { t } = useI18n()
@@ -109,9 +127,10 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
 
       const options: Array<{
         label: string
-        value: string
+        value?: string
         type?: string
         key?: string
+        disabled?: boolean
         children?: Array<{ label: string; value: string }>
       }> = []
 
@@ -220,61 +239,7 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
 
     async persistLastConnectedDevice(deviceInfo: ConnectableDevice, controllerName: string) {
       const settingsStore = useSettingsStore()
-      let storedDevice: PanelLastConnectedDevice
-
-      if (isAdbDevice(deviceInfo)) {
-        storedDevice = {
-          type: "Adb",
-          controller_name: controllerName,
-          fingerprint: buildDeviceFingerprint(deviceInfo),
-          adb_path: deviceInfo.adb_path,
-          address: deviceInfo.address,
-          class_name: "",
-          window_name: "",
-          hWnd: 0,
-          gamepad_type: 0,
-          uuid: "",
-        }
-      } else if (isWin32Device(deviceInfo)) {
-        storedDevice = {
-          type: "Win32",
-          controller_name: controllerName,
-          fingerprint: buildDeviceFingerprint(deviceInfo),
-          adb_path: "",
-          address: "",
-          class_name: deviceInfo.class_name,
-          window_name: deviceInfo.window_name,
-          hWnd: deviceInfo.hWnd,
-          gamepad_type: 0,
-          uuid: "",
-        }
-      } else if (isGamepadDevice(deviceInfo)) {
-        storedDevice = {
-          type: "Gamepad",
-          controller_name: controllerName,
-          fingerprint: buildDeviceFingerprint(deviceInfo),
-          adb_path: "",
-          address: "",
-          class_name: deviceInfo.class_name,
-          window_name: deviceInfo.window_name,
-          hWnd: deviceInfo.hWnd,
-          gamepad_type: deviceInfo.gamepad_type,
-          uuid: "",
-        }
-      } else {
-        storedDevice = {
-          type: "PlayCover",
-          controller_name: controllerName,
-          fingerprint: buildDeviceFingerprint(deviceInfo),
-          adb_path: "",
-          address: deviceInfo.address,
-          class_name: "",
-          window_name: deviceInfo.name || "",
-          hWnd: 0,
-          gamepad_type: 0,
-          uuid: deviceInfo.uuid || "",
-        }
-      }
+      const storedDevice = buildStoredLastConnectedDevice(deviceInfo, controllerName)
 
       await settingsStore.updateSetting("panel", "lastConnectedDevice", storedDevice)
       return storedDevice
@@ -338,54 +303,70 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
     },
 
     async syncDeviceRuntimeState() {
-      try {
-        const state = await getDeviceState()
+      const [state] = await tryCatch(() => getDeviceState())
+      if (state) {
         this.applyDeviceRuntimeState(state)
-      } catch {
-        // Ignore polling failures to keep current UI state
+      }
+    },
+
+    applyControllerData(data: Awaited<ReturnType<typeof getDevices>>) {
+      this.controllerCapabilities = data.controllers
+      const selectedCapability = data.controllers.find(
+        (item) => item.name === data.selected_controller,
+      )
+      this.selectedController = selectedCapability?.display_label || null
+      return selectedCapability
+    },
+
+    applyDeviceData(
+      selectedCapability: DeviceControllerCapability,
+      data: Awaited<ReturnType<typeof getDevices>>,
+      restoreStored: boolean,
+    ) {
+      if (selectedCapability.type === "PlayCover") {
+        this.availableDevices = []
+        this.selectedDeviceKey = null
+        if (restoreStored) {
+          this.restoreLastConnectedDevice()
+        }
+        if (!this.playCoverAddress) {
+          this.playCoverAddress = getPlayCoverDefaultAddress(data.controllers)
+        }
+        return
+      }
+
+      this.availableDevices = data.devices
+      if (restoreStored) {
+        this.restoreLastConnectedDevice()
+      }
+    },
+
+    resetDeviceLoading(requestId: number) {
+      if (requestId === this._fetchDevicesRequestId) {
+        this.loading = false
       }
     },
 
     async fetchDevices(controllerName?: string, restoreStored = false) {
       const requestId = ++this._fetchDevicesRequestId
       this.loading = true
-      try {
-        const data = await getDevices(controllerName)
-        if (requestId !== this._fetchDevicesRequestId) return
 
-        this.controllerCapabilities = data.controllers
-        const selectedCapability = data.controllers.find(
-          (item) => item.name === data.selected_controller,
-        )
-        this.selectedController = selectedCapability?.display_label || null
-
-        if (!selectedCapability) {
-          this.availableDevices = []
-          this.selectedDeviceKey = null
-          return
-        }
-
-        if (selectedCapability.type === "PlayCover") {
-          this.availableDevices = []
-          this.selectedDeviceKey = null
-          if (restoreStored) {
-            this.restoreLastConnectedDevice()
-          }
-          if (!this.playCoverAddress) {
-            this.playCoverAddress = getPlayCoverDefaultAddress(data.controllers)
-          }
-          return
-        }
-
-        this.availableDevices = data.devices
-        if (restoreStored) {
-          this.restoreLastConnectedDevice()
-        }
-      } finally {
-        if (requestId === this._fetchDevicesRequestId) {
-          this.loading = false
-        }
+      const [data] = await tryCatch(() => getDevices(controllerName))
+      if (!data || requestId !== this._fetchDevicesRequestId) {
+        this.resetDeviceLoading(requestId)
+        return
       }
+
+      const selectedCapability = this.applyControllerData(data)
+      if (!selectedCapability) {
+        this.availableDevices = []
+        this.selectedDeviceKey = null
+        this.resetDeviceLoading(requestId)
+        return
+      }
+
+      this.applyDeviceData(selectedCapability, data, restoreStored)
+      this.resetDeviceLoading(requestId)
     },
 
     handleControllerChange() {
@@ -418,6 +399,19 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
       void this.fetchDevices(this.selectedControllerCapability.name)
     },
 
+    buildPlayCoverDevice(): { device: ConnectableDevice } | { error: string } {
+      const { t } = useI18n()
+      const address = this.playCoverAddress.trim()
+      if (!address) {
+        return { error: t("panel.playcoverAddress") }
+      }
+      const regex = /^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}:\d{1,5}$/
+      if (!regex.test(address)) {
+        return { error: t("panel.invalidPlaycoverAddress") }
+      }
+      return { device: { type: "PlayCover", address } }
+    },
+
     async connectDevices(): Promise<PostDeviceResult> {
       const { t } = useI18n()
 
@@ -432,16 +426,14 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
 
       let currentDevice: ConnectableDevice | null = null
       if (selectedCapability.type === "PlayCover") {
-        const address = this.playCoverAddress.trim()
-        if (!address) {
-          return { success: false, message: t("panel.playcoverAddress") }
+        const playCoverResult = this.buildPlayCoverDevice()
+        if ("error" in playCoverResult) {
+          return { success: false, message: playCoverResult.error }
         }
-        const regex = /^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}:\d{1,5}$/
-        if (!regex.test(address)) {
-          return { success: false, message: t("panel.invalidPlaycoverAddress") }
-        }
-        currentDevice = { type: "PlayCover", address }
-      } else {
+        currentDevice = playCoverResult.device
+      }
+
+      if (!currentDevice) {
         currentDevice = this.selectedDevice
       }
 
@@ -472,6 +464,12 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
       return result
     },
 
+    resetResourceLoading(requestId: number) {
+      if (requestId === this._fetchResourcesRequestId) {
+        this.loading = false
+      }
+    },
+
     async getResourceList() {
       if (this.isDeviceResourceLocked || !this.selectedControllerCapability) {
         return
@@ -481,20 +479,21 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
       const settingsStore = useSettingsStore()
       this.resourcesList = []
       this.loading = true
-      try {
-        const resourceData = await getResource(this.selectedControllerCapability.type)
-        if (requestId !== this._fetchResourcesRequestId) return
 
-        this.resourcesList = resourceData.map((item) => ({ label: item.name, value: item.name }))
-        const savedResource = settingsStore.settings.panel.lastResource
-        if (savedResource && resourceData.some((item) => item.name === savedResource)) {
-          this.resource = savedResource
-        }
-      } finally {
-        if (requestId === this._fetchResourcesRequestId) {
-          this.loading = false
-        }
+      const [resourceData] = await tryCatch(() =>
+        getResource(this.selectedControllerCapability!.type),
+      )
+      if (!resourceData || requestId !== this._fetchResourcesRequestId) {
+        this.resetResourceLoading(requestId)
+        return
       }
+
+      this.resourcesList = resourceData.map((item) => ({ label: item.name, value: item.name }))
+      const savedResource = settingsStore.settings.panel.lastResource
+      if (savedResource && resourceData.some((item) => item.name === savedResource)) {
+        this.resource = savedResource
+      }
+      this.resetResourceLoading(requestId)
     },
 
     async postResourceSelection(): Promise<PostResourceResult> {
@@ -560,9 +559,9 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
       if (compatibleTaskIds.length === 0) {
         if (allCompatibleTaskIds.length === 0) {
           showGlobalMessage("error", t("panel.noCompatibleTask"))
-        } else {
-          showGlobalMessage("error", t("panel.selectTask"))
+          return false
         }
+        showGlobalMessage("error", t("panel.selectTask"))
         return false
       }
 
@@ -597,18 +596,17 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
       // Sync device state
       void this.syncDeviceRuntimeState()
 
-      // Fetch settings if not initialized
-      if (!settingsStore.initialized) {
-        void settingsStore.fetchSettings().then(() => {
-          const savedDevice = settingsStore.settings.panel.lastConnectedDevice
-          void this.fetchDevices(savedDevice?.controller_name, true)
-          void this.getResourceList()
-        })
-      } else {
+      const fetchSavedDevice = () => {
         const savedDevice = settingsStore.settings.panel.lastConnectedDevice
         void this.fetchDevices(savedDevice?.controller_name, true)
         void this.getResourceList()
       }
+
+      // Fetch settings if not initialized
+      const settingsPromise = settingsStore.initialized
+        ? Promise.resolve()
+        : settingsStore.fetchSettings()
+      void settingsPromise.then(() => fetchSavedDevice())
 
       // Start device state poll timer
       this.deviceStatePollTimer = window.setInterval(() => {
@@ -623,7 +621,7 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
         () => configStore.taskList.length,
         (length) => {
           if (length > 0) {
-            indexStore.SelectTask(configStore.taskList[0]!.id)
+            indexStore.SelectTask(configStore.taskList[0].id)
           }
         },
         { immediate: true },
@@ -679,6 +677,66 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
 })
 
 // --- Helper functions used by the store (replicated from PanelControlColumn) ---
+
+function buildStoredLastConnectedDevice(
+  deviceInfo: ConnectableDevice,
+  controllerName: string,
+): PanelLastConnectedDevice {
+  if (isAdbDevice(deviceInfo)) {
+    return {
+      type: "Adb",
+      controller_name: controllerName,
+      fingerprint: buildDeviceFingerprint(deviceInfo),
+      adb_path: deviceInfo.adb_path,
+      address: deviceInfo.address,
+      class_name: "",
+      window_name: "",
+      hWnd: 0,
+      gamepad_type: 0,
+      uuid: "",
+    }
+  }
+  if (isWin32Device(deviceInfo)) {
+    return {
+      type: "Win32",
+      controller_name: controllerName,
+      fingerprint: buildDeviceFingerprint(deviceInfo),
+      adb_path: "",
+      address: "",
+      class_name: deviceInfo.class_name,
+      window_name: deviceInfo.window_name,
+      hWnd: deviceInfo.hWnd,
+      gamepad_type: 0,
+      uuid: "",
+    }
+  }
+  if (isGamepadDevice(deviceInfo)) {
+    return {
+      type: "Gamepad",
+      controller_name: controllerName,
+      fingerprint: buildDeviceFingerprint(deviceInfo),
+      adb_path: "",
+      address: "",
+      class_name: deviceInfo.class_name,
+      window_name: deviceInfo.window_name,
+      hWnd: deviceInfo.hWnd,
+      gamepad_type: deviceInfo.gamepad_type,
+      uuid: "",
+    }
+  }
+  return {
+    type: "PlayCover",
+    controller_name: controllerName,
+    fingerprint: buildDeviceFingerprint(deviceInfo),
+    adb_path: "",
+    address: deviceInfo.address,
+    class_name: "",
+    window_name: deviceInfo.name || "",
+    hWnd: 0,
+    gamepad_type: 0,
+    uuid: deviceInfo.uuid || "",
+  }
+}
 
 function buildStoredDeviceLabel(stored: PanelLastConnectedDevice): string {
   if (stored.type === "Adb") {

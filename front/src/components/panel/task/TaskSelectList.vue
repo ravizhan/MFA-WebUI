@@ -19,7 +19,7 @@
           class="checkbox checkbox-primary checkbox-sm shrink-0"
           :checked="isTaskSelected(item.id)"
           @click.stop
-          @change="handleToggle(item.id, ($event.target as HTMLInputElement).checked)"
+          @change="handleToggle(item.id, getChecked($event))"
         />
         <span class="flex-1 text-sm truncate select-none">{{
           resolveTaskLabel(item.id, item.name)
@@ -41,59 +41,57 @@ import { VueDraggable } from "vue-draggable-plus"
 import { useI18n } from "vue-i18n"
 import { Icon } from "@iconify/vue"
 import { useInterfaceStore } from "@/stores"
-import type { TaskListItem } from "@/types/task-config/model"
-import type { Task } from "@/types/interface/model"
+import type { TaskListItem } from "@/types/taskConfigModel"
+import type { Task } from "@/types/interfaceModel"
 import { resolveInterfaceText } from "@/utils/interface/content"
 
 interface Props {
   tasks: TaskListItem[]
   selectedTasks: string[]
-  scrollable?: boolean
   controllerName?: string | null
   resourceName?: string | null
   hideIncompatible?: boolean
 }
 
 interface Emits {
-  (e: "update:selectedTasks", value: string[]): void
+  (e: "update:selected-tasks", value: string[]): void
   (e: "update:tasks", value: TaskListItem[]): void
   (e: "config", taskId: string): void
 }
 
-const props = withDefaults(defineProps<Props>(), {
-  scrollable: false,
-  controllerName: null,
-  resourceName: null,
-  hideIncompatible: false,
-})
+const {
+  tasks,
+  selectedTasks,
+  controllerName = null,
+  resourceName = null,
+  hideIncompatible = false,
+} = defineProps<Props>()
 
 const emit = defineEmits<Emits>()
 const { locale } = useI18n()
 const interfaceStore = useInterfaceStore()
 
 function isTaskVisible(taskId: string): boolean {
-  if (!props.hideIncompatible) {
+  if (!hideIncompatible) {
     return true
   }
-  return interfaceStore.isTaskCompatibleByEntry(taskId, props.controllerName, props.resourceName)
+  return interfaceStore.isTaskCompatibleByEntry(taskId, controllerName, resourceName)
 }
 
 const taskListData = computed({
-  get: () => props.tasks.filter((task) => isTaskVisible(task.id)),
+  get: () => tasks.filter((task) => isTaskVisible(task.id)),
   set: (value: TaskListItem[]) => {
-    if (!props.hideIncompatible) {
+    if (!hideIncompatible) {
       emit("update:tasks", value)
       return
     }
 
-    const visibleTaskIds = props.tasks
-      .filter((task) => isTaskVisible(task.id))
-      .map((task) => task.id)
+    const visibleTaskIds = tasks.filter((task) => isTaskVisible(task.id)).map((task) => task.id)
     const visibleTaskIdSet = new Set(visibleTaskIds)
 
     const reorderedVisibleTaskIds = value.map((task) => task.id)
     const reorderedVisibleTaskIdSet = new Set(reorderedVisibleTaskIds)
-    const taskById = new Map(props.tasks.map((task) => [task.id, task]))
+    const taskById = new Map(tasks.map((task) => [task.id, task]))
 
     const orderedVisibleTasks: TaskListItem[] = []
     for (const taskId of reorderedVisibleTaskIds) {
@@ -117,7 +115,7 @@ const taskListData = computed({
     }
 
     let visibleCursor = 0
-    const mergedTasks = props.tasks.map((task) => {
+    const mergedTasks = tasks.map((task) => {
       if (!visibleTaskIdSet.has(task.id)) {
         return task
       }
@@ -136,33 +134,43 @@ function resolveTaskLabel(taskId: string, fallback: string) {
 }
 
 function isTaskSelected(taskId: string): boolean {
-  return props.selectedTasks.includes(taskId)
+  return selectedTasks.includes(taskId)
 }
 
 function handleToggle(taskId: string, checked: boolean) {
-  let newSelected: string[]
   if (checked) {
-    newSelected = [...props.selectedTasks, taskId]
-  } else {
-    newSelected = props.selectedTasks.filter((id) => id !== taskId)
+    emit("update:selected-tasks", [...selectedTasks, taskId])
+    return
   }
-  emit("update:selectedTasks", newSelected)
+  emit(
+    "update:selected-tasks",
+    selectedTasks.filter((id) => id !== taskId),
+  )
 }
 
 function handleConfig(taskId: string) {
   emit("config", taskId)
 }
 
+function getChecked(event: Event): boolean {
+  const target = event.target
+  if (target instanceof HTMLInputElement) return target.checked
+  return false
+}
+
+function hasDocumentContent(task: Task): boolean {
+  if (task.description) return true
+  if (typeof task.desc === "string" && task.desc) return true
+  if (Array.isArray(task.desc) && task.desc.length > 0) return true
+  if (typeof task.doc === "string" && task.doc) return true
+  if (Array.isArray(task.doc) && task.doc.length > 0) return true
+  return false
+}
+
 function taskHasContent(task: Task | null): boolean {
   if (!task) return false
   const hasOptions = task.option && task.option.length > 0
-  const hasDescription =
-    task.description ||
-    (typeof task.desc === "string" && task.desc) ||
-    (Array.isArray(task.desc) && task.desc.length > 0) ||
-    (typeof task.doc === "string" && task.doc) ||
-    (Array.isArray(task.doc) && task.doc.length > 0)
-  return hasOptions || hasDescription
+  return hasOptions || hasDocumentContent(task)
 }
 
 function handleRowClick(taskId: string) {
