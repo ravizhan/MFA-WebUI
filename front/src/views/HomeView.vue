@@ -10,7 +10,11 @@
               class="w-3 h-3 rounded-full"
               :class="indexStore.Connected ? 'bg-success' : 'bg-error'"
             />
-            {{ indexStore.Connected ? "已连接" : "未连接" }}
+            {{
+              indexStore.Connected
+                ? t("panel.connection.connected")
+                : t("panel.connection.disconnected")
+            }}
           </div>
         </div>
       </div>
@@ -18,7 +22,7 @@
         <div class="card-body p-2">
           <div class="stat-title text-sm opacity-70">{{ t("panel.taskList") }}</div>
           <div class="stat-value text-lg">
-            {{ selectedTaskCount }} / {{ configStore.taskList.length }}
+            {{ selectedTaskCount }} {{ t("common.slash") }} {{ configStore.taskList.length }}
           </div>
         </div>
       </div>
@@ -58,7 +62,6 @@
               :play-cover-address="deviceStore.playCoverAddress"
               :controller-options="deviceStore.controllerOptions"
               :device-options="deviceStore.deviceOptions"
-              :loading="deviceStore.loading"
               :device-disabled="deviceStore.isDeviceResourceLocked"
               :resource-disabled="
                 !deviceStore.selectedController || deviceStore.isDeviceResourceLocked
@@ -69,7 +72,7 @@
               :resources-list="deviceStore.resourcesList"
               @update:selected-controller="deviceStore.selectedController = $event"
               @update:selected-device-key="deviceStore.selectedDeviceKey = $event"
-              @update:playCoverAddress="deviceStore.playCoverAddress = $event"
+              @update:play-cover-address="deviceStore.playCoverAddress = $event"
               @update:resource="deviceStore.resource = $event"
               @controller-change="deviceStore.handleControllerChange()"
               @refresh-devices="deviceStore.refreshDevices()"
@@ -91,7 +94,6 @@
               :play-cover-address="deviceStore.playCoverAddress"
               :controller-options="deviceStore.controllerOptions"
               :device-options="deviceStore.deviceOptions"
-              :loading="deviceStore.loading"
               :device-disabled="deviceStore.isDeviceResourceLocked"
               :resource-disabled="
                 !deviceStore.selectedController || deviceStore.isDeviceResourceLocked
@@ -102,7 +104,7 @@
               :resources-list="deviceStore.resourcesList"
               @update:selected-controller="deviceStore.selectedController = $event"
               @update:selected-device-key="deviceStore.selectedDeviceKey = $event"
-              @update:playCoverAddress="deviceStore.playCoverAddress = $event"
+              @update:play-cover-address="deviceStore.playCoverAddress = $event"
               @update:resource="deviceStore.resource = $event"
               @controller-change="deviceStore.handleControllerChange()"
               @refresh-devices="deviceStore.refreshDevices()"
@@ -120,24 +122,12 @@
               {{ t("panel.preset.title") }}
             </h2>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
-              <div
+              <HomeRecipeCard
                 v-for="preset in recipeCards"
                 :key="preset.name"
-                class="card bg-base-200 hover:bg-base-300 transition-colors cursor-pointer group"
-                @click="applyPreset(preset.name)"
-              >
-                <div class="card-body p-3">
-                  <h3 class="card-title text-sm group-hover:text-primary transition-colors">
-                    {{ preset.label }}
-                  </h3>
-                  <p class="text-xs opacity-70 line-clamp-2">{{ preset.description }}</p>
-                  <div class="card-actions justify-end mt-2">
-                    <span class="badge badge-primary badge-sm">
-                      {{ preset.taskCount }} {{ t("panel.preset.taskCount") }}
-                    </span>
-                  </div>
-                </div>
-              </div>
+                :preset="preset"
+                @apply="applyPreset"
+              />
             </div>
           </div>
         </div>
@@ -162,6 +152,7 @@ import { computed, onMounted, onUnmounted } from "vue"
 import { useI18n } from "vue-i18n"
 import { useRouter } from "vue-router"
 import { Icon } from "@iconify/vue"
+import HomeRecipeCard from "@/components/home/HomeRecipeCard.vue"
 import RoutineHealthCard from "@/components/home/RoutineHealthCard.vue"
 import PanelConnectionTabs from "@/components/panel/PanelConnectionTabs.vue"
 import {

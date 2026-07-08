@@ -12,9 +12,9 @@
             </h2>
             <div class="flex gap-2">
               <select v-model="fps" class="select select-bordered select-sm w-24">
-                <option :value="15">15 FPS</option>
-                <option :value="30">30 FPS</option>
-                <option :value="60">60 FPS</option>
+                <option :value="15">{{ t("panel.preview.fps15") }}</option>
+                <option :value="30">{{ t("panel.preview.fps30") }}</option>
+                <option :value="60">{{ t("panel.preview.fps60") }}</option>
               </select>
               <button
                 class="btn btn-primary btn-sm"
@@ -99,7 +99,7 @@
 
 <script setup lang="ts">
 import { storeToRefs } from "pinia"
-import { nextTick, onUnmounted, ref, watch } from "vue"
+import { nextTick, onUnmounted, ref, useTemplateRef, watch } from "vue"
 import { useI18n } from "vue-i18n"
 import { Icon } from "@iconify/vue"
 import { useIndexStore } from "@/stores"
@@ -110,8 +110,8 @@ const { Connected: connected, RunningLog: log } = storeToRefs(indexStore)
 const streaming = ref(false)
 const fps = ref(30)
 const streamUrl = ref("")
-const streamContainer = ref<HTMLElement | null>(null)
-const logContainer = ref<HTMLElement | null>(null)
+const streamContainer = useTemplateRef<HTMLElement>("streamContainer")
+const logContainer = useTemplateRef<HTMLElement>("logContainer")
 const autoScroll = ref(true)
 
 function handleStartStream() {

@@ -69,7 +69,7 @@ import PreTaskList from "@/components/panel/task/PreTaskList.vue"
 import TaskSelectList from "@/components/panel/task/TaskSelectList.vue"
 import { stopTask } from "@/services/api"
 import { useIndexStore, useTaskConfigStore, useDeviceConnectionStore } from "@/stores"
-import type { TaskListItem } from "@/types/task-config/model"
+import type { TaskListItem } from "@/types/taskConfigModel"
 import { useViewport } from "@/utils/viewport/useViewport"
 
 const { t } = useI18n()

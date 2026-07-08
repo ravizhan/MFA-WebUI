@@ -1,4 +1,4 @@
-import type { PreTaskCommand } from "@/types/task-config/model"
+import type { PreTaskCommand } from "@/types/taskConfigModel"
 
 export type TriggerType = "cron" | "date" | "interval"
 

@@ -60,7 +60,7 @@ import SchedulerTaskDialog from "@/components/settings/dialogs/SchedulerTaskDial
 import SchedulerTaskList from "@/components/settings/scheduler/SchedulerTaskList.vue"
 import SchedulerExecutionHistory from "@/components/settings/scheduler/SchedulerExecutionHistory.vue"
 import { useSchedulerStore } from "@/stores"
-import type { ScheduledTask } from "@/types/scheduler/model"
+import type { ScheduledTask } from "@/types/schedulerModel"
 
 const { t } = useI18n()
 const schedulerStore = useSchedulerStore()
