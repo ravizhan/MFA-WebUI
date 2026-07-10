@@ -1,235 +1,217 @@
 <template>
-  <div class="space-y-4">
-    <div class="flex justify-end">
-      <button
-        class="btn btn-info btn-sm"
-        :disabled="isTestNotificationDisabled"
-        @click="testNotification"
-      >
-        <Icon icon="mdi:bell-ring" class="mr-1 text-base" />
-        {{ t("settings.notification.test") }}
-      </button>
-    </div>
+  <div class="space-y-6">
+    <!-- Channels + test -->
+    <section class="space-y-3">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <div class="flex min-w-0 items-center gap-2">
+          <Icon icon="mdi:bell-outline" class="text-primary shrink-0 text-lg" aria-hidden="true" />
+          <h3 class="text-sm font-semibold">{{ t("settings.notification.sections.channels") }}</h3>
+        </div>
+        <button
+          type="button"
+          class="btn btn-primary btn-sm"
+          :disabled="isTestNotificationDisabled"
+          :title="t('settings.notification.test')"
+          :aria-label="t('settings.notification.test')"
+          @click="testNotification"
+        >
+          <Icon icon="mdi:bell-ring" class="text-base" aria-hidden="true" />
+          {{ t("settings.notification.test") }}
+        </button>
+      </div>
 
-    <div class="form-control">
-      <label class="label">
-        <span class="label-text">{{ t("settings.notification.enable") }}</span>
-      </label>
-      <div class="flex flex-wrap gap-4">
-        <label class="flex items-center gap-2 cursor-pointer">
+      <div class="flex flex-wrap gap-2">
+        <label
+          class="border-base-300 hover:border-primary/40 has-[:checked]:border-primary has-[:checked]:bg-primary/5 flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors"
+        >
           <input
             type="checkbox"
-            class="checkbox checkbox-primary"
+            class="checkbox checkbox-primary checkbox-sm"
             :checked="settings.notification.systemNotification"
             @change="
-              handleSettingChange(
-                'notification',
-                'systemNotification',
-                ($event.target as HTMLInputElement).checked,
-              )
+              handleSettingChange('notification', 'systemNotification', getCheckboxValue($event))
             "
           />
+          <Icon icon="mdi:desktop-mac" class="text-base opacity-70" aria-hidden="true" />
           <span class="text-sm">{{ t("settings.notification.system") }}</span>
         </label>
-        <label class="flex items-center gap-2 cursor-pointer">
+
+        <label
+          class="border-base-300 hover:border-primary/40 has-[:checked]:border-primary has-[:checked]:bg-primary/5 flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors"
+        >
           <input
             type="checkbox"
-            class="checkbox checkbox-primary"
+            class="checkbox checkbox-primary checkbox-sm"
             :checked="settings.notification.browserNotification"
-            @change="handleBrowserNotificationChange(($event.target as HTMLInputElement).checked)"
+            @change="handleBrowserNotificationChange(getCheckboxValue($event))"
           />
+          <Icon icon="mdi:web" class="text-base opacity-70" aria-hidden="true" />
           <span class="text-sm">{{ t("settings.notification.browser") }}</span>
         </label>
-        <label class="flex items-center gap-2 cursor-pointer">
+
+        <label
+          class="border-base-300 hover:border-primary/40 has-[:checked]:border-primary has-[:checked]:bg-primary/5 flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors"
+        >
           <input
             type="checkbox"
-            class="checkbox checkbox-primary"
+            class="checkbox checkbox-primary checkbox-sm"
             :checked="settings.notification.externalNotification"
             @change="
-              handleSettingChange(
-                'notification',
-                'externalNotification',
-                ($event.target as HTMLInputElement).checked,
-              )
+              handleSettingChange('notification', 'externalNotification', getCheckboxValue($event))
             "
           />
+          <Icon icon="mdi:webhook" class="text-base opacity-70" aria-hidden="true" />
           <span class="text-sm">{{ t("settings.notification.external") }}</span>
         </label>
       </div>
-    </div>
+    </section>
 
-    <template v-if="settings.notification.externalNotification">
-      <div class="divider" />
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div class="form-control">
-          <label class="label">
-            <span class="label-text">{{ t("settings.notification.fields.url") }}</span>
-          </label>
+    <!-- External connection (collapses when off) -->
+    <section
+      v-if="settings.notification.externalNotification"
+      class="border-base-200 space-y-4 border-t pt-5"
+    >
+      <div class="flex items-center gap-2">
+        <Icon icon="mdi:link-variant" class="text-primary shrink-0 text-lg" aria-hidden="true" />
+        <h3 class="text-sm font-semibold">
+          {{ t("settings.notification.sections.external") }}
+        </h3>
+      </div>
+
+      <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <fieldset class="fieldset p-0 md:col-span-2">
+          <legend class="fieldset-legend">{{ t("settings.notification.fields.url") }}</legend>
           <input
             :value="settings.notification.webhook"
-            type="text"
-            class="input input-bordered"
+            type="url"
+            class="input input-bordered w-full font-mono text-sm"
             placeholder="https://..."
-            @input="
-              handleSettingChange(
-                'notification',
-                'webhook',
-                ($event.target as HTMLInputElement).value,
-              )
-            "
+            autocomplete="off"
+            spellcheck="false"
+            @input="handleSettingChange('notification', 'webhook', getInputValue($event))"
           />
-        </div>
-        <div v-if="settings.notification.method !== 'GET'" class="form-control">
-          <label class="label">
-            <span class="label-text">{{ t("settings.notification.fields.contentType") }}</span>
-          </label>
+        </fieldset>
+
+        <fieldset class="fieldset p-0">
+          <legend class="fieldset-legend">{{ t("settings.notification.fields.method") }}</legend>
+          <select
+            :value="settings.notification.method"
+            class="select select-bordered w-full"
+            @change="handleMethodChange($event)"
+          >
+            <option value="POST">{{ t("settings.notification.fields.post") }}</option>
+            <option value="GET">{{ t("settings.notification.fields.get") }}</option>
+          </select>
+        </fieldset>
+
+        <fieldset v-if="settings.notification.method !== 'GET'" class="fieldset p-0">
+          <legend class="fieldset-legend">
+            {{ t("settings.notification.fields.contentType") }}
+          </legend>
           <select
             :value="settings.notification.contentType"
-            class="select select-bordered"
-            @change="
-              handleSettingChange(
-                'notification',
-                'contentType',
-                ($event.target as HTMLSelectElement)
-                  .value as SettingsModel['notification']['contentType'],
-              )
-            "
+            class="select select-bordered w-full"
+            @change="handleContentTypeChange($event)"
           >
             <option value="application/json">{{ t("settings.notification.fields.json") }}</option>
             <option value="application/x-www-form-urlencoded">
               {{ t("settings.notification.fields.formUrlencoded") }}
             </option>
           </select>
-        </div>
-        <div class="form-control">
-          <label class="label">
-            <span class="label-text">{{ t("settings.notification.fields.headers") }}</span>
-          </label>
+        </fieldset>
+
+        <fieldset class="fieldset p-0 md:col-span-2">
+          <legend class="fieldset-legend">{{ t("settings.notification.fields.headers") }}</legend>
           <input
             :value="settings.notification.headers"
             type="text"
-            class="input input-bordered"
-            placeholder="HTTP headers in JSON format"
-            @input="
-              handleSettingChange(
-                'notification',
-                'headers',
-                ($event.target as HTMLInputElement).value,
-              )
-            "
+            class="input input-bordered w-full font-mono text-sm"
+            placeholder='{"Authorization":"Bearer ..."}'
+            autocomplete="off"
+            spellcheck="false"
+            @input="handleSettingChange('notification', 'headers', getInputValue($event))"
           />
-        </div>
-        <div class="form-control">
-          <label class="label">
-            <span class="label-text">{{ t("settings.notification.fields.method") }}</span>
-          </label>
-          <select
-            :value="settings.notification.method"
-            class="select select-bordered"
-            @change="
-              handleSettingChange(
-                'notification',
-                'method',
-                ($event.target as HTMLSelectElement)
-                  .value as SettingsModel['notification']['method'],
-              )
-            "
-          >
-            <option value="POST">{{ t("settings.notification.fields.post") }}</option>
-            <option value="GET">{{ t("settings.notification.fields.get") }}</option>
-          </select>
-        </div>
-        <div class="form-control md:col-span-2">
-          <label class="label">
-            <span class="label-text">{{ t("settings.notification.fields.body") }}</span>
-          </label>
+        </fieldset>
+
+        <fieldset class="fieldset p-0 md:col-span-2">
+          <legend class="fieldset-legend">{{ t("settings.notification.fields.body") }}</legend>
           <textarea
             :value="settings.notification.body"
-            class="textarea textarea-bordered"
+            class="textarea textarea-bordered min-h-24 w-full font-mono text-sm"
             placeholder='{"desp":"{{message}}","title":"{{title}}"}'
-            rows="3"
-            @input="
-              handleSettingChange(
-                'notification',
-                'body',
-                ($event.target as HTMLTextAreaElement).value,
-              )
-            "
+            rows="4"
+            spellcheck="false"
+            @input="handleSettingChange('notification', 'body', getTextareaValue($event))"
           />
-        </div>
-        <div class="form-control">
-          <label class="label">
-            <span class="label-text">{{ t("settings.notification.fields.username") }}</span>
-          </label>
+        </fieldset>
+
+        <fieldset class="fieldset p-0">
+          <legend class="fieldset-legend">{{ t("settings.notification.fields.username") }}</legend>
           <input
             :value="settings.notification.username"
             type="text"
-            class="input input-bordered"
-            @input="
-              handleSettingChange(
-                'notification',
-                'username',
-                ($event.target as HTMLInputElement).value,
-              )
-            "
+            class="input input-bordered w-full"
+            autocomplete="username"
+            @input="handleSettingChange('notification', 'username', getInputValue($event))"
           />
-        </div>
-        <div class="form-control">
-          <label class="label">
-            <span class="label-text">{{ t("settings.notification.fields.password") }}</span>
-          </label>
+        </fieldset>
+
+        <fieldset class="fieldset p-0">
+          <legend class="fieldset-legend">{{ t("settings.notification.fields.password") }}</legend>
           <input
             :value="settings.notification.password"
             type="password"
-            class="input input-bordered"
-            @input="
-              handleSettingChange(
-                'notification',
-                'password',
-                ($event.target as HTMLInputElement).value,
-              )
-            "
+            class="input input-bordered w-full"
+            autocomplete="current-password"
+            @input="handleSettingChange('notification', 'password', getInputValue($event))"
           />
-        </div>
+        </fieldset>
       </div>
-    </template>
+    </section>
 
-    <div class="divider" />
+    <!-- Trigger timing -->
+    <section class="border-base-200 space-y-1 border-t pt-5">
+      <div class="mb-3 flex items-center gap-2">
+        <Icon
+          icon="mdi:bell-badge-outline"
+          class="text-primary shrink-0 text-lg"
+          aria-hidden="true"
+        />
+        <h3 class="text-sm font-semibold">{{ t("settings.notification.sections.triggers") }}</h3>
+      </div>
 
-    <div class="form-control">
-      <label class="label cursor-pointer">
-        <span class="label-text">{{ t("settings.notification.onComplete") }}</span>
+      <div
+        class="grid grid-cols-1 items-center gap-2 border-b border-base-200 py-3 last:border-b-0 md:grid-cols-[1fr_auto] md:gap-4"
+      >
+        <label class="text-sm" for="notify-on-complete">
+          {{ t("settings.notification.onComplete") }}
+        </label>
         <input
+          id="notify-on-complete"
           type="checkbox"
           class="toggle toggle-primary"
           :checked="settings.notification.notifyOnComplete"
           @change="
-            handleSettingChange(
-              'notification',
-              'notifyOnComplete',
-              ($event.target as HTMLInputElement).checked,
-            )
+            handleSettingChange('notification', 'notifyOnComplete', getCheckboxValue($event))
           "
         />
-      </label>
-    </div>
-    <div class="form-control">
-      <label class="label cursor-pointer">
-        <span class="label-text">{{ t("settings.notification.onError") }}</span>
+      </div>
+
+      <div
+        class="grid grid-cols-1 items-center gap-2 border-b border-base-200 py-3 last:border-b-0 md:grid-cols-[1fr_auto] md:gap-4"
+      >
+        <label class="text-sm" for="notify-on-error">
+          {{ t("settings.notification.onError") }}
+        </label>
         <input
+          id="notify-on-error"
           type="checkbox"
           class="toggle toggle-primary"
           :checked="settings.notification.notifyOnError"
-          @change="
-            handleSettingChange(
-              'notification',
-              'notifyOnError',
-              ($event.target as HTMLInputElement).checked,
-            )
-          "
+          @change="handleSettingChange('notification', 'notifyOnError', getCheckboxValue($event))"
         />
-      </label>
-    </div>
+      </div>
+    </section>
   </div>
 </template>
 
@@ -267,6 +249,36 @@ const isTestNotificationDisabled = computed(() => {
 })
 
 type EditableCategory = Exclude<keyof SettingsModel, "about">
+type NotificationMethod = SettingsModel["notification"]["method"]
+type NotificationContentType = SettingsModel["notification"]["contentType"]
+
+function getInputValue(event: Event): string {
+  const target = event.target
+  return target instanceof HTMLInputElement ? target.value : ""
+}
+
+function getTextareaValue(event: Event): string {
+  const target = event.target
+  return target instanceof HTMLTextAreaElement ? target.value : ""
+}
+
+function getCheckboxValue(event: Event): boolean {
+  const target = event.target
+  return target instanceof HTMLInputElement ? target.checked : false
+}
+
+function getSelectValue(event: Event): string {
+  const target = event.target
+  return target instanceof HTMLSelectElement ? target.value : ""
+}
+
+function isNotificationMethod(value: string): value is NotificationMethod {
+  return value === "POST" || value === "GET"
+}
+
+function isNotificationContentType(value: string): value is NotificationContentType {
+  return value === "application/json" || value === "application/x-www-form-urlencoded"
+}
 
 async function handleSettingChange<K extends EditableCategory, P extends keyof SettingsModel[K]>(
   category: K,
@@ -274,6 +286,22 @@ async function handleSettingChange<K extends EditableCategory, P extends keyof S
   value: SettingsModel[K][P],
 ) {
   await settingsStore.updateSetting(category, key, value)
+}
+
+function handleMethodChange(event: Event) {
+  const value = getSelectValue(event)
+  if (!isNotificationMethod(value)) {
+    return
+  }
+  void handleSettingChange("notification", "method", value)
+}
+
+function handleContentTypeChange(event: Event) {
+  const value = getSelectValue(event)
+  if (!isNotificationContentType(value)) {
+    return
+  }
+  void handleSettingChange("notification", "contentType", value)
 }
 
 async function handleBrowserNotificationChange(enabled: boolean) {

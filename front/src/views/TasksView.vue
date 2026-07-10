@@ -4,7 +4,7 @@
     <div class="card bg-base-100 shadow-xl">
       <div class="card-body flex flex-col">
         <h2 class="card-title text-base mb-3 shrink-0">
-          <Icon icon="mdi:format-list-checks" class="text-primary" />
+          <Icon icon="mdi:format-list-checks" class="text-primary text-2xl" />
           {{ t("panel.taskList") }}
         </h2>
         <PreTaskList v-model="configStore.preTasks" />

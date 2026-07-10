@@ -7,14 +7,14 @@
         :checked="expanded"
         @change="handleExpandedChange($event)"
       />
-      <div class="collapse-title text-sm font-medium py-2 px-3 min-h-0 flex items-center gap-2">
-        <Icon icon="mdi:playlist-play" class="text-primary text-lg" />
+      <div class="collapse-title text-base font-medium py-2 px-3 min-h-0 flex items-center gap-2">
+        <Icon icon="mdi:playlist-play" class="text-primary text-2xl" />
         {{ $t("taskConfig.preTasks.title") }}
       </div>
       <div class="collapse-content px-3 pb-3">
         <div class="flex items-center justify-between mb-2">
-          <span class="text-xs opacity-60">{{ $t("taskConfig.preTasks.description") }}</span>
-          <button class="btn btn-primary btn-xs" @click="handleAdd">
+          <span class="text-sm opacity-60">{{ $t("taskConfig.preTasks.description") }}</span>
+          <button class="btn btn-primary btn-sm" @click="handleAdd">
             <Icon icon="mdi:plus" class="text-base" />
             {{ $t("taskConfig.preTasks.add") }}
           </button>

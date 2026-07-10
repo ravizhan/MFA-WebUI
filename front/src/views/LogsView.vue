@@ -12,23 +12,23 @@
             </h2>
             <div class="flex gap-2">
               <select v-model="fps" class="select select-bordered select-sm w-24">
-                <option :value="15">{{ t("panel.preview.fps15") }}</option>
-                <option :value="30">{{ t("panel.preview.fps30") }}</option>
-                <option :value="60">{{ t("panel.preview.fps60") }}</option>
+                <option :value="15">{{ t("panel.preview-fps.fps15") }}</option>
+                <option :value="30">{{ t("panel.preview-fps.fps30") }}</option>
+                <option :value="60">{{ t("panel.preview-fps.fps60") }}</option>
               </select>
               <button
                 class="btn btn-primary btn-sm"
                 :disabled="streaming || !connected"
                 @click="handleStartStream"
               >
-                <Icon icon="mdi:play-circle-outline" />
+                <Icon icon="mdi:play-circle-outline" class="text-xl" />
               </button>
               <button
                 class="btn btn-warning btn-sm"
                 :disabled="!streaming"
                 @click="handleStopStream"
               >
-                <Icon icon="mdi:pause-circle-outline" />
+                <Icon icon="mdi:pause-circle-outline" class="text-xl" />
               </button>
             </div>
           </div>
@@ -64,7 +64,7 @@
         <div class="card-body p-4 h-full flex flex-col">
           <div class="flex items-center justify-between mb-3 shrink-0">
             <h2 class="card-title text-base">
-              <Icon icon="mdi:file-document-outline" class="text-primary" />
+              <Icon icon="mdi:file-document-outline" class="text-primary text-xl" />
               {{ t("panel.log") }}
             </h2>
             <div class="flex gap-1">
@@ -73,10 +73,13 @@
                 :class="{ 'text-primary': autoScroll }"
                 @click="autoScroll = !autoScroll"
               >
-                <Icon :icon="autoScroll ? 'mdi:arrow-collapse-down' : 'mdi:arrow-collapse-up'" />
+                <Icon
+                  :icon="autoScroll ? 'mdi:arrow-collapse-down' : 'mdi:arrow-collapse-up'"
+                  class="text-lg"
+                />
               </button>
               <button class="btn btn-ghost btn-sm" :data-clipboard-text="log" @click="handleCopy">
-                <Icon icon="mdi:content-copy" />
+                <Icon icon="mdi:content-copy" class="text-lg" />
                 {{ t("common.copy") }}
               </button>
             </div>

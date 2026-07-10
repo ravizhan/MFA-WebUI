@@ -1,22 +1,12 @@
 <template>
   <div class="space-y-0">
-    <div class="flex justify-end pb-4">
-      <button class="btn btn-primary btn-sm" :disabled="checkingUpdate" @click="checkForUpdate">
-        <Icon v-if="checkingUpdate" icon="mdi:loading" class="animate-spin mr-1 text-base" />
-        <Icon v-else icon="mdi:update" class="mr-1 text-base" />
-        {{ t("settings.update.check") }}
-      </button>
-    </div>
-
-    <div class="border-t border-base-200" />
-
     <div
       class="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-2 md:gap-4 items-center py-4 border-b border-base-200 last:border-b-0"
     >
       <label class="text-sm font-medium md:text-right">
         {{ t("settings.update.auto") }}
       </label>
-      <div class="flex items-center">
+      <div class="flex items-center justify-between">
         <input
           type="checkbox"
           class="toggle toggle-primary"
@@ -25,6 +15,11 @@
             handleSettingChange('update', 'autoUpdate', ($event.target as HTMLInputElement).checked)
           "
         />
+        <button class="btn btn-primary btn-sm" :disabled="checkingUpdate" @click="checkForUpdate">
+          <Icon v-if="checkingUpdate" icon="mdi:loading" class="animate-spin mr-1 text-base" />
+          <Icon v-else icon="mdi:update" class="mr-1 text-base" />
+          {{ t("settings.update.check") }}
+        </button>
       </div>
     </div>
 

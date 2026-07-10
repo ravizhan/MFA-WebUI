@@ -160,7 +160,14 @@
         "deviceAndResource": "设备与资源",
         "controller": "控制器",
         "deviceAddress": "设备地址",
-        "resource": "资源"
+        "resource": "资源",
+        "sections": {
+          "nav": "配置分区",
+          "basic": "基本信息",
+          "schedule": "执行计划",
+          "environment": "运行环境",
+          "content": "执行内容"
+        }
       },
       "rules": {
         "nameRequired": "请输入任务名称",
@@ -203,18 +210,23 @@
       "testError": "发送测试通知时发生错误",
       "browserUnsupported": "当前环境不支持浏览器通知",
       "browserPermissionDenied": "浏览器通知权限未授予，无法启用浏览器通知",
+      "sections": {
+        "channels": "通知渠道",
+        "external": "外部通知连接",
+        "triggers": "触发时机"
+      },
       "fields": {
-        "url": "url *",
-        "contentType": "content_type",
+        "url": "URL",
+        "contentType": "Content-Type",
         "json": "application/json",
         "formUrlencoded": "application/x-www-form-urlencoded",
-        "headers": "headers",
-        "method": "method",
+        "headers": "Headers",
+        "method": "Method",
         "post": "POST",
         "get": "GET",
-        "body": "body",
-        "username": "username",
-        "password": "password"
+        "body": "Body",
+        "username": "Username",
+        "password": "Password"
       }
     },
     "about": {
@@ -290,7 +302,7 @@
       "connected": "已连接",
       "disconnected": "未连接"
     },
-    "preview": {
+    "preview-fps": {
       "fps15": "15 FPS",
       "fps30": "30 FPS",
       "fps60": "60 FPS"

@@ -21,14 +21,14 @@
           @click.stop
           @change="handleToggle(item.id, getChecked($event))"
         />
-        <span class="flex-1 text-sm truncate select-none">{{
+        <span class="flex-1 text-base truncate select-none">{{
           resolveTaskLabel(item.id, item.name)
         }}</span>
         <button
           class="btn btn-ghost btn-xs btn-circle shrink-0 w-7 h-7 min-h-0"
           @click.stop="handleConfig(item.id)"
         >
-          <Icon icon="mdi:cog-outline" class="text-base" />
+          <Icon icon="mdi:cog-outline" class="text-lg" />
         </button>
       </div>
     </VueDraggable>

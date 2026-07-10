@@ -160,7 +160,14 @@
         "deviceAndResource": "Device & Resource",
         "controller": "Controller",
         "deviceAddress": "Device Address",
-        "resource": "Resource"
+        "resource": "Resource",
+        "sections": {
+          "nav": "Sections",
+          "basic": "Basic Info",
+          "schedule": "Schedule",
+          "environment": "Environment",
+          "content": "Tasks"
+        }
       },
       "rules": {
         "nameRequired": "Please enter task name",
@@ -203,18 +210,23 @@
       "testError": "Error sending test notification",
       "browserUnsupported": "Browser notifications are not supported in this environment",
       "browserPermissionDenied": "Browser notification permission was not granted",
+      "sections": {
+        "channels": "Channels",
+        "external": "External Webhook",
+        "triggers": "When to Notify"
+      },
       "fields": {
-        "url": "url *",
-        "contentType": "content_type",
+        "url": "URL",
+        "contentType": "Content-Type",
         "json": "application/json",
         "formUrlencoded": "application/x-www-form-urlencoded",
-        "headers": "headers",
-        "method": "method",
+        "headers": "Headers",
+        "method": "Method",
         "post": "POST",
         "get": "GET",
-        "body": "body",
-        "username": "username",
-        "password": "password"
+        "body": "Body",
+        "username": "Username",
+        "password": "Password"
       }
     },
     "about": {
@@ -290,7 +302,7 @@
       "connected": "Connected",
       "disconnected": "Disconnected"
     },
-    "preview": {
+    "preview-fps": {
       "fps15": "15 FPS",
       "fps30": "30 FPS",
       "fps60": "60 FPS"

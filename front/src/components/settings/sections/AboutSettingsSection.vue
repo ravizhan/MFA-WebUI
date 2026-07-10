@@ -4,12 +4,12 @@
       <table class="table table-sm">
         <tbody>
           <tr>
-            <td class="font-medium text-sm">{{ t("settings.about.version") }}</td>
-            <td class="text-sm">{{ settings.about.version || t("common.unknown") }}</td>
+            <td class="font-medium text-base">{{ t("settings.about.version") }}</td>
+            <td class="text-base">{{ settings.about.version || t("common.unknown") }}</td>
           </tr>
           <tr>
-            <td class="font-medium text-sm">{{ t("settings.about.author") }}</td>
-            <td class="text-sm">
+            <td class="font-medium text-base">{{ t("settings.about.author") }}</td>
+            <td class="text-base">
               <a
                 v-if="settings.about.author"
                 :href="`https://github.com/${settings.about.author}`"
@@ -23,12 +23,12 @@
             </td>
           </tr>
           <tr>
-            <td class="font-medium text-sm">{{ t("settings.about.license") }}</td>
-            <td class="text-sm">{{ settings.about.license || "MIT" }}</td>
+            <td class="font-medium text-base">{{ t("settings.about.license") }}</td>
+            <td class="text-base">{{ settings.about.license || "MIT" }}</td>
           </tr>
           <tr>
-            <td class="font-medium text-sm">{{ t("settings.about.homepage") }}</td>
-            <td class="text-sm">
+            <td class="font-medium text-base">{{ t("settings.about.homepage") }}</td>
+            <td class="text-base">
               <a
                 :href="settings.about.github || 'https://github.com/ravizhan/MWU'"
                 target="_blank"
@@ -40,8 +40,8 @@
             </td>
           </tr>
           <tr>
-            <td class="font-medium text-sm">{{ t("settings.about.issue") }}</td>
-            <td class="text-sm">
+            <td class="font-medium text-base">{{ t("settings.about.issue") }}</td>
+            <td class="text-base">
               <a
                 :href="settings.about.issueUrl || 'https://github.com/ravizhan/MWU/issues'"
                 target="_blank"
@@ -53,12 +53,12 @@
             </td>
           </tr>
           <tr v-if="settings.about.contact">
-            <td class="font-medium text-sm">{{ t("settings.about.contact") }}</td>
-            <td class="text-sm">{{ settings.about.contact }}</td>
+            <td class="font-medium text-base">{{ t("settings.about.contact") }}</td>
+            <td class="text-base">{{ settings.about.contact }}</td>
           </tr>
           <tr>
-            <td class="font-medium text-sm">{{ t("settings.about.description") }}</td>
-            <td class="text-sm">
+            <td class="font-medium text-base">{{ t("settings.about.description") }}</td>
+            <td class="text-base">
               {{ settings.about.description || t("settings.about.defaultDescription") }}
             </td>
           </tr>

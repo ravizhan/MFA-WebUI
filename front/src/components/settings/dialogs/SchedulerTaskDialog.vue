@@ -1,116 +1,172 @@
 <template>
-  <div class="modal" :class="{ 'modal-open': showDialog }" @click.self="handleCancel">
-    <div class="modal-box max-w-3xl max-h-[90vh] overflow-y-auto">
-      <h3 class="font-bold text-lg mb-4">
-        {{
-          isEditMode
-            ? t("settings.scheduler.dialog.editTitle")
-            : t("settings.scheduler.dialog.createTitle")
-        }}
-      </h3>
-
-      <div class="space-y-4">
-        <!-- Name -->
-        <div class="form-control">
-          <label class="label">
-            <span class="label-text">{{ t("settings.scheduler.dialog.taskName") }}</span>
-          </label>
-          <input
-            v-model="formData.name"
-            type="text"
-            class="input input-bordered"
-            :placeholder="t('settings.scheduler.dialog.taskNamePlaceholder')"
+  <dialog
+    ref="dialogRef"
+    class="modal modal-bottom sm:modal-middle"
+    aria-labelledby="scheduler-task-dialog-title"
+    @close="onNativeClose"
+  >
+    <div
+      class="modal-box flex h-[min(92dvh,720px)] w-full max-w-4xl flex-col p-0 sm:h-auto sm:max-h-[90vh]"
+    >
+      <!-- Header -->
+      <header
+        class="border-base-200 flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3 sm:px-5"
+      >
+        <div class="flex min-w-0 items-center gap-2">
+          <Icon
+            icon="mdi:calendar-clock"
+            class="text-primary shrink-0 text-xl"
+            aria-hidden="true"
           />
+          <h3 id="scheduler-task-dialog-title" class="truncate text-base font-semibold sm:text-lg">
+            {{
+              isEditMode
+                ? t("settings.scheduler.dialog.editTitle")
+                : t("settings.scheduler.dialog.createTitle")
+            }}
+          </h3>
         </div>
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm btn-square shrink-0"
+          :title="t('common.cancel')"
+          :aria-label="t('common.cancel')"
+          @click="handleCancel"
+        >
+          <Icon icon="mdi:close" class="text-lg" aria-hidden="true" />
+        </button>
+      </header>
 
-        <!-- Description -->
-        <div class="form-control">
-          <label class="label">
-            <span class="label-text">{{ t("settings.scheduler.dialog.taskDesc") }}</span>
-          </label>
-          <textarea
-            v-model="formData.description"
-            class="textarea textarea-bordered"
-            :placeholder="t('settings.scheduler.dialog.taskDescPlaceholder')"
-            rows="2"
-          />
-        </div>
+      <!-- Body: section nav + scrollable content -->
+      <div class="flex min-h-0 flex-1 flex-col md:flex-row">
+        <!-- Section navigation -->
+        <nav
+          class="border-base-200 flex shrink-0 gap-1 overflow-x-auto border-b p-2 md:w-44 md:flex-col md:overflow-y-auto md:overflow-x-hidden md:border-r md:border-b-0 md:p-3"
+          :aria-label="t('settings.scheduler.dialog.sections.nav')"
+        >
+          <button
+            v-for="section in sections"
+            :key="section.id"
+            type="button"
+            class="btn btn-sm h-auto min-h-0 shrink-0 justify-start gap-1 px-2 py-2 text-xs font-normal normal-case md:gap-2 md:px-3 md:text-sm"
+            :class="activeSection === section.id ? 'btn-primary' : 'btn-ghost text-base-content/80'"
+            :aria-current="activeSection === section.id ? 'page' : undefined"
+            @click="activeSection = section.id"
+          >
+            <Icon
+              :icon="section.icon"
+              class="hidden shrink-0 text-base md:block"
+              aria-hidden="true"
+            />
+            <span class="whitespace-nowrap">{{ section.label }}</span>
+          </button>
+        </nav>
 
-        <!-- Trigger Type -->
-        <div class="form-control">
-          <label class="label">
-            <span class="label-text">{{ t("settings.scheduler.dialog.triggerType") }}</span>
-          </label>
-          <div class="flex flex-wrap gap-2">
-            <label class="flex items-center gap-2 cursor-pointer">
-              <input
-                v-model="formData.trigger_type"
-                type="radio"
-                class="radio radio-primary"
-                value="cron"
-              />
-              <span class="text-sm">{{ t("settings.scheduler.dialog.cronExpression") }}</span>
-            </label>
-            <label class="flex items-center gap-2 cursor-pointer">
-              <input
-                v-model="formData.trigger_type"
-                type="radio"
-                class="radio radio-primary"
-                value="date"
-              />
-              <span class="text-sm">{{ t("settings.scheduler.dialog.specificTime") }}</span>
-            </label>
-            <label class="flex items-center gap-2 cursor-pointer">
-              <input
-                v-model="formData.trigger_type"
-                type="radio"
-                class="radio radio-primary"
-                value="interval"
-              />
-              <span class="text-sm">{{ t("settings.scheduler.dialog.intervalExecution") }}</span>
-            </label>
-          </div>
-        </div>
+        <!-- Scrollable content: flex+gap so section pieces space without extra wrappers -->
+        <div
+          class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain px-4 py-4 sm:px-5"
+        >
+          <!-- Basic info -->
+          <fieldset v-if="activeSection === 'basic'" class="fieldset p-0">
+            <legend class="fieldset-legend flex items-center gap-1.5">
+              <Icon icon="mdi:form-textbox" class="text-base opacity-70" aria-hidden="true" />
+              {{ t("settings.scheduler.dialog.taskName") }}
+            </legend>
+            <input
+              v-model="formData.name"
+              type="text"
+              class="input input-bordered w-full"
+              :placeholder="t('settings.scheduler.dialog.taskNamePlaceholder')"
+              autocomplete="off"
+            />
+          </fieldset>
 
-        <!-- Cron -->
-        <template v-if="formData.trigger_type === 'cron'">
-          <div class="form-control">
-            <label class="label">
-              <span class="label-text">{{ t("settings.scheduler.dialog.cronExpression") }}</span>
-            </label>
+          <fieldset v-if="activeSection === 'basic'" class="fieldset p-0">
+            <legend class="fieldset-legend flex items-center gap-1.5">
+              <Icon icon="mdi:text" class="text-base opacity-70" aria-hidden="true" />
+              {{ t("settings.scheduler.dialog.taskDesc") }}
+            </legend>
+            <textarea
+              v-model="formData.description"
+              class="textarea textarea-bordered w-full min-h-20"
+              :placeholder="t('settings.scheduler.dialog.taskDescPlaceholder')"
+              rows="3"
+            />
+          </fieldset>
+
+          <!-- Schedule: trigger type -->
+          <fieldset v-if="activeSection === 'schedule'" class="fieldset p-0">
+            <legend class="fieldset-legend flex items-center gap-1.5">
+              <Icon icon="mdi:lightning-bolt" class="text-base opacity-70" aria-hidden="true" />
+              {{ t("settings.scheduler.dialog.triggerType") }}
+            </legend>
+            <div class="flex flex-wrap gap-2">
+              <label
+                v-for="option in triggerOptions"
+                :key="option.value"
+                class="border-base-300 hover:border-primary/40 has-[:checked]:border-primary has-[:checked]:bg-primary/5 flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors"
+              >
+                <input
+                  v-model="formData.trigger_type"
+                  type="radio"
+                  class="radio radio-primary radio-sm"
+                  :value="option.value"
+                />
+                <Icon :icon="option.icon" class="text-base opacity-70" aria-hidden="true" />
+                <span class="text-sm">{{ option.label }}</span>
+              </label>
+            </div>
+          </fieldset>
+
+          <!-- Schedule: cron -->
+          <fieldset
+            v-if="activeSection === 'schedule' && formData.trigger_type === 'cron'"
+            class="fieldset p-0"
+          >
+            <legend class="fieldset-legend">
+              {{ t("settings.scheduler.dialog.cronExpression") }}
+            </legend>
             <input
               :value="cronConfig.cron"
               type="text"
-              class="input input-bordered"
+              class="input input-bordered w-full font-mono text-sm"
               :placeholder="t('settings.scheduler.dialog.cronPlaceholder')"
+              spellcheck="false"
               @input="updateTriggerConfig({ cron: getInputValue($event) })"
             />
-          </div>
-          <div class="flex flex-wrap gap-2">
-            <button class="btn btn-outline btn-xs" @click="setCronPreset('daily')">
+          </fieldset>
+          <div
+            v-if="activeSection === 'schedule' && formData.trigger_type === 'cron'"
+            class="flex flex-wrap gap-2"
+          >
+            <span class="text-base-content/50 self-center text-xs">
+              {{ t("settings.scheduler.dialog.quickSelect") }}
+            </span>
+            <button type="button" class="btn btn-outline btn-xs" @click="setCronPreset('daily')">
               {{ t("settings.scheduler.dialog.presets.daily") }}
             </button>
-            <button class="btn btn-outline btn-xs" @click="setCronPreset('daily9am')">
+            <button type="button" class="btn btn-outline btn-xs" @click="setCronPreset('daily9am')">
               {{ t("settings.scheduler.dialog.presets.daily9am") }}
             </button>
-            <button class="btn btn-outline btn-xs" @click="setCronPreset('weekly')">
+            <button type="button" class="btn btn-outline btn-xs" @click="setCronPreset('weekly')">
               {{ t("settings.scheduler.dialog.presets.weekly") }}
             </button>
-            <button class="btn btn-outline btn-xs" @click="setCronPreset('hourly')">
+            <button type="button" class="btn btn-outline btn-xs" @click="setCronPreset('hourly')">
               {{ t("settings.scheduler.dialog.presets.hourly") }}
             </button>
           </div>
-        </template>
 
-        <!-- Date -->
-        <template v-if="formData.trigger_type === 'date'">
-          <div class="form-control">
-            <label class="label">
-              <span class="label-text">{{ t("settings.scheduler.dialog.executionTime") }}</span>
-            </label>
+          <!-- Schedule: date -->
+          <fieldset
+            v-if="activeSection === 'schedule' && formData.trigger_type === 'date'"
+            class="fieldset p-0"
+          >
+            <legend class="fieldset-legend">
+              {{ t("settings.scheduler.dialog.executionTime") }}
+            </legend>
             <input
               type="datetime-local"
-              class="input input-bordered"
+              class="input input-bordered w-full max-w-xs"
               :value="dateConfigLocal"
               @input="
                 updateTriggerConfig({
@@ -118,260 +174,298 @@
                 })
               "
             />
-          </div>
-        </template>
+          </fieldset>
 
-        <!-- Interval -->
-        <template v-if="formData.trigger_type === 'interval'">
-          <div class="grid grid-cols-2 gap-3">
-            <div class="form-control">
-              <label class="label"
-                ><span class="label-text">{{ t("settings.scheduler.formatter.week") }}</span></label
-              >
-              <input
-                :value="intervalConfig.weeks"
-                type="number"
-                class="input input-bordered"
-                min="0"
-                @input="
-                  updateTriggerConfig({
-                    weeks: Number(getInputValue($event)) || 0,
-                  })
-                "
-              />
-            </div>
-            <div class="form-control">
-              <label class="label"
-                ><span class="label-text">{{ t("settings.scheduler.formatter.day") }}</span></label
-              >
-              <input
-                :value="intervalConfig.days"
-                type="number"
-                class="input input-bordered"
-                min="0"
-                @input="
-                  updateTriggerConfig({
-                    days: Number(getInputValue($event)) || 0,
-                  })
-                "
-              />
-            </div>
-            <div class="form-control">
-              <label class="label"
-                ><span class="label-text">{{ t("settings.scheduler.formatter.hour") }}</span></label
-              >
-              <input
-                :value="intervalConfig.hours"
-                type="number"
-                class="input input-bordered"
-                min="0"
-                @input="
-                  updateTriggerConfig({
-                    hours: Number(getInputValue($event)) || 0,
-                  })
-                "
-              />
-            </div>
-            <div class="form-control">
-              <label class="label"
-                ><span class="label-text">{{
+          <!-- Schedule: interval duration -->
+          <fieldset
+            v-if="activeSection === 'schedule' && formData.trigger_type === 'interval'"
+            class="fieldset p-0"
+          >
+            <legend class="fieldset-legend">
+              {{ t("settings.scheduler.dialog.intervalTime") }}
+            </legend>
+            <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <label class="flex flex-col gap-1">
+                <span class="text-xs opacity-60">{{ t("settings.scheduler.formatter.week") }}</span>
+                <input
+                  :value="intervalConfig.weeks"
+                  type="number"
+                  class="input input-bordered w-full"
+                  min="0"
+                  @input="
+                    updateTriggerConfig({
+                      weeks: Number(getInputValue($event)) || 0,
+                    })
+                  "
+                />
+              </label>
+              <label class="flex flex-col gap-1">
+                <span class="text-xs opacity-60">{{ t("settings.scheduler.formatter.day") }}</span>
+                <input
+                  :value="intervalConfig.days"
+                  type="number"
+                  class="input input-bordered w-full"
+                  min="0"
+                  @input="
+                    updateTriggerConfig({
+                      days: Number(getInputValue($event)) || 0,
+                    })
+                  "
+                />
+              </label>
+              <label class="flex flex-col gap-1">
+                <span class="text-xs opacity-60">{{ t("settings.scheduler.formatter.hour") }}</span>
+                <input
+                  :value="intervalConfig.hours"
+                  type="number"
+                  class="input input-bordered w-full"
+                  min="0"
+                  @input="
+                    updateTriggerConfig({
+                      hours: Number(getInputValue($event)) || 0,
+                    })
+                  "
+                />
+              </label>
+              <label class="flex flex-col gap-1">
+                <span class="text-xs opacity-60">{{
                   t("settings.scheduler.formatter.minute")
-                }}</span></label
-              >
-              <input
-                :value="intervalConfig.minutes"
-                type="number"
-                class="input input-bordered"
-                min="0"
-                @input="
-                  updateTriggerConfig({
-                    minutes: Number(getInputValue($event)) || 0,
-                  })
-                "
-              />
-            </div>
-            <div class="form-control col-span-2">
-              <label class="label"
-                ><span class="label-text">{{
+                }}</span>
+                <input
+                  :value="intervalConfig.minutes"
+                  type="number"
+                  class="input input-bordered w-full"
+                  min="0"
+                  @input="
+                    updateTriggerConfig({
+                      minutes: Number(getInputValue($event)) || 0,
+                    })
+                  "
+                />
+              </label>
+              <label class="flex flex-col gap-1 col-span-2 sm:col-span-1">
+                <span class="text-xs opacity-60">{{
                   t("settings.scheduler.formatter.second")
-                }}</span></label
-              >
+                }}</span>
+                <input
+                  :value="intervalConfig.seconds"
+                  type="number"
+                  class="input input-bordered w-full"
+                  min="0"
+                  @input="
+                    updateTriggerConfig({
+                      seconds: Number(getInputValue($event)) || 0,
+                    })
+                  "
+                />
+              </label>
+            </div>
+          </fieldset>
+
+          <!-- Schedule: interval start/end -->
+          <div
+            v-if="activeSection === 'schedule' && formData.trigger_type === 'interval'"
+            class="grid grid-cols-1 gap-3 sm:grid-cols-2"
+          >
+            <fieldset class="fieldset p-0">
+              <legend class="fieldset-legend">
+                {{ t("settings.scheduler.dialog.startTime") }}
+              </legend>
               <input
-                :value="intervalConfig.seconds"
-                type="number"
-                class="input input-bordered"
-                min="0"
+                type="datetime-local"
+                class="input input-bordered w-full"
+                :value="intervalStartLocal"
                 @input="
                   updateTriggerConfig({
-                    seconds: Number(getInputValue($event)) || 0,
+                    start_date: getInputValue($event)
+                      ? new Date(getInputValue($event)).toISOString()
+                      : undefined,
                   })
                 "
               />
+            </fieldset>
+            <fieldset class="fieldset p-0">
+              <legend class="fieldset-legend">
+                {{ t("settings.scheduler.dialog.endTime") }}
+              </legend>
+              <input
+                type="datetime-local"
+                class="input input-bordered w-full"
+                :value="intervalEndLocal"
+                @input="
+                  updateTriggerConfig({
+                    end_date: getInputValue($event)
+                      ? new Date(getInputValue($event)).toISOString()
+                      : undefined,
+                  })
+                "
+              />
+            </fieldset>
+          </div>
+
+          <!-- Environment -->
+          <fieldset v-if="activeSection === 'environment'" class="fieldset p-0">
+            <legend class="fieldset-legend flex items-center gap-1.5">
+              <Icon icon="mdi:gamepad-variant" class="text-base opacity-70" aria-hidden="true" />
+              {{ t("settings.scheduler.dialog.controller") }}
+            </legend>
+            <select
+              v-model="formData.controller_name"
+              class="select select-bordered w-full"
+              :disabled="loadingDevices"
+            >
+              <option value="">{{ t("panel.selectDeviceType") }}</option>
+              <option v-for="opt in deviceControllerOptions" :key="opt.value" :value="opt.value">
+                {{ opt.label }}
+              </option>
+            </select>
+          </fieldset>
+
+          <fieldset v-if="activeSection === 'environment'" class="fieldset p-0">
+            <legend class="fieldset-legend flex items-center gap-1.5">
+              <Icon icon="mdi:cellphone-link" class="text-base opacity-70" aria-hidden="true" />
+              {{ t("settings.scheduler.dialog.deviceAddress") }}
+            </legend>
+            <input
+              v-if="isPlayCover"
+              v-model="selectedDeviceAddress"
+              type="text"
+              class="input input-bordered w-full"
+              :placeholder="t('panel.playcoverAddress')"
+              :disabled="!formData.controller_name"
+            />
+            <select
+              v-else
+              v-model="selectedDeviceAddress"
+              class="select select-bordered w-full"
+              :disabled="!formData.controller_name || loadingDevices"
+            >
+              <option value="">{{ t("panel.selectDevice") }}</option>
+              <option v-for="opt in deviceAddressOptions" :key="opt.value" :value="opt.value">
+                {{ opt.label }}
+              </option>
+            </select>
+          </fieldset>
+
+          <fieldset v-if="activeSection === 'environment'" class="fieldset p-0">
+            <legend class="fieldset-legend flex items-center gap-1.5">
+              <Icon icon="mdi:folder-cog" class="text-base opacity-70" aria-hidden="true" />
+              {{ t("settings.scheduler.dialog.resource") }}
+            </legend>
+            <select
+              v-model="formData.resource_name"
+              class="select select-bordered w-full"
+              :disabled="!formData.controller_name || loadingResources"
+            >
+              <option value="">{{ t("panel.selectResource") }}</option>
+              <option v-for="opt in resourceOptions" :key="opt.value" :value="opt.value">
+                {{ opt.label }}
+              </option>
+            </select>
+          </fieldset>
+
+          <!-- Content: tasks -->
+          <div v-if="activeSection === 'content'" class="flex min-h-0 flex-col gap-3">
+            <div role="tablist" class="tabs tabs-box tabs-sm w-full flex-nowrap overflow-x-auto">
+              <button
+                type="button"
+                role="tab"
+                class="tab gap-1.5"
+                :class="{ 'tab-active': activeTab === 'pre-tasks' }"
+                :aria-selected="activeTab === 'pre-tasks'"
+                @click="activeTab = 'pre-tasks'"
+              >
+                <Icon icon="mdi:console" class="text-base" aria-hidden="true" />
+                <span class="whitespace-nowrap">{{
+                  t("settings.scheduler.dialog.tab.preTasks")
+                }}</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                class="tab gap-1.5"
+                :class="{ 'tab-active': activeTab === 'task-list' }"
+                :aria-selected="activeTab === 'task-list'"
+                @click="activeTab = 'task-list'"
+              >
+                <Icon icon="mdi:playlist-check" class="text-base" aria-hidden="true" />
+                <span class="whitespace-nowrap">{{
+                  t("settings.scheduler.dialog.tab.taskList")
+                }}</span>
+              </button>
+              <button
+                type="button"
+                role="tab"
+                class="tab gap-1.5"
+                :class="{ 'tab-active': activeTab === 'task-settings' }"
+                :aria-selected="activeTab === 'task-settings'"
+                @click="activeTab = 'task-settings'"
+              >
+                <Icon icon="mdi:tune" class="text-base" aria-hidden="true" />
+                <span class="whitespace-nowrap">{{
+                  t("settings.scheduler.dialog.tab.taskSettings")
+                }}</span>
+              </button>
             </div>
-          </div>
-          <div class="form-control">
-            <label class="label"
-              ><span class="label-text">{{ t("settings.scheduler.dialog.startTime") }}</span></label
-            >
-            <input
-              type="datetime-local"
-              class="input input-bordered"
-              :value="intervalStartLocal"
-              @input="
-                updateTriggerConfig({
-                  start_date: getInputValue($event)
-                    ? new Date(getInputValue($event)).toISOString()
-                    : undefined,
-                })
-              "
-            />
-          </div>
-          <div class="form-control">
-            <label class="label"
-              ><span class="label-text">{{ t("settings.scheduler.dialog.endTime") }}</span></label
-            >
-            <input
-              type="datetime-local"
-              class="input input-bordered"
-              :value="intervalEndLocal"
-              @input="
-                updateTriggerConfig({
-                  end_date: getInputValue($event)
-                    ? new Date(getInputValue($event)).toISOString()
-                    : undefined,
-                })
-              "
-            />
-          </div>
-        </template>
 
-        <div class="divider" />
-
-        <!-- Device & Resource -->
-        <div class="form-control">
-          <label class="label">
-            <span class="label-text">{{ t("settings.scheduler.dialog.controller") }}</span>
-          </label>
-          <select
-            v-model="formData.controller_name"
-            class="select select-bordered"
-            :disabled="loadingDevices"
-          >
-            <option value="">{{ t("panel.selectDeviceType") }}</option>
-            <option v-for="opt in deviceControllerOptions" :key="opt.value" :value="opt.value">
-              {{ opt.label }}
-            </option>
-          </select>
-        </div>
-
-        <div class="form-control">
-          <label class="label">
-            <span class="label-text">{{ t("settings.scheduler.dialog.deviceAddress") }}</span>
-          </label>
-          <input
-            v-if="isPlayCover"
-            v-model="selectedDeviceAddress"
-            type="text"
-            class="input input-bordered"
-            :placeholder="t('panel.playcoverAddress')"
-            :disabled="!formData.controller_name"
-          />
-          <select
-            v-else
-            v-model="selectedDeviceAddress"
-            class="select select-bordered"
-            :disabled="!formData.controller_name || loadingDevices"
-          >
-            <option value="">{{ t("panel.selectDevice") }}</option>
-            <option v-for="opt in deviceAddressOptions" :key="opt.value" :value="opt.value">
-              {{ opt.label }}
-            </option>
-          </select>
-        </div>
-
-        <div class="form-control">
-          <label class="label">
-            <span class="label-text">{{ t("settings.scheduler.dialog.resource") }}</span>
-          </label>
-          <select
-            v-model="formData.resource_name"
-            class="select select-bordered"
-            :disabled="!formData.controller_name || loadingResources"
-          >
-            <option value="">{{ t("panel.selectResource") }}</option>
-            <option v-for="opt in resourceOptions" :key="opt.value" :value="opt.value">
-              {{ opt.label }}
-            </option>
-          </select>
-        </div>
-
-        <!-- Tabs -->
-        <div class="tabs tabs-boxed mb-2">
-          <a
-            class="tab"
-            :class="{ 'tab-active': activeTab === 'pre-tasks' }"
-            @click="activeTab = 'pre-tasks'"
-          >
-            {{ t("settings.scheduler.dialog.tab.preTasks") }}
-          </a>
-          <a
-            class="tab"
-            :class="{ 'tab-active': activeTab === 'task-list' }"
-            @click="activeTab = 'task-list'"
-          >
-            {{ t("settings.scheduler.dialog.tab.taskList") }}
-          </a>
-          <a
-            class="tab"
-            :class="{ 'tab-active': activeTab === 'task-settings' }"
-            @click="activeTab = 'task-settings'"
-          >
-            {{ t("settings.scheduler.dialog.tab.taskSettings") }}
-          </a>
-        </div>
-
-        <div class="max-h-64 overflow-y-auto">
-          <div v-if="activeTab === 'pre-tasks'">
-            <PreTaskList v-model="formData.preTasks" embedded />
-          </div>
-          <div v-if="activeTab === 'task-list'">
-            <TaskSelectList
-              :tasks="taskListData"
-              :selected-tasks="formData.task_list"
-              :controller-name="formData.controller_name"
-              :resource-name="formData.resource_name"
-              :hide-incompatible="true"
-              @update:tasks="handleTasksUpdate"
-              @update:selected-tasks="handleSelectedTasksUpdate"
-              @config="openTaskSettings"
-            />
-          </div>
-          <div v-if="activeTab === 'task-settings'">
-            <TaskOptionPanel
-              :current-task-id="currentSettingTaskId"
-              :options="formData.task_options"
-              :show-header="true"
-              :header-label="t('settings.scheduler.dialog.currentSetting')"
-              :empty-text="t('settings.scheduler.dialog.selectTaskTip')"
-              :no-options-text="t('settings.scheduler.dialog.noOptions')"
-            />
+            <div class="min-h-48">
+              <div v-if="activeTab === 'pre-tasks'">
+                <PreTaskList v-model="formData.preTasks" embedded />
+              </div>
+              <div v-if="activeTab === 'task-list'">
+                <TaskSelectList
+                  :tasks="taskListData"
+                  :selected-tasks="formData.task_list"
+                  :controller-name="formData.controller_name"
+                  :resource-name="formData.resource_name"
+                  :hide-incompatible="true"
+                  @update:tasks="handleTasksUpdate"
+                  @update:selected-tasks="handleSelectedTasksUpdate"
+                  @config="openTaskSettings"
+                />
+              </div>
+              <div v-if="activeTab === 'task-settings'">
+                <TaskOptionPanel
+                  :current-task-id="currentSettingTaskId"
+                  :options="formData.task_options"
+                  :show-header="true"
+                  :header-label="t('settings.scheduler.dialog.currentSetting')"
+                  :empty-text="t('settings.scheduler.dialog.selectTaskTip')"
+                  :no-options-text="t('settings.scheduler.dialog.noOptions')"
+                />
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      <div class="modal-action">
-        <button class="btn btn-ghost" @click="handleCancel">{{ t("common.cancel") }}</button>
-        <button class="btn btn-primary" :disabled="loading" @click="handleSave">
-          <Icon v-if="loading" icon="mdi:loading" class="animate-spin mr-1 text-lg" />
+      <!-- Footer -->
+      <footer
+        class="border-base-200 flex shrink-0 items-center justify-end gap-2 border-t px-4 py-3 sm:px-5"
+      >
+        <button type="button" class="btn btn-ghost" @click="handleCancel">
+          {{ t("common.cancel") }}
+        </button>
+        <button type="button" class="btn btn-primary" :disabled="loading" @click="handleSave">
+          <Icon
+            v-if="loading"
+            icon="mdi:loading"
+            class="mr-1 animate-spin text-lg"
+            aria-hidden="true"
+          />
           {{ t("common.save") }}
         </button>
-      </div>
+      </footer>
     </div>
-  </div>
+
+    <form method="dialog" class="modal-backdrop">
+      <button type="submit">{{ t("common.cancel") }}</button>
+    </form>
+  </dialog>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, watch } from "vue"
+import { ref, computed, nextTick, watch, onMounted, useTemplateRef } from "vue"
 import { useI18n } from "vue-i18n"
 import { Icon } from "@iconify/vue"
 import {
@@ -411,6 +505,8 @@ interface Emits {
   (e: "saved"): void
 }
 
+type DialogSection = "basic" | "schedule" | "environment" | "content"
+
 const { show, task } = defineProps<Props>()
 const emit = defineEmits<Emits>()
 
@@ -420,8 +516,11 @@ const configStore = useTaskConfigStore()
 const interfaceStore = useInterfaceStore()
 const settingsStore = useSettingsStore()
 
+const dialogRef = useTemplateRef<HTMLDialogElement>("dialogRef")
 const loading = ref(false)
+const closingFromUi = ref(false)
 
+const activeSection = ref<DialogSection>("basic")
 const activeTab = ref<"task-list" | "task-settings" | "pre-tasks">("task-list")
 const currentSettingTaskId = ref<string | null>(null)
 const suppressFormInit = ref(false)
@@ -430,6 +529,47 @@ const availableDevices = ref<ConnectableDevice[]>([])
 const availableResources = ref<Array<{ name: string; label?: string; controller?: string[] }>>([])
 const loadingDevices = ref(false)
 const loadingResources = ref(false)
+
+const sections = computed(() => [
+  {
+    id: "basic" as const,
+    label: t("settings.scheduler.dialog.sections.basic"),
+    icon: "mdi:information-outline",
+  },
+  {
+    id: "schedule" as const,
+    label: t("settings.scheduler.dialog.sections.schedule"),
+    icon: "mdi:clock-outline",
+  },
+  {
+    id: "environment" as const,
+    label: t("settings.scheduler.dialog.sections.environment"),
+    icon: "mdi:devices",
+  },
+  {
+    id: "content" as const,
+    label: t("settings.scheduler.dialog.sections.content"),
+    icon: "mdi:playlist-check",
+  },
+])
+
+const triggerOptions = computed(() => [
+  {
+    value: "cron" as const,
+    label: t("settings.scheduler.dialog.cronExpression"),
+    icon: "mdi:code-braces",
+  },
+  {
+    value: "date" as const,
+    label: t("settings.scheduler.dialog.specificTime"),
+    icon: "mdi:calendar-month",
+  },
+  {
+    value: "interval" as const,
+    label: t("settings.scheduler.dialog.intervalExecution"),
+    icon: "mdi:timer-outline",
+  },
+])
 
 function isDeviceControllerType(type: string): type is DeviceControllerType {
   return type === "Adb" || type === "Win32" || type === "Gamepad" || type === "PlayCover"
@@ -565,6 +705,39 @@ const intervalEndLocal = computed(() => {
 const formData = ref<ScheduledTaskCreate>(initFormData(task))
 const taskListData = ref<TaskListItem[]>([])
 
+function syncDialogVisibility(open: boolean) {
+  const el = dialogRef.value
+  if (!el) {
+    return
+  }
+  if (open) {
+    if (!el.open) {
+      el.showModal()
+    }
+    return
+  }
+  if (el.open) {
+    el.close()
+  }
+}
+
+watch(
+  () => show,
+  async (open) => {
+    await nextTick()
+    syncDialogVisibility(open)
+    if (open) {
+      activeSection.value = "basic"
+    }
+  },
+)
+
+onMounted(() => {
+  if (show) {
+    syncDialogVisibility(true)
+  }
+})
+
 watch(
   () => formData.value.trigger_type,
   (newType) => {
@@ -654,6 +827,7 @@ function resetForm() {
   syncTaskListData(formData.value.task_list)
   currentSettingTaskId.value = null
   activeTab.value = "task-list"
+  activeSection.value = "basic"
 }
 
 function syncTaskListData(preferredOrder: string[]) {
@@ -816,6 +990,7 @@ function openTaskSettings(taskId: string) {
     )
   }
   currentSettingTaskId.value = taskId
+  activeSection.value = "content"
   activeTab.value = "task-settings"
 }
 
@@ -884,10 +1059,12 @@ function validateName(): boolean {
   const name = formData.value.name.trim()
   if (!name) {
     showGlobalMessage("error", t("settings.scheduler.rules.nameRequired"))
+    activeSection.value = "basic"
     return false
   }
   if (name.length > 100) {
     showGlobalMessage("error", t("settings.scheduler.rules.nameLength"))
+    activeSection.value = "basic"
     return false
   }
   return true
@@ -900,12 +1077,14 @@ function validateCron(): boolean {
   }
   if (!config.cron) {
     showGlobalMessage("error", t("settings.scheduler.rules.cronRequired"))
+    activeSection.value = "schedule"
     return false
   }
   const pattern =
     /^(\*|[0-9\-*,/]+)\s+(\*|[0-9\-*,/]+)\s+(\*|[0-9\-*,/]+)\s+(\*|[0-9\-*,/]+)\s+(\*|[0-9\-*,/]+)$/
   if (!pattern.test(config.cron)) {
     showGlobalMessage("error", t("settings.scheduler.rules.cronInvalid"))
+    activeSection.value = "schedule"
     return false
   }
   return true
@@ -918,10 +1097,12 @@ function validateDate(): boolean {
   }
   if (!config.run_date) {
     showGlobalMessage("error", t("settings.scheduler.rules.dateRequired"))
+    activeSection.value = "schedule"
     return false
   }
   if (new Date(config.run_date).getTime() < Date.now()) {
     showGlobalMessage("error", t("settings.scheduler.rules.dateInPast"))
+    activeSection.value = "schedule"
     return false
   }
   return true
@@ -944,6 +1125,7 @@ function validateInterval(): boolean {
     nonNegative(config.seconds)
   if (total <= 0) {
     showGlobalMessage("error", t("settings.scheduler.rules.intervalRequired"))
+    activeSection.value = "schedule"
     return false
   }
   if (config.start_date && config.end_date) {
@@ -951,6 +1133,7 @@ function validateInterval(): boolean {
     const endAt = new Date(config.end_date).getTime()
     if (endAt < startAt) {
       showGlobalMessage("error", t("settings.scheduler.rules.endBeforeStart"))
+      activeSection.value = "schedule"
       return false
     }
   }
@@ -960,6 +1143,8 @@ function validateInterval(): boolean {
 function validateTaskList(): boolean {
   if (formData.value.task_list.length === 0) {
     showGlobalMessage("error", t("settings.scheduler.rules.taskListRequired"))
+    activeSection.value = "content"
+    activeTab.value = "task-list"
     return false
   }
   return true
@@ -1010,13 +1195,27 @@ async function handleSave() {
       ? t("settings.scheduler.dialog.taskUpdated")
       : t("settings.scheduler.dialog.taskCreated"),
   )
+  closingFromUi.value = true
   showDialog.value = false
   emit("saved")
   resetForm()
 }
 
 function handleCancel() {
+  closingFromUi.value = true
   showDialog.value = false
+  resetForm()
+}
+
+function onNativeClose() {
+  if (closingFromUi.value) {
+    closingFromUi.value = false
+    return
+  }
+  // ESC / backdrop closed the dialog
+  if (show) {
+    emit("update:show", false)
+  }
   resetForm()
 }
 </script>

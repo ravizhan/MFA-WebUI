@@ -58,6 +58,7 @@ async function handleSettingChange<K extends EditableCategory, P extends keyof S
 function handleLocaleChange(val: string) {
   locale.value = val
   localStorage.setItem("locale", val)
+  window.location.reload()
 }
 
 function handleDarkModeChange(val: string) {
