@@ -250,6 +250,7 @@
     "resetConfig": "重置配置",
     "noDevice": "无可用设备",
     "noMatchingDevice": "无匹配设备",
+    "useCustomValue": "使用“{value}”",
     "recentDevices": "最近使用",
     "discoveredDevices": "已发现设备",
     "selectTask": "请至少选择一个任务",

@@ -7,6 +7,7 @@ vi.mock("@/services/api", () => ({
   getDevices: vi.fn<() => void>(),
   getResource: vi.fn<() => void>(),
   postDevices: vi.fn<() => void>(),
+  postCustomDevice: vi.fn<() => void>(),
   postResource: vi.fn<() => void>(),
   startTask: vi.fn<() => void>(),
   getSettings: vi.fn<() => void>(),
@@ -82,8 +83,28 @@ const adbDevice: ConnectableDevice = {
   name: "adb-device",
   adb_path: "/usr/bin/adb",
   address: "127.0.0.1:5555",
-  screencap_methods: "",
-  input_methods: "",
+  screencap_methods: 0,
+  input_methods: 0,
+  config: {},
+}
+
+const customAdbDevice: ConnectableDevice = {
+  type: "Adb",
+  name: "",
+  adb_path: "",
+  address: "192.168.1.10:5555",
+  screencap_methods: 0,
+  input_methods: 0,
+  config: {},
+}
+
+const scannedCustomAdbDevice: ConnectableDevice = {
+  type: "Adb",
+  name: "phone",
+  adb_path: "/usr/bin/adb",
+  address: "192.168.1.10:5555",
+  screencap_methods: 1,
+  input_methods: 1,
   config: {},
 }
 
@@ -348,6 +369,277 @@ describe("useDeviceConnectionStore", () => {
       expect(store.controllerCapabilities).toEqual([adbCapability])
       expect(store.availableDevices).toEqual([adbDevice])
       expect(store.loading).toBe(false)
+    })
+  })
+
+  describe("openDevices", () => {
+    it("refreshes devices for the selected non-PlayCover controller", async () => {
+      const store = useDeviceConnectionStore()
+      store.controllerCapabilities = [adbCapability]
+      store.selectedController = "ADB"
+      vi.mocked(api.getDevices).mockResolvedValue({
+        controllers: [adbCapability],
+        selected_controller: "adb",
+        devices: [adbDevice],
+      })
+      store.openDevices()
+      await vi.waitFor(() => {
+        expect(store.availableDevices).toEqual([adbDevice])
+      })
+      expect(api.getDevices).toHaveBeenCalledWith("adb")
+    })
+
+    it("is a no-op when locked", () => {
+      const store = useDeviceConnectionStore()
+      store.controllerCapabilities = [adbCapability]
+      store.selectedController = "ADB"
+      store.isDeviceResourceLocked = true
+      store.openDevices()
+      expect(api.getDevices).not.toHaveBeenCalled()
+    })
+
+    it("is a no-op for PlayCover", () => {
+      const store = useDeviceConnectionStore()
+      store.controllerCapabilities = [playCoverCapability]
+      store.selectedController = "PlayCover"
+      store.openDevices()
+      expect(api.getDevices).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("createCustomDevice", () => {
+    it("saves trimmed address, refreshes, and selects richer scanned device", async () => {
+      const store = useDeviceConnectionStore()
+      store.controllerCapabilities = [adbCapability]
+      store.selectedController = "ADB"
+      vi.mocked(api.postCustomDevice).mockResolvedValue({
+        success: true,
+        message: "ok",
+        data: customAdbDevice,
+      })
+      vi.mocked(api.getDevices).mockResolvedValue({
+        controllers: [adbCapability],
+        selected_controller: "adb",
+        devices: [scannedCustomAdbDevice],
+      })
+
+      await store.createCustomDevice("  192.168.1.10:5555  ")
+
+      expect(api.postCustomDevice).toHaveBeenCalledWith({
+        controller_name: "adb",
+        type: "Adb",
+        address: "192.168.1.10:5555",
+      })
+      expect(api.getDevices).toHaveBeenCalledWith("adb")
+      expect(store.availableDevices).toEqual([scannedCustomAdbDevice])
+      expect(store.selectedDeviceKey).toBe("adb|/usr/bin/adb|192.168.1.10:5555")
+    })
+
+    it("reports error and does not append client fallback when refresh omits device", async () => {
+      const store = useDeviceConnectionStore()
+      store.controllerCapabilities = [adbCapability]
+      store.selectedController = "ADB"
+      store.selectedDeviceKey = "adb|/usr/bin/adb|127.0.0.1:5555"
+      store.availableDevices = [adbDevice]
+      vi.mocked(api.postCustomDevice).mockResolvedValue({
+        success: true,
+        message: "ok",
+        data: customAdbDevice,
+      })
+      vi.mocked(api.getDevices).mockResolvedValue({
+        controllers: [adbCapability],
+        selected_controller: "adb",
+        devices: [adbDevice],
+      })
+
+      await store.createCustomDevice("192.168.1.10:5555")
+
+      expect(store.availableDevices).toEqual([adbDevice])
+      expect(store.availableDevices).not.toContainEqual(customAdbDevice)
+      expect(showGlobalMessage).toHaveBeenCalledWith(
+        "error",
+        "自定义设备已保存，但刷新列表后未找到该设备",
+      )
+    })
+
+    it("preserves previous selection and shows error when save fails", async () => {
+      const store = useDeviceConnectionStore()
+      store.controllerCapabilities = [adbCapability]
+      store.selectedController = "ADB"
+      store.selectedDeviceKey = "adb|/usr/bin/adb|127.0.0.1:5555"
+      store.availableDevices = [adbDevice]
+      vi.mocked(api.postCustomDevice).mockResolvedValue({
+        success: false,
+        message: "save failed",
+      })
+
+      await store.createCustomDevice("192.168.1.10:5555")
+
+      expect(showGlobalMessage).toHaveBeenCalledWith("error", "save failed")
+      expect(api.getDevices).not.toHaveBeenCalled()
+      expect(store.selectedDeviceKey).toBe("adb|/usr/bin/adb|127.0.0.1:5555")
+    })
+
+    it("does not reselect when controller changes after POST", async () => {
+      const store = useDeviceConnectionStore()
+      store.controllerCapabilities = [adbCapability, playCoverCapability]
+      store.selectedController = "ADB"
+      let resolvePost: (value: {
+        success: boolean
+        message: string
+        data?: ConnectableDevice
+      }) => void
+      const postPromise = new Promise<{
+        success: boolean
+        message: string
+        data?: ConnectableDevice
+      }>((r) => {
+        resolvePost = r
+      })
+      vi.mocked(api.postCustomDevice).mockImplementationOnce(() => postPromise)
+
+      const createPromise = store.createCustomDevice("192.168.1.10:5555")
+      store.selectedController = "PlayCover"
+      resolvePost!({ success: true, message: "ok", data: customAdbDevice })
+      await createPromise
+
+      expect(api.getDevices).not.toHaveBeenCalled()
+      expect(store.selectedController).toBe("PlayCover")
+    })
+
+    it("does not reselect when a newer fetchDevices wins race after create", async () => {
+      const store = useDeviceConnectionStore()
+      store.controllerCapabilities = [adbCapability]
+      store.selectedController = "ADB"
+
+      let resolvePost: (value: {
+        success: boolean
+        message: string
+        data?: ConnectableDevice
+      }) => void
+      const postPromise = new Promise<{
+        success: boolean
+        message: string
+        data?: ConnectableDevice
+      }>((r) => {
+        resolvePost = r
+      })
+      vi.mocked(api.postCustomDevice).mockImplementationOnce(() => postPromise)
+
+      let resolveCreateFetch: (value: DeviceSearchData) => void
+      let resolveNewerFetch: (value: DeviceSearchData) => void
+      const createFetch = new Promise<DeviceSearchData>((r) => {
+        resolveCreateFetch = r
+      })
+      const newerFetch = new Promise<DeviceSearchData>((r) => {
+        resolveNewerFetch = r
+      })
+      vi.mocked(api.getDevices)
+        .mockImplementationOnce(() => createFetch)
+        .mockImplementationOnce(() => newerFetch)
+
+      const createPromise = store.createCustomDevice("192.168.1.10:5555")
+      resolvePost!({ success: true, message: "ok", data: customAdbDevice })
+      // Let createCustomDevice enter its fetchDevices
+      await Promise.resolve()
+      await Promise.resolve()
+
+      const newerPromise = store.fetchDevices("adb")
+      resolveNewerFetch!({
+        controllers: [adbCapability],
+        selected_controller: "adb",
+        devices: [adbDevice],
+      })
+      await newerPromise
+      resolveCreateFetch!({
+        controllers: [adbCapability],
+        selected_controller: "adb",
+        devices: [scannedCustomAdbDevice],
+      })
+      await createPromise
+
+      // Newer fetch wins; create must not reselect stale custom device
+      expect(store.availableDevices).toEqual([adbDevice])
+      expect(store.selectedDeviceKey).not.toBe("adb|/usr/bin/adb|192.168.1.10:5555")
+    })
+
+    it("ignores empty address and locked state", async () => {
+      const store = useDeviceConnectionStore()
+      store.controllerCapabilities = [adbCapability]
+      store.selectedController = "ADB"
+
+      await store.createCustomDevice("   ")
+      expect(api.postCustomDevice).not.toHaveBeenCalled()
+
+      store.isDeviceResourceLocked = true
+      await store.createCustomDevice("192.168.1.10:5555")
+      expect(api.postCustomDevice).not.toHaveBeenCalled()
+    })
+  })
+
+  describe("selectedDevice rebind", () => {
+    it("rebinds by identity when fingerprint changes after refresh", async () => {
+      const store = useDeviceConnectionStore()
+      store.controllerCapabilities = [adbCapability]
+      store.selectedController = "ADB"
+      store.availableDevices = [customAdbDevice]
+      store.selectedDeviceKey = "adb||192.168.1.10:5555"
+
+      vi.mocked(api.getDevices).mockResolvedValue({
+        controllers: [adbCapability],
+        selected_controller: "adb",
+        devices: [scannedCustomAdbDevice],
+      })
+      await store.fetchDevices("adb")
+
+      expect(store.selectedDeviceKey).toBe("adb|/usr/bin/adb|192.168.1.10:5555")
+      expect(store.selectedDevice).toEqual(scannedCustomAdbDevice)
+    })
+
+    it("clears selection when refreshed list removes the device", async () => {
+      const store = useDeviceConnectionStore()
+      store.controllerCapabilities = [adbCapability]
+      store.selectedController = "ADB"
+      store.availableDevices = [adbDevice]
+      store.selectedDeviceKey = "adb|/usr/bin/adb|127.0.0.1:5555"
+
+      vi.mocked(api.getDevices).mockResolvedValue({
+        controllers: [adbCapability],
+        selected_controller: "adb",
+        devices: [customAdbDevice],
+      })
+      await store.fetchDevices("adb")
+
+      expect(store.selectedDeviceKey).toBeNull()
+      expect(store.selectedDevice).toBeNull()
+    })
+
+    it("never treats fingerprint keys as addresses", () => {
+      const store = useDeviceConnectionStore()
+      store.controllerCapabilities = [adbCapability]
+      store.selectedController = "ADB"
+      store.availableDevices = [adbDevice]
+      // Stale fingerprint not in list — must not synthesize device from key
+      store.selectedDeviceKey = "adb|/missing/path|127.0.0.1:5555"
+      expect(store.selectedDevice).toBeNull()
+    })
+  })
+
+  describe("deviceOptions", () => {
+    it("maps availableDevices only without recent/discovered groups", () => {
+      const store = useDeviceConnectionStore()
+      store.availableDevices = [adbDevice, customAdbDevice]
+      expect(store.deviceOptions).toEqual([
+        { label: "adb-device(127.0.0.1:5555)", value: "adb|/usr/bin/adb|127.0.0.1:5555" },
+        { label: "192.168.1.10:5555", value: "adb||192.168.1.10:5555" },
+      ])
+    })
+
+    it("returns disabled placeholder when empty", () => {
+      const store = useDeviceConnectionStore()
+      expect(store.deviceOptions).toEqual([
+        { label: "panel.noDevice", value: "none-device", disabled: true },
+      ])
     })
   })
 

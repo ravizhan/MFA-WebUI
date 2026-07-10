@@ -6,12 +6,12 @@ import {
   getDeviceState,
   getDevices,
   getResource,
+  postCustomDevice,
   postDevices,
   postResource,
   startTask,
   type ConnectableDevice,
   type DeviceControllerCapability,
-  type DeviceControllerType,
   type PostDeviceResult,
   type PostResourceResult,
 } from "@/services/api"
@@ -25,11 +25,15 @@ import type { PanelLastConnectedDevice } from "@/types/settingsModel"
 import {
   buildDeviceFingerprint,
   buildDeviceLabel,
+  findDeviceByIdentityOrFingerprint,
+  getDeviceIdentity,
   getPlayCoverDefaultAddress,
   getStoredDeviceFingerprint,
+  getStoredDeviceIdentity,
   isAdbDevice,
   isGamepadDevice,
   isWin32Device,
+  storedDeviceMatchesController,
 } from "@/utils/panel/device"
 
 let watcherStopHandles: (() => void)[] = []
@@ -97,90 +101,43 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
       return this.selectedControllerCapability?.name || null
     },
 
-    deviceOptions(): Array<{
-      label: string
-      value?: string
-      type?: string
-      key?: string
-      disabled?: boolean
-      children?: Array<{ label: string; value: string }>
-    }> {
+    // Backend owns scan+custom merge; Home options are flat availableDevices only.
+    // recentDevices remain in settings for scheduler/other consumers.
+    deviceOptions(): Array<{ label: string; value: string; disabled?: boolean }> {
       const { t } = useI18n()
-      const capability = this.selectedControllerCapability
-      const settingsStore = useSettingsStore()
-
-      const discoveredOptions = this.availableDevices.map((item) => ({
+      if (this.availableDevices.length === 0) {
+        return [{ label: t("panel.noDevice"), value: "none-device", disabled: true }]
+      }
+      return this.availableDevices.map((item) => ({
         label: buildDeviceLabel(item),
         value: buildDeviceFingerprint(item),
       }))
-
-      const recentDevices = settingsStore.settings.panel.recentDevices ?? []
-      const discoveredFingerprints = new Set(discoveredOptions.map((item) => item.value))
-      const recentOptions = recentDevices
-        .filter(
-          (item) => item.type === capability?.type && !discoveredFingerprints.has(item.fingerprint),
-        )
-        .map((item) => ({
-          label: buildStoredDeviceLabel(item),
-          value: item.fingerprint,
-        }))
-
-      const options: Array<{
-        label: string
-        value?: string
-        type?: string
-        key?: string
-        disabled?: boolean
-        children?: Array<{ label: string; value: string }>
-      }> = []
-
-      if (recentOptions.length > 0) {
-        options.push({
-          type: "group",
-          label: t("panel.recentDevices"),
-          key: "recent-devices",
-          children: recentOptions,
-        })
-      }
-      if (discoveredOptions.length > 0) {
-        options.push({
-          type: "group",
-          label: t("panel.discoveredDevices"),
-          key: "discovered-devices",
-          children: discoveredOptions,
-        })
-      }
-      if (options.length === 0) {
-        return [{ label: t("panel.noDevice"), value: "none-device", disabled: true }]
-      }
-      return options
     },
 
     selectedDevice(): ConnectableDevice | null {
       if (!this.selectedDeviceKey) {
         return null
       }
-      const settingsStore = useSettingsStore()
 
-      const discovered = this.availableDevices.find(
+      const byFingerprint = this.availableDevices.find(
         (item) => buildDeviceFingerprint(item) === this.selectedDeviceKey,
       )
-      if (discovered) {
-        return discovered
+      if (byFingerprint) {
+        return byFingerprint
       }
 
-      const recent = (settingsStore.settings.panel.recentDevices ?? []).find(
-        (item) => item.fingerprint === this.selectedDeviceKey,
-      )
-      if (recent) {
-        return buildConnectableDeviceFromStored(recent)
+      // Identity match only when selectedDeviceKey is a pure identity (not a fingerprint).
+      // Fingerprints contain "|"; never treat them as addresses.
+      if (!this.selectedDeviceKey.includes("|")) {
+        const byIdentity = this.availableDevices.find(
+          (item) => getDeviceIdentity(item) === this.selectedDeviceKey,
+        )
+        if (byIdentity) {
+          return byIdentity
+        }
       }
 
-      const capability = this.selectedControllerCapability
-      if (!capability) {
-        return null
-      }
-      return buildDeviceFromAddress(this.selectedDeviceKey, capability.type)
+      return null
     },
 
     currentSelectionFingerprint(): string {
@@ -200,11 +157,7 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
       if (!indexStore.Connected || !savedDevice || !selectedCapability) {
         return false
       }
-      if (savedDevice.controller_name) {
-        if (savedDevice.controller_name !== selectedCapability.name) {
-          return false
-        }
-      } else if (savedDevice.type !== selectedCapability.type) {
+      if (!storedDeviceMatchesController(savedDevice, selectedCapability)) {
         return false
       }
       return getStoredDeviceFingerprint(savedDevice) === this.currentSelectionFingerprint
@@ -258,11 +211,7 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
       if (!savedDevice || !selectedCapability) {
         return
       }
-      if (savedDevice.controller_name) {
-        if (savedDevice.controller_name !== selectedCapability.name) {
-          return
-        }
-      } else if (savedDevice.type !== selectedCapability.type) {
+      if (!storedDeviceMatchesController(savedDevice, selectedCapability)) {
         return
       }
 
@@ -272,11 +221,25 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
         return
       }
 
+      this.selectRestoredDevice(savedDevice)
+    },
+
+    /** Fingerprint match first; identity fallback when scan returns a richer device. */
+    selectRestoredDevice(savedDevice: PanelLastConnectedDevice) {
       const targetFingerprint = getStoredDeviceFingerprint(savedDevice)
       const matchedDevice = this.availableDevices.find(
         (item) => buildDeviceFingerprint(item) === targetFingerprint,
       )
-      this.selectedDeviceKey = matchedDevice ? buildDeviceFingerprint(matchedDevice) : null
+      if (matchedDevice) {
+        this.selectedDeviceKey = buildDeviceFingerprint(matchedDevice)
+        return
+      }
+
+      const targetIdentity = getStoredDeviceIdentity(savedDevice)
+      const byIdentity = this.availableDevices.find(
+        (item) => getDeviceIdentity(item) === targetIdentity,
+      )
+      this.selectedDeviceKey = byIdentity ? buildDeviceFingerprint(byIdentity) : null
     },
 
     applyDeviceRuntimeState(state: Awaited<ReturnType<typeof getDeviceState>>) {
@@ -335,10 +298,49 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
         return
       }
 
+      const previousKey = this.selectedDeviceKey
+      const previousDevice = previousKey
+        ? this.availableDevices.find((item) => buildDeviceFingerprint(item) === previousKey)
+        : null
+      const previousIdentity = previousDevice ? getDeviceIdentity(previousDevice) : null
+
       this.availableDevices = data.devices
       if (restoreStored) {
         this.restoreLastConnectedDevice()
+        return
       }
+      this.rebindSelectedDeviceKey(previousKey, previousIdentity)
+    },
+
+    /**
+     * After availableDevices is replaced, keep selection if fingerprint still exists;
+     * otherwise rebind by semantic identity; otherwise clear (never treat fingerprints as addresses).
+     */
+    rebindSelectedDeviceKey(previousKey: string | null, previousIdentity: string | null) {
+      if (!previousKey) {
+        this.selectedDeviceKey = null
+        return
+      }
+
+      const byFingerprint = this.availableDevices.find(
+        (item) => buildDeviceFingerprint(item) === previousKey,
+      )
+      if (byFingerprint) {
+        this.selectedDeviceKey = buildDeviceFingerprint(byFingerprint)
+        return
+      }
+
+      if (previousIdentity) {
+        const byIdentity = this.availableDevices.find(
+          (item) => getDeviceIdentity(item) === previousIdentity,
+        )
+        if (byIdentity) {
+          this.selectedDeviceKey = buildDeviceFingerprint(byIdentity)
+          return
+        }
+      }
+
+      this.selectedDeviceKey = null
     },
 
     resetDeviceLoading(requestId: number) {
@@ -354,7 +356,7 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
       const [data] = await tryCatch(() => getDevices(controllerName))
       if (!data || requestId !== this._fetchDevicesRequestId) {
         this.resetDeviceLoading(requestId)
-        return
+        return false
       }
 
       const selectedCapability = this.applyControllerData(data)
@@ -362,11 +364,12 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
         this.availableDevices = []
         this.selectedDeviceKey = null
         this.resetDeviceLoading(requestId)
-        return
+        return true
       }
 
       this.applyDeviceData(selectedCapability, data, restoreStored)
       this.resetDeviceLoading(requestId)
+      return true
     },
 
     handleControllerChange() {
@@ -388,7 +391,7 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
       void this.getResourceList()
     },
 
-    refreshDevices() {
+    openDevices() {
       if (
         this.isDeviceResourceLocked ||
         !this.selectedControllerCapability ||
@@ -397,6 +400,82 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
         return
       }
       void this.fetchDevices(this.selectedControllerCapability.name)
+    },
+
+    isStillOnController(controllerName: string, displayLabel: string): boolean {
+      return (
+        this.selectedControllerCapability?.name === controllerName ||
+        this.selectedController === displayLabel
+      )
+    },
+
+    handleCustomDeviceSaveFailure(previousKey: string | null, message?: string) {
+      // Preserve previous selection on save failure
+      this.selectedDeviceKey = previousKey
+      showGlobalMessage("error", message || "保存自定义设备失败")
+    },
+
+    async selectPersistedCustomDevice(
+      persisted: ConnectableDevice,
+      controllerName: string,
+      displayLabel: string,
+    ) {
+      const applied = await this.fetchDevices(controllerName)
+      // Stale GET discarded by request-id — do not reselect on old controller
+      if (!applied) {
+        return
+      }
+      if (!this.isStillOnController(controllerName, displayLabel)) {
+        return
+      }
+
+      const matched = findDeviceByIdentityOrFingerprint(this.availableDevices, persisted)
+      if (matched) {
+        this.selectedDeviceKey = buildDeviceFingerprint(matched)
+        return
+      }
+
+      // Do not append client-only fallback — backend list is source of truth
+      showGlobalMessage("error", "自定义设备已保存，但刷新列表后未找到该设备")
+    },
+
+    async createCustomDevice(rawAddress: string) {
+      if (this.isDeviceResourceLocked) {
+        return
+      }
+      const capability = this.selectedControllerCapability
+      if (!capability || capability.type === "PlayCover") {
+        return
+      }
+
+      const address = rawAddress.trim()
+      if (!address) {
+        return
+      }
+
+      const controllerName = capability.name
+      const displayLabel = capability.display_label
+      const previousKey = this.selectedDeviceKey
+
+      const [result] = await tryCatch(() =>
+        postCustomDevice({
+          controller_name: controllerName,
+          type: capability.type,
+          address,
+        }),
+      )
+
+      // Still on the same controller after POST? (user may have switched meanwhile)
+      if (!this.isStillOnController(controllerName, displayLabel)) {
+        return
+      }
+
+      if (!result?.success || !result.data) {
+        this.handleCustomDeviceSaveFailure(previousKey, result?.message)
+        return
+      }
+
+      await this.selectPersistedCustomDevice(result.data, controllerName, displayLabel)
     },
 
     buildPlayCoverDevice(): { device: ConnectableDevice } | { error: string } {
@@ -480,9 +559,13 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
       this.resourcesList = []
       this.loading = true
 
-      const [resourceData] = await tryCatch(() =>
-        getResource(this.selectedControllerCapability!.type),
-      )
+      const capability = this.selectedControllerCapability
+      if (!capability) {
+        this.resetResourceLoading(requestId)
+        return
+      }
+
+      const [resourceData] = await tryCatch(() => getResource(capability.type))
       if (!resourceData || requestId !== this._fetchResourcesRequestId) {
         this.resetResourceLoading(requestId)
         return
@@ -676,7 +759,7 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
   },
 })
 
-// --- Helper functions used by the store (replicated from PanelControlColumn) ---
+// --- Helper functions used by the store ---
 
 function buildStoredLastConnectedDevice(
   deviceInfo: ConnectableDevice,
@@ -736,100 +819,4 @@ function buildStoredLastConnectedDevice(
     gamepad_type: 0,
     uuid: deviceInfo.uuid || "",
   }
-}
-
-function buildStoredDeviceLabel(stored: PanelLastConnectedDevice): string {
-  if (stored.type === "Adb") {
-    return `${stored.address} (${stored.adb_path})`
-  }
-  if (stored.type === "Win32" || stored.type === "Gamepad") {
-    return `${stored.window_name || stored.class_name} (${stored.class_name || stored.address})`
-  }
-  return stored.address
-}
-
-function buildConnectableDeviceFromStored(stored: PanelLastConnectedDevice): ConnectableDevice {
-  if (stored.type === "Adb") {
-    return {
-      type: "Adb",
-      name: stored.controller_name || stored.address,
-      adb_path: stored.adb_path,
-      address: stored.address,
-      screencap_methods: "",
-      input_methods: "",
-      config: {},
-    }
-  }
-  if (stored.type === "Win32") {
-    return {
-      type: "Win32",
-      hWnd: stored.hWnd,
-      class_name: stored.class_name,
-      window_name: stored.window_name,
-      screencap_methods: 0,
-      input_methods: 0,
-    }
-  }
-  if (stored.type === "Gamepad") {
-    return {
-      type: "Gamepad",
-      hWnd: stored.hWnd,
-      class_name: stored.class_name,
-      window_name: stored.window_name,
-      screencap_methods: 0,
-      gamepad_type: stored.gamepad_type,
-    }
-  }
-  return {
-    type: "PlayCover",
-    address: stored.address,
-    uuid: stored.uuid,
-  }
-}
-
-function buildDeviceFromAddress(
-  address: string,
-  type: DeviceControllerType,
-): ConnectableDevice | null {
-  if (type === "Adb") {
-    return {
-      type: "Adb",
-      name: address,
-      adb_path: "",
-      address,
-      screencap_methods: "",
-      input_methods: "",
-      config: {},
-    }
-  }
-  if (type === "Win32") {
-    const hWnd = Number.parseInt(address, 10)
-    if (Number.isNaN(hWnd)) {
-      return null
-    }
-    return {
-      type: "Win32",
-      hWnd,
-      class_name: "",
-      window_name: "",
-      screencap_methods: 0,
-      input_methods: 0,
-    }
-  }
-  if (type === "Gamepad") {
-    const parts = address.split("|")
-    const hWnd = Number.parseInt(parts[0] ?? "", 10)
-    if (Number.isNaN(hWnd)) {
-      return null
-    }
-    return {
-      type: "Gamepad",
-      hWnd,
-      class_name: "",
-      window_name: "",
-      screencap_methods: 0,
-      gamepad_type: Number.parseInt(parts[1] ?? "0", 10) || 0,
-    }
-  }
-  return null
 }

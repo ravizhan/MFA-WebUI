@@ -75,7 +75,8 @@
               @update:play-cover-address="deviceStore.playCoverAddress = $event"
               @update:resource="deviceStore.resource = $event"
               @controller-change="deviceStore.handleControllerChange()"
-              @refresh-devices="deviceStore.refreshDevices()"
+              @open-devices="deviceStore.openDevices()"
+              @create-device="deviceStore.createCustomDevice($event)"
             />
           </div>
         </div>
@@ -102,12 +103,7 @@
               :is-play-cover="deviceStore.selectedControllerCapability?.type === 'PlayCover'"
               :resource="deviceStore.resource"
               :resources-list="deviceStore.resourcesList"
-              @update:selected-controller="deviceStore.selectedController = $event"
-              @update:selected-device-key="deviceStore.selectedDeviceKey = $event"
-              @update:play-cover-address="deviceStore.playCoverAddress = $event"
               @update:resource="deviceStore.resource = $event"
-              @controller-change="deviceStore.handleControllerChange()"
-              @refresh-devices="deviceStore.refreshDevices()"
             />
           </div>
         </div>

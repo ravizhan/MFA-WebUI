@@ -19,7 +19,7 @@ from pydantic import BaseModel
 import json_utils as json
 from app_state import AppState, LogBroadcaster, normalize_event
 from maa_utils import MaaWorker
-from models.api import DeviceModel
+from models.api import CustomDeviceCreate, DeviceModel
 from models.interface_loader import (
     InterfaceLoadError,
     load_interface_model,
@@ -287,6 +287,19 @@ async def connect_device(device: DeviceModel):
         return {"status": "success"}
     msg = app_state.worker.device_state.last_device_error or "设备连接失败"
     return {"status": "failed", "message": msg}
+
+
+@app.post("/api/device/custom")
+def add_custom_device(payload: CustomDeviceCreate):
+    if app_state.worker is None:
+        return {"status": "failed", "message": "Worker未初始化"}
+    try:
+        device = app_state.worker.device.add_custom_device(payload)
+        return {"status": "success", "data": device}
+    except ValueError as e:
+        return {"status": "failed", "message": str(e)}
+    except OSError as e:
+        return {"status": "failed", "message": f"保存自定义设备失败: {e}"}
 
 
 @app.get("/api/device/state")

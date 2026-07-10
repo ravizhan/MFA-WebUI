@@ -250,6 +250,7 @@
     "resetConfig": "Reset Config",
     "noDevice": "No available device",
     "noMatchingDevice": "No matching device",
+    "useCustomValue": "Use \"{value}\"",
     "recentDevices": "Recent",
     "discoveredDevices": "Discovered",
     "selectTask": "Please select at least one task",

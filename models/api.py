@@ -1,5 +1,6 @@
 from typing import Any, Literal
-from pydantic import BaseModel, Field
+
+from pydantic import BaseModel, Field, field_validator
 
 RealtimeEventName = Literal[
     "log",
@@ -17,9 +18,11 @@ RealtimeEventName = Literal[
 ]
 RealtimeEventLevel = Literal["info", "success", "error"]
 
+DeviceType = Literal["Adb", "Win32", "Gamepad", "PlayCover"]
+
 
 class DeviceModel(BaseModel):
-    type: Literal["Adb", "Win32", "Gamepad", "PlayCover"]
+    type: DeviceType
     controller_name: str = ""
     name: str = ""
     adb_path: str = ""
@@ -30,6 +33,24 @@ class DeviceModel(BaseModel):
     gamepad_type: int = 0
     uuid: str = ""
     config: dict = {}
+
+
+class CustomDeviceCreate(BaseModel):
+    """User-entered device address to persist and merge with scan results."""
+
+    controller_name: str = Field(..., description="interface.json controller name")
+    type: DeviceType
+    address: str = Field(..., description="Device address (format depends on type)")
+
+    @field_validator("controller_name", "address", mode="before")
+    @classmethod
+    def strip_and_require(cls, value: Any) -> str:
+        if value is None:
+            raise ValueError("must not be empty")
+        text = str(value).strip()
+        if not text:
+            raise ValueError("must not be empty")
+        return text
 
 
 class RealtimeEvent(BaseModel):

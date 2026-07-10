@@ -3,7 +3,9 @@ from __future__ import annotations
 import os
 import re
 import sys
+import threading
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from maa.controller import (
@@ -14,10 +16,14 @@ from maa.controller import (
 )
 from maa.toolkit import Toolkit
 
-from models.api import DeviceModel
+import json_utils as json
+from models.api import CustomDeviceCreate, DeviceModel
+from models.settings import SettingsModel
 
 if TYPE_CHECKING:
     from maa_utils import MaaWorker
+
+_SETTINGS_LOCK = threading.RLock()
 
 
 def is_controller_supported(controller) -> tuple[bool, str]:
@@ -44,9 +50,249 @@ def is_controller_supported(controller) -> tuple[bool, str]:
             return False, "controller_not_supported"
 
 
+def canonicalize_custom_address(device_type: str, address: str) -> str:
+    """Validate and return canonical address for persistence/identity.
+
+    Raises ValueError on invalid input.
+    """
+    text = str(address).strip()
+    if device_type in ("Adb", "PlayCover"):
+        if not text:
+            raise ValueError("设备地址不能为空")
+        return text
+    if device_type == "Win32":
+        if not text.isdigit() or int(text) <= 0:
+            raise ValueError("Win32 地址必须为正整数 hWnd")
+        return str(int(text))
+    if device_type == "Gamepad":
+        parts = text.split("|")
+        if len(parts) != 2:
+            raise ValueError("Gamepad 地址格式必须为 hWnd|type")
+        hwnd_raw, type_raw = parts[0].strip(), parts[1].strip()
+        if not hwnd_raw.isdigit() or int(hwnd_raw) <= 0:
+            raise ValueError("Gamepad hWnd 必须为正整数")
+        if not type_raw.isdigit():
+            raise ValueError("Gamepad type 只能为 0 或 1")
+        gamepad_type = int(type_raw)
+        if gamepad_type not in (0, 1):
+            raise ValueError("Gamepad type 只能为 0 或 1")
+        return f"{int(hwnd_raw)}|{gamepad_type}"
+    raise ValueError(f"不支持的设备类型: {device_type}")
+
+
+def try_canonicalize_custom_address(device_type: str, address: str) -> str | None:
+    try:
+        return canonicalize_custom_address(device_type, address)
+    except (ValueError, TypeError):
+        return None
+
+
+def _record_identity(
+    controller_name: str, device_type: str, address: str
+) -> tuple[str, str, str]:
+    return (controller_name, device_type, address)
+
+
+def _scan_device_address(device: dict[str, Any]) -> str | None:
+    device_type = device.get("type")
+    if device_type in ("Adb", "PlayCover"):
+        return try_canonicalize_custom_address(
+            device_type, str(device.get("address", ""))
+        )
+    if device_type == "Win32":
+        return try_canonicalize_custom_address(device_type, str(device.get("hWnd", "")))
+    if device_type == "Gamepad":
+        return try_canonicalize_custom_address(
+            device_type,
+            f"{device.get('hWnd', 0)}|{device.get('gamepad_type', 0)}",
+        )
+    return None
+
+
+def custom_record_to_device(record: dict[str, Any]) -> dict[str, Any]:
+    """Rebuild a ConnectableDevice-like dict from a persisted custom record."""
+    device_type = record.get("type")
+    address = str(record.get("address", ""))
+
+    if device_type == "Adb":
+        return {
+            "name": "",
+            "type": "Adb",
+            "adb_path": "",
+            "address": address,
+            "screencap_methods": 0,
+            "input_methods": 0,
+            "config": {},
+        }
+    if device_type == "Win32":
+        return {
+            "type": "Win32",
+            "hWnd": int(address),
+            "class_name": "",
+            "window_name": "",
+            "screencap_methods": 0,
+            "input_methods": 0,
+        }
+    if device_type == "Gamepad":
+        hwnd_s, type_s = address.split("|", 1)
+        return {
+            "type": "Gamepad",
+            "hWnd": int(hwnd_s),
+            "class_name": "",
+            "window_name": "",
+            "screencap_methods": 0,
+            "gamepad_type": int(type_s),
+        }
+    if device_type == "PlayCover":
+        return {"type": "PlayCover", "address": address}
+    return {"type": device_type, "address": address}
+
+
 class DeviceService:
     def __init__(self, worker: "MaaWorker"):
         self.worker = worker
+
+    def _settings_path(self) -> Path:
+        return self.worker.context.interface_base_dir / "config" / "settings.json"
+
+    def _load_custom_devices(self) -> list[dict[str, Any]]:
+        with _SETTINGS_LOCK:
+            path = self._settings_path()
+            if not path.exists():
+                return []
+            try:
+                with path.open("r", encoding="utf-8") as f:
+                    raw = json.load(f)
+            except Exception:
+                return []
+            panel = raw.get("panel") if isinstance(raw, dict) else None
+            custom_list = (
+                panel.get("customDevices") if isinstance(panel, dict) else None
+            )
+            if not isinstance(custom_list, list):
+                return []
+
+            records: list[dict[str, Any]] = []
+            for item in custom_list:
+                if not isinstance(item, dict):
+                    continue
+                controller_name = str(item.get("controller_name", "")).strip()
+                device_type = item.get("type")
+                if not controller_name or device_type not in (
+                    "Adb",
+                    "Win32",
+                    "Gamepad",
+                    "PlayCover",
+                ):
+                    continue
+                address = try_canonicalize_custom_address(
+                    device_type, str(item.get("address", ""))
+                )
+                if address is None:
+                    continue
+                records.append(
+                    {
+                        "controller_name": controller_name,
+                        "type": device_type,
+                        "address": address,
+                    }
+                )
+            return records
+
+    def _save_custom_devices(self, records: list[dict[str, Any]]) -> None:
+        with _SETTINGS_LOCK:
+            path = self._settings_path()
+            # Load existing settings to preserve all fields
+            raw: dict[str, Any] = {}
+            if path.exists():
+                try:
+                    with path.open("r", encoding="utf-8") as f:
+                        raw = json.load(f)
+                except Exception:
+                    raw = {}
+            if not isinstance(raw, dict):
+                raw = {}
+            panel = raw.get("panel")
+            if not isinstance(panel, dict):
+                panel = {}
+            panel["customDevices"] = records
+            raw["panel"] = panel
+
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = path.with_name(f".settings.json.{os.getpid()}.tmp")
+            try:
+                with tmp_path.open("w", encoding="utf-8") as f:
+                    json.dump(raw, f, indent=4, ensure_ascii=False)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp_path, path)
+            except Exception:
+                if tmp_path.exists():
+                    try:
+                        tmp_path.unlink()
+                    except OSError:
+                        pass
+                raise
+
+    def add_custom_device(self, payload: CustomDeviceCreate) -> dict[str, Any]:
+        controller = self.get_controller_definition(payload.controller_name)
+        if controller is None:
+            raise ValueError("未找到匹配的控制器配置")
+        if controller.type != payload.type:
+            raise ValueError("控制器类型不匹配")
+
+        address = canonicalize_custom_address(payload.type, payload.address)
+        record = {
+            "controller_name": payload.controller_name,
+            "type": payload.type,
+            "address": address,
+        }
+        identity = _record_identity(
+            record["controller_name"], record["type"], record["address"]
+        )
+
+        with _SETTINGS_LOCK:
+            records = self._load_custom_devices()
+            for existing in records:
+                if (
+                    _record_identity(
+                        existing["controller_name"],
+                        existing["type"],
+                        existing["address"],
+                    )
+                    == identity
+                ):
+                    return custom_record_to_device(existing)
+            records.append(record)
+            self._save_custom_devices(records)
+
+        return custom_record_to_device(record)
+
+    def _merge_custom_devices(
+        self, controller_name: str, devices: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        seen: set[tuple[str, str, str]] = set()
+        for device in devices:
+            address = _scan_device_address(device)
+            device_type = device.get("type")
+            if address is None or not device_type:
+                continue
+            seen.add(_record_identity(controller_name, device_type, address))
+
+        merged = list(devices)
+        with _SETTINGS_LOCK:
+            custom_records = self._load_custom_devices()
+        for record in custom_records:
+            if record["controller_name"] != controller_name:
+                continue
+            identity = _record_identity(
+                record["controller_name"], record["type"], record["address"]
+            )
+            if identity in seen:
+                continue  # scan wins on duplicate identity
+            merged.append(custom_record_to_device(record))
+            seen.add(identity)
+        return merged
 
     def _load_resource_bundle(self, path: str) -> str:
         resolved_path = os.path.realpath(path.replace("{PROJECT_DIR}", os.getcwd()))
@@ -262,6 +508,9 @@ class DeviceService:
             if controller is not None:
                 devices = self._find_devices_for_controller(controller)
 
+        if selected_name:
+            devices = self._merge_custom_devices(selected_name, devices)
+
         return {
             "controllers": capabilities,
             "selected_controller": selected_name,
@@ -284,7 +533,7 @@ class DeviceService:
             or state.controller_type is not None
         )
 
-        # 注销 controller sink
+        # 销毁 controller sink
         if state.controller is not None and hasattr(self.worker, "sinks"):
             self.worker.sinks.unregister_controller_sink(state.controller)
 

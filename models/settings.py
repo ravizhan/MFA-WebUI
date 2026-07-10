@@ -4,6 +4,8 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, ValidationInfo, field_validator, model_validator
 
+DeviceType = Literal["Adb", "Win32", "Gamepad", "PlayCover"]
+
 
 def _normalize_str(value: Any) -> str:
     if isinstance(value, str):
@@ -103,7 +105,7 @@ class About(BaseModel):
 
 
 class PanelLastConnectedDevice(BaseModel):
-    type: Literal["Adb", "Win32", "Gamepad", "PlayCover"]
+    type: DeviceType
     controller_name: str = ""
     fingerprint: str = ""
     adb_path: str = ""
@@ -115,10 +117,23 @@ class PanelLastConnectedDevice(BaseModel):
     uuid: str = ""
 
 
+class CustomDevice(BaseModel):
+    """Persisted custom device address record.
+
+    Stored in panel.customDevices within settings.json and merged with
+    scan results at read time via DeviceService.
+    """
+
+    controller_name: str
+    type: DeviceType
+    address: str
+
+
 class Panel(BaseModel):
     lastResource: str = ""
     lastConnectedDevice: Optional[PanelLastConnectedDevice] = None
     recentDevices: Optional[list[PanelLastConnectedDevice]] = None
+    customDevices: list[CustomDevice] = []
 
     @field_validator("recentDevices")
     @classmethod
