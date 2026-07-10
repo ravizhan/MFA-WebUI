@@ -3,28 +3,27 @@ import {
   getInterface,
   rescanScanSelectOption as requestRescanScanSelectOption,
 } from "@/services/api"
-import type { InterfaceModel, Option, Preset, Task } from "@/types/interface/model"
-import type { TaskListItem } from "@/types/task-config/model"
+import type { InterfaceModel, Option, Preset, Task } from "@/types/interfaceModel"
+import type { TaskListItem } from "@/types/taskConfigModel"
 
 export const useInterfaceStore = defineStore("interface", {
-  state: () => ({
-    interface: {} as InterfaceModel,
+  state: (): { interface: Partial<InterfaceModel> } => ({
+    interface: {},
   }),
   getters: {
-    getTaskList: (state) => {
+    getTaskList: (state): TaskListItem[] => {
       if (!state.interface?.task) return []
       return state.interface.task.map((item, index) => ({
         id: item.entry,
         name: item.name,
         order: index,
-      })) as TaskListItem[]
+      }))
     },
     getPresetList: (state): Preset[] => state.interface?.preset || [],
   },
   actions: {
     async setInterface() {
-      const data = await getInterface()
-      this.interface = data
+      this.interface = await getInterface()
     },
 
     async rescanScanSelectOption(optionName: string): Promise<boolean> {
@@ -59,11 +58,7 @@ export const useInterfaceStore = defineStore("interface", {
         return false
       }
 
-      if (resourceName && task.resource?.length && !task.resource.includes(resourceName)) {
-        return false
-      }
-
-      return true
+      return !(resourceName && task.resource?.length && !task.resource.includes(resourceName))
     },
 
     isTaskCompatibleByEntry(
@@ -94,9 +89,11 @@ export const useInterfaceStore = defineStore("interface", {
             continue
           }
           result[optionName] = optionValue
-          for (const caseItem of optionValue.cases || []) {
-            if (caseItem.option) {
-              collectOptions(caseItem.option)
+          if ("cases" in optionValue) {
+            for (const caseItem of optionValue.cases || []) {
+              if (caseItem.option) {
+                collectOptions(caseItem.option)
+              }
             }
           }
         }

@@ -2,7 +2,7 @@ import type {
   ScheduledTaskCreate,
   ScheduledTaskUpdate,
   SchedulerApiResponse,
-} from "@/types/scheduler/model"
+} from "@/types/schedulerModel"
 
 export function getSchedulerTasks(): Promise<SchedulerApiResponse> {
   return fetch("/api/scheduler/tasks", { method: "GET" }).then((res) => res.json())

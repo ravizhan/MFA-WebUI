@@ -61,11 +61,19 @@ export interface PanelLastConnectedDevice {
   uuid: string
 }
 
+// 自定义设备（后端持久化，前端透传保留）
+export interface CustomDevice {
+  controller_name: string
+  type: string
+  address: string
+}
+
 // 面板持久化设置
 export interface PanelSettings {
   lastResource: string
   lastConnectedDevice: PanelLastConnectedDevice | null
   recentDevices: PanelLastConnectedDevice[] | null
+  customDevices?: CustomDevice[]
 }
 
 // 完整设置模型

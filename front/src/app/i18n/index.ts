@@ -4,13 +4,24 @@ import enUS from "@/app/i18n/messages/en-US.json"
 
 type MessageSchema = typeof zhCN
 
+function isLocale(value: string | null): value is "zh-CN" | "en-US" {
+  return value === "zh-CN" || value === "en-US"
+}
+
+const savedLocale = localStorage.getItem("locale")
+const savedLang = localStorage.getItem("lang")
+let locale: "zh-CN" | "en-US" = "zh-CN"
+if (isLocale(savedLocale)) {
+  locale = savedLocale
+}
+if (!isLocale(savedLocale) && isLocale(savedLang)) {
+  locale = savedLang
+}
+
 const i18n = createI18n<[MessageSchema], "zh-CN" | "en-US">({
   legacy: false,
   globalInjection: true,
-  locale:
-    (localStorage.getItem("locale") as "zh-CN" | "en-US") ||
-    (localStorage.getItem("lang") as "zh-CN" | "en-US") ||
-    "zh-CN",
+  locale,
   fallbackLocale: "zh-CN",
   messages: {
     "zh-CN": zhCN,

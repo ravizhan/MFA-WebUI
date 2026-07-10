@@ -1,87 +1,79 @@
 <template>
-  <n-modal
-    v-model:show="showModal"
-    preset="dialog"
-    :title="dialogTitle"
-    :closable="!isUpdating"
-    :mask-closable="!isUpdating"
-    :close-on-esc="!isUpdating"
-  >
-    <div class="update-dialog-content">
-      <div v-if="updateState === 'available'">
-        <n-space vertical>
-          <n-alert :title="version_info" type="info">
-            <template #icon>
-              <n-icon>
-                <div class="i-mdi-update" />
-              </n-icon>
-            </template>
-          </n-alert>
+  <div class="modal" :class="{ 'modal-open': showModal }" @click.self="handleClose">
+    <div class="modal-box max-w-lg">
+      <h3 class="font-bold text-lg">{{ dialogTitle }}</h3>
 
-          <n-card :title="t('settings.update.updateLog')" size="small">
-            <div class="markdown-body max-h-100 overflow-y-auto" v-html="renderedMarkdown"></div>
-          </n-card>
-        </n-space>
-      </div>
+      <div class="py-4">
+        <div v-if="updateState === 'available'">
+          <div class="alert alert-info mb-4">
+            <Icon icon="mdi:update" class="text-2xl" />
+            <span>{{ version_info }}</span>
+          </div>
+          <div class="card bg-base-200">
+            <div class="card-body p-3">
+              <h4 class="card-title text-sm">{{ t("settings.update.updateLog") }}</h4>
+              <div class="markdown-body max-h-64 overflow-y-auto" v-html="renderedMarkdown" />
+            </div>
+          </div>
+        </div>
 
-      <div v-else-if="isUpdating">
-        <n-space vertical>
-          <n-alert :type="updateState === 'failed' ? 'error' : 'info'">
-            {{ statusMessage }}
-          </n-alert>
-          <n-progress
+        <div v-else-if="isUpdating" class="space-y-3">
+          <div class="alert" :class="updateState === 'failed' ? 'alert-error' : 'alert-info'">
+            <span>{{ statusMessage }}</span>
+          </div>
+          <progress
             v-if="updateState !== 'failed' && updateState !== 'success'"
-            type="line"
-            :percentage="100"
-            :show-indicator="false"
-            status="default"
-            processing
+            class="progress progress-primary w-full"
+            max="100"
           />
-        </n-space>
-      </div>
+        </div>
 
-      <!-- Success state -->
-      <div v-else-if="updateState === 'success'">
-        <n-alert type="success">
+        <div v-else-if="updateState === 'success'" class="alert alert-success">
           {{ t("settings.update.updateSuccess") }}
-        </n-alert>
+        </div>
+
+        <div v-else-if="updateState === 'failed'" class="alert alert-error">
+          <div>
+            <div class="font-bold">{{ t("settings.update.updateFailed") }}</div>
+            <div>{{ statusMessage }}</div>
+          </div>
+        </div>
       </div>
 
-      <!-- Failed state -->
-      <div v-else-if="updateState === 'failed'">
-        <n-alert type="error" :title="t('settings.update.updateFailed')">
-          {{ statusMessage }}
-        </n-alert>
+      <div class="modal-action">
+        <button
+          v-if="updateState === 'available'"
+          class="btn btn-ghost"
+          :disabled="isUpdating"
+          @click="handleClose"
+        >
+          {{ t("settings.update.later") }}
+        </button>
+        <button
+          v-if="updateState === 'available'"
+          class="btn btn-primary"
+          :disabled="isUpdating"
+          @click="handleUpdate"
+        >
+          <Icon v-if="isUpdating" icon="mdi:loading" class="animate-spin mr-1 text-lg" />
+          {{ t("settings.update.updateNow") }}
+        </button>
+        <button v-if="updateState === 'failed'" class="btn btn-primary" @click="handleClose">
+          {{ t("common.confirm") }}
+        </button>
       </div>
     </div>
-
-    <template #action>
-      <n-space>
-        <n-button v-if="updateState === 'available'" @click="handleClose" :disabled="isUpdating">
-          {{ t("settings.update.later") }}
-        </n-button>
-        <n-button
-          v-if="updateState === 'available'"
-          type="primary"
-          @click="handleUpdate"
-          :loading="isUpdating"
-        >
-          {{ t("settings.update.updateNow") }}
-        </n-button>
-        <n-button v-if="updateState === 'failed'" @click="handleClose">
-          {{ t("common.confirm") }}
-        </n-button>
-      </n-space>
-    </template>
-  </n-modal>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch, onUnmounted } from "vue"
 import { useI18n } from "vue-i18n"
+import { Icon } from "@iconify/vue"
 import { marked } from "marked"
 import { performUpdateApi, getUpdateStatusApi, type UpdateInfo } from "@/services/api"
 import DOMPurify from "dompurify"
+import { tryCatch } from "@/utils/tryCatch"
 
 const { t } = useI18n()
 
@@ -89,24 +81,26 @@ interface Props {
   show: boolean
   updateInfo: UpdateInfo | null
 }
-const version_info = computed(() => {
-  return (
-    t("settings.update.currentVersion") +
-    ": " +
-    (props.updateInfo?.current_version || "-") +
-    " | " +
-    t("settings.update.latestVersion") +
-    ": " +
-    (props.updateInfo?.latest_version || "-")
-  )
-})
-const props = defineProps<Props>()
+
+const { show, updateInfo } = defineProps<Props>()
 const emit = defineEmits<{
   (e: "update:show", value: boolean): void
 }>()
 
+const version_info = computed(() => {
+  return (
+    t("settings.update.currentVersion") +
+    ": " +
+    (updateInfo?.current_version || "-") +
+    " | " +
+    t("settings.update.latestVersion") +
+    ": " +
+    (updateInfo?.latest_version || "-")
+  )
+})
+
 const showModal = computed({
-  get: () => props.show,
+  get: () => show,
   set: (value) => emit("update:show", value),
 })
 
@@ -136,48 +130,50 @@ const dialogTitle = computed(() => {
 })
 
 const renderedMarkdown = computed(() => {
-  if (!props.updateInfo?.release_notes) {
+  if (!updateInfo?.release_notes) {
     return "<p>" + t("panel.empty") + "</p>"
   }
-  return DOMPurify.sanitize(marked.parse(props.updateInfo.release_notes) as string)
+  const raw = marked.parse(updateInfo.release_notes)
+  return typeof raw === "string" ? DOMPurify.sanitize(raw) : ""
 })
 
 let pollTimer: number | null = null
 
 const pollUpdateStatus = async () => {
-  try {
-    const status = await getUpdateStatusApi()
-    statusMessage.value = status.message
+  const [status, err] = await tryCatch(() => getUpdateStatusApi())
+  if (err) {
+    console.error("Failed to poll update status:", err)
+    return
+  }
 
-    switch (status.status) {
-      case "downloading":
-        updateState.value = "downloading"
-        break
-      case "updating":
-        updateState.value = "updating"
-        break
-      case "success":
-        updateState.value = "success"
-        stopPolling()
-        // Wait for backend to restart and refresh page
-        waitForBackendRestart()
-        break
-      case "failed":
-        updateState.value = "failed"
-        stopPolling()
-        break
-      case "idle":
-        // If idle, continue polling as update might still be processing
-        break
-    }
-  } catch (error) {
-    console.error("Failed to poll update status:", error)
+  statusMessage.value = status.message
+
+  switch (status.status) {
+    case "downloading":
+      updateState.value = "downloading"
+      break
+    case "updating":
+      updateState.value = "updating"
+      break
+    case "success":
+      updateState.value = "success"
+      stopPolling()
+      waitForBackendRestart()
+      break
+    case "failed":
+      updateState.value = "failed"
+      stopPolling()
+      break
+    case "idle":
+      break
   }
 }
 
 const startPolling = () => {
   if (pollTimer) return
-  pollTimer = window.setInterval(pollUpdateStatus, 1000) // Poll every 1 second
+  pollTimer = window.setInterval(() => {
+    void pollUpdateStatus()
+  }, 1000)
 }
 
 const stopPolling = () => {
@@ -187,26 +183,21 @@ const stopPolling = () => {
   }
 }
 
-const waitForBackendRestart = async () => {
+const waitForBackendRestart = () => {
   statusMessage.value = t("settings.update.waitingRestart")
   let retries = 0
-  const maxRetries = 60 // Wait up to 60 seconds
+  const maxRetries = 60
 
   const checkBackend = async () => {
-    try {
-      const response = await fetch("/api/settings", { method: "GET" })
-      if (response.ok) {
-        statusMessage.value = t("settings.update.restarting")
-        // Backend is back online, refresh the page
-        setTimeout(() => {
-          window.location.reload()
-        }, 1000)
-        return true
-      }
-    } catch (error) {
-      // Backend not ready yet
+    const [response, err] = await tryCatch(() => fetch("/api/settings", { method: "GET" }))
+    if (err || !response?.ok) {
+      return false
     }
-    return false
+    statusMessage.value = t("settings.update.restarting")
+    setTimeout(() => {
+      window.location.reload()
+    }, 1000)
+    return true
   }
 
   const pollBackend = async () => {
@@ -219,7 +210,6 @@ const waitForBackendRestart = async () => {
       }
     }
 
-    // If backend doesn't come back, just try to reload anyway
     window.location.reload()
   }
 
@@ -227,23 +217,23 @@ const waitForBackendRestart = async () => {
 }
 
 const handleUpdate = async () => {
-  try {
-    updateState.value = "downloading"
-    statusMessage.value = t("settings.update.downloading")
+  updateState.value = "downloading"
+  statusMessage.value = t("settings.update.downloading")
 
-    const result = await performUpdateApi()
-
-    if (result.status === "success") {
-      startPolling()
-    } else {
-      updateState.value = "failed"
-      statusMessage.value = result.message || t("settings.update.updateFailed")
-    }
-  } catch (error) {
+  const [result, err] = await tryCatch(() => performUpdateApi())
+  if (err) {
     updateState.value = "failed"
-    statusMessage.value = String(error)
-    console.error("Failed to perform update:", error)
+    statusMessage.value = String(err)
+    console.error("Failed to perform update:", err)
+    return
   }
+
+  if (result.status === "success") {
+    startPolling()
+    return
+  }
+  updateState.value = "failed"
+  statusMessage.value = result.message || t("settings.update.updateFailed")
 }
 
 const handleClose = () => {
@@ -252,14 +242,14 @@ const handleClose = () => {
 }
 
 watch(
-  () => props.show,
+  () => show,
   (newShow) => {
     if (newShow) {
       updateState.value = "available"
       statusMessage.value = ""
-    } else {
-      stopPolling()
+      return
     }
+    stopPolling()
   },
 )
 
@@ -267,16 +257,3 @@ onUnmounted(() => {
   stopPolling()
 })
 </script>
-
-<style scoped>
-.update-dialog-content {
-  min-width: 400px;
-  max-width: 600px;
-}
-
-@media (max-width: 768px) {
-  .update-dialog-content {
-    min-width: 300px;
-  }
-}
-</style>

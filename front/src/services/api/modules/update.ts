@@ -34,27 +34,3 @@ export function performUpdateApi(): Promise<ApiResponse> {
 export function getUpdateStatusApi(): Promise<UpdateStatusResponse> {
   return fetch("/api/update/status", { method: "GET" }).then((res) => res.json())
 }
-
-export function checkUpdate(): Promise<{
-  hasUpdate: boolean
-  version?: string
-  changelog?: string
-  downloadUrl?: string
-}> {
-  return checkUpdateApi()
-    .then((data) => {
-      if (data.status === "success" && data.update_info) {
-        return {
-          hasUpdate: data.update_info.is_update_available || false,
-          version: data.update_info.latest_version,
-          changelog: data.update_info.release_notes,
-          downloadUrl: data.update_info.download_url,
-        }
-      }
-      return { hasUpdate: false }
-    })
-    .catch((error) => {
-      console.error("Failed to check update:", error)
-      return { hasUpdate: false }
-    })
-}

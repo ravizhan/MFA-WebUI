@@ -6,7 +6,7 @@ import {
   resolveInterfaceDocumentContent,
   resolveInterfaceText,
 } from "@/utils/interface/content"
-import type { InterfaceModel } from "@/types/interface/model"
+import type { InterfaceModel } from "@/types/interfaceModel"
 
 describe("isExternalUrl", () => {
   it("detects https:// URLs", () => {
@@ -98,6 +98,7 @@ describe("resolveInterfaceText", () => {
 })
 
 describe("resolveInterfaceAssetUrl", () => {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
   const mockModel = {} as InterfaceModel
 
   it("returns external URL as-is", () => {
@@ -120,6 +121,7 @@ describe("resolveInterfaceAssetUrl", () => {
 })
 
 describe("resolveInterfaceDocumentContent", () => {
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
   const mockModel = {} as InterfaceModel
 
   beforeEach(() => {
@@ -146,6 +148,7 @@ describe("resolveInterfaceDocumentContent", () => {
   })
 
   it("fetches and returns text for text file paths", async () => {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
       ok: true,
       text: () => Promise.resolve("# Hello\nWorld"),
@@ -165,6 +168,7 @@ describe("resolveInterfaceDocumentContent", () => {
   })
 
   it("returns the path itself when response is not ok, proving fetch was called", async () => {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
       ok: false,
       text: () => Promise.resolve(""),
@@ -188,6 +192,7 @@ describe("resolveInterfaceDocumentContent", () => {
     { ext: ".html", file: "page.html" },
     { ext: ".htm", file: "page.htm" },
   ])("fetches text files with $ext extension", async ({ file }) => {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
       ok: true,
       text: () => Promise.resolve("content"),
@@ -206,6 +211,7 @@ describe("resolveInterfaceDocumentContent", () => {
   })
 
   it("trims whitespace before checking", async () => {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
       ok: true,
       text: () => Promise.resolve("trimmed content"),
@@ -216,6 +222,7 @@ describe("resolveInterfaceDocumentContent", () => {
   })
 
   it("handles resource/ paths correctly", async () => {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
       ok: true,
       text: () => Promise.resolve("resource content"),

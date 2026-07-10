@@ -1,5 +1,11 @@
-import type { Option } from "@/types/interface/model"
-import type { TaskOptionValue } from "@/types/scheduler/model"
+import type {
+  InputOption,
+  Option,
+  ScanSelectOption,
+  SelectOption,
+  SwitchOption,
+} from "@/types/interfaceModel"
+import type { TaskOptionValue } from "@/types/schedulerModel"
 
 export function buildOrderedCheckboxValue(option: Extract<Option, { type: "checkbox" }>): string[] {
   const selectedSet = new Set(option.default_case || [])
@@ -20,32 +26,44 @@ function normalizeObjectValue(value: unknown): Record<string, string> {
   return normalized
 }
 
+function buildSelectDefault(option: SelectOption | ScanSelectOption): string {
+  const defaultValue = option.default_case ?? option.cases[0]?.name ?? ""
+  return typeof defaultValue === "string" ? defaultValue : ""
+}
+
+function buildInputDefault(option: InputOption): Record<string, string> {
+  const inputDefaults: Record<string, string> = {}
+  for (const input of option.inputs) {
+    inputDefaults[input.name] = input.default ?? ""
+  }
+  return inputDefaults
+}
+
+function buildSwitchDefault(option: SwitchOption): string {
+  const defaultValue = option.default_case ?? option.cases[0]?.name ?? ""
+  return typeof defaultValue === "string" ? defaultValue : ""
+}
+
 // 根据选项定义生成默认值
 export function buildDefaultsFromOptionMap(
   optionMap: Record<string, Option>,
 ): Record<string, TaskOptionValue> {
   const options: Record<string, TaskOptionValue> = {}
   for (const key in optionMap) {
-    const option = optionMap[key]!
+    const option = optionMap[key]
 
     if (option.type === "select" || option.type === "scan_select") {
-      const defaultValue = option.default_case ?? option.cases[0]?.name ?? ""
-      options[key] = typeof defaultValue === "string" ? defaultValue : ""
+      options[key] = buildSelectDefault(option)
       continue
     }
 
     if (option.type === "input") {
-      const inputDefaults: Record<string, string> = {}
-      for (const input of option.inputs) {
-        inputDefaults[input.name] = input.default ?? ""
-      }
-      options[key] = inputDefaults
+      options[key] = buildInputDefault(option)
       continue
     }
 
     if (option.type === "switch") {
-      const defaultValue = option.default_case ?? option.cases[0]?.name ?? ""
-      options[key] = typeof defaultValue === "string" ? defaultValue : ""
+      options[key] = buildSwitchDefault(option)
       continue
     }
 

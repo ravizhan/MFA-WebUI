@@ -1,4 +1,4 @@
-import type { InterfaceModel, OptionCase } from "@/types/interface/model"
+import type { InterfaceModel, OptionCase } from "@/types/interfaceModel"
 import type { ApiResponse } from "@/services/api/core/types"
 
 export function getInterface(): Promise<InterfaceModel> {

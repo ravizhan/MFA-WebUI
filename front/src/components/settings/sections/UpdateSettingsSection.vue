@@ -1,88 +1,111 @@
 <template>
-  <n-card
-    id="update-settings"
-    class="mb-6 scroll-mt-5 last:mb-0"
-    :title="t('settings.update.title')"
-  >
-    <template #header-extra>
-      <n-button size="small" type="primary" @click="checkForUpdate" :loading="checkingUpdate">
-        {{ t("settings.update.check") }}
-      </n-button>
-    </template>
-    <n-form label-placement="left" label-width="120">
-      <n-form-item :label="t('settings.update.auto')">
-        <n-switch
-          v-model:value="settings.update.autoUpdate"
-          @update:value="(val: boolean) => handleSettingChange('update', 'autoUpdate', val)"
-        />
-      </n-form-item>
-      <n-form-item :label="t('settings.update.channel')">
-        <n-select
-          v-model:value="settings.update.updateChannel"
-          :options="updateChannelOptions"
-          @update:value="
-            (val: string) =>
-              handleSettingChange(
-                'update',
-                'updateChannel',
-                val as SettingsModel['update']['updateChannel'],
-              )
+  <div class="space-y-0">
+    <div
+      class="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-2 md:gap-4 items-center py-4 border-b border-base-200 last:border-b-0"
+    >
+      <label class="text-sm font-medium md:text-right">
+        {{ t("settings.update.auto") }}
+      </label>
+      <div class="flex items-center justify-between">
+        <input
+          type="checkbox"
+          class="toggle toggle-primary"
+          :checked="settings.update.autoUpdate"
+          @change="
+            handleSettingChange('update', 'autoUpdate', ($event.target as HTMLInputElement).checked)
           "
         />
-      </n-form-item>
-      <n-form-item :label="t('settings.update.proxy')">
-        <n-input
-          v-model:value="settings.update.proxy"
-          placeholder="http://127.0.0.1:7890"
-          clearable
-          @update:value="(val: string) => handleSettingChange('update', 'proxy', val)"
-        />
-      </n-form-item>
-      <n-form-item
-        v-if="interfaceStore.interface?.mirrorchyan_rid"
-        :label="t('settings.update.mirrorchyanCdk')"
+        <button class="btn btn-primary btn-sm" :disabled="checkingUpdate" @click="checkForUpdate">
+          <Icon v-if="checkingUpdate" icon="mdi:loading" class="animate-spin mr-1 text-base" />
+          <Icon v-else icon="mdi:update" class="mr-1 text-base" />
+          {{ t("settings.update.check") }}
+        </button>
+      </div>
+    </div>
+
+    <div
+      class="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-2 md:gap-4 items-center py-4 border-b border-base-200 last:border-b-0"
+    >
+      <label class="text-sm font-medium md:text-right">
+        {{ t("settings.update.channel") }}
+      </label>
+      <select
+        :value="settings.update.updateChannel"
+        class="select select-bordered w-full md:w-auto"
+        @change="handleUpdateChannelChange($event)"
       >
-        <n-input-group>
-          <n-input
-            v-model:value="settings.update.mirrorchyanCdk"
-            type="password"
-            show-password-on="click"
-            :placeholder="t('settings.update.mirrorchyanCdkPlaceholder')"
-            clearable
-            @update:value="(val: string) => handleSettingChange('update', 'mirrorchyanCdk', val)"
-          />
-          <n-button tag="a" href="https://mirrorchyan.com" target="_blank" type="primary" ghost>
-            {{ t("settings.update.mirrorchyanCdkHint") }}
-          </n-button>
-        </n-input-group>
-      </n-form-item>
-    </n-form>
-  </n-card>
+        <option value="stable">{{ t("settings.update.channelOptions.stable") }}</option>
+        <option value="beta">{{ t("settings.update.channelOptions.beta") }}</option>
+      </select>
+    </div>
+
+    <div
+      class="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-2 md:gap-4 items-center py-4 border-b border-base-200 last:border-b-0"
+    >
+      <label class="text-sm font-medium md:text-right">
+        {{ t("settings.update.proxy") }}
+      </label>
+      <input
+        :value="settings.update.proxy"
+        type="text"
+        class="input input-bordered w-full"
+        placeholder="http://127.0.0.1:7890"
+        @input="handleSettingChange('update', 'proxy', ($event.target as HTMLInputElement).value)"
+      />
+    </div>
+
+    <div
+      v-if="interfaceStore.interface?.mirrorchyan_rid"
+      class="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-2 md:gap-4 items-center py-4 border-b border-base-200 last:border-b-0"
+    >
+      <label class="text-sm font-medium md:text-right">
+        {{ t("settings.update.mirrorchyanCdk") }}
+      </label>
+      <div class="flex gap-2">
+        <input
+          :value="settings.update.mirrorchyanCdk"
+          type="password"
+          class="input input-bordered flex-1"
+          :placeholder="t('settings.update.mirrorchyanCdkPlaceholder')"
+          @input="
+            handleSettingChange(
+              'update',
+              'mirrorchyanCdk',
+              ($event.target as HTMLInputElement).value,
+            )
+          "
+        />
+        <a href="https://mirrorchyan.com" target="_blank" class="btn btn-outline">
+          {{ t("settings.update.mirrorchyanCdkHint") }}
+        </a>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref } from "vue"
-import { useMessage } from "naive-ui"
 import { useI18n } from "vue-i18n"
+import { Icon } from "@iconify/vue"
 import { checkUpdateApi, type UpdateInfo } from "@/services/api"
+import { showGlobalMessage } from "@/services/feedback/message"
 import { useInterfaceStore, useSettingsStore } from "@/stores"
-import type { SettingsModel } from "@/types/settings/model"
+import { tryCatch } from "@/utils/tryCatch"
+import type { SettingsModel } from "@/types/settingsModel"
 
 const emit = defineEmits<{
   (e: "show-update", updateInfo: UpdateInfo): void
 }>()
 
-const message = useMessage()
+function isUpdateChannel(value: string): value is SettingsModel["update"]["updateChannel"] {
+  return value === "stable" || value === "beta"
+}
+
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
 const interfaceStore = useInterfaceStore()
 const settings = computed(() => settingsStore.settings)
 const checkingUpdate = ref(false)
-
-const updateChannelOptions = computed(() => [
-  { label: t("settings.update.channelOptions.stable"), value: "stable" },
-  { label: t("settings.update.channelOptions.beta"), value: "beta" },
-])
 
 type EditableCategory = Exclude<keyof SettingsModel, "about">
 type MaybeNullForNumbers<T> = T extends number ? T | null : T
@@ -97,22 +120,32 @@ async function handleSettingChange<K extends EditableCategory, P extends keyof S
   value: EditableSettingValue<K, P>,
 ) {
   if (value === null) return
-  await settingsStore.updateSetting(category, key, value as SettingsModel[K][P])
+  await settingsStore.updateSetting(category, key, value)
+}
+
+function handleUpdateChannelChange(event: Event) {
+  const target = event.target
+  if (!(target instanceof HTMLSelectElement)) return
+  const value = target.value
+  if (!isUpdateChannel(value)) return
+  void handleSettingChange("update", "updateChannel", value)
 }
 
 async function checkForUpdate() {
   checkingUpdate.value = true
-  try {
-    const result = await checkUpdateApi()
-    if (result.status === "success" && result.update_info?.is_update_available) {
-      emit("show-update", result.update_info)
-    } else {
-      message.success(t("settings.update.latest"))
-    }
-  } catch {
-    message.error(t("settings.update.failed"))
-  } finally {
+  const [result, err] = await tryCatch(() => checkUpdateApi())
+  if (err) {
+    showGlobalMessage("error", t("settings.update.failed"))
     checkingUpdate.value = false
+    return
   }
+
+  if (result.status === "success" && result.update_info?.is_update_available) {
+    emit("show-update", result.update_info)
+    checkingUpdate.value = false
+    return
+  }
+  showGlobalMessage("success", t("settings.update.latest"))
+  checkingUpdate.value = false
 }
 </script>

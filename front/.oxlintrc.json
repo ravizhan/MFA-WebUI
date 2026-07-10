@@ -3,6 +3,10 @@
   "env": {
     "es6": true
   },
+  "options": {
+    "typeAware": true,
+    "typeCheck": true
+  },
   "ignorePatterns": ["auto-imports.d.ts", "components.d.ts", "env.d.ts"],
   "overrides": [
     {
@@ -19,6 +23,13 @@
       "files": ["vite.config.ts", "uno.config.ts"],
       "env": {
         "node": true
+      }
+    },
+    {
+      "files": ["**/test/**", "**/*.test.{js,jsx,ts,tsx}"],
+      "plugins": ["vitest"],
+      "env": {
+        "vitest": true
       }
     }
   ]

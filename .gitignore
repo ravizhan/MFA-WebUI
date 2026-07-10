@@ -282,7 +282,7 @@ yarn-error.log
 # End of https://www.toptal.com/developers/gitignore/api/pycharm+all,python,vuejs,vue
 
 # Logs
-logs
+/logs
 yarn-debug.log*
 pnpm-debug.log*
 lerna-debug.log*
@@ -331,6 +331,7 @@ version
 .codex
 deploy_result
 options
-tasks
+/tasks
 .sisyphus
 deps
+.explyt

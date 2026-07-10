@@ -1,5 +1,6 @@
-import type { InterfaceModel } from "@/types/interface/model"
+import type { InterfaceModel } from "@/types/interfaceModel"
 import { showGlobalMessage } from "@/services/feedback/message"
+import { tryCatch } from "@/utils/tryCatch"
 
 const textFilePattern = /^(?:\.\/)?(?:[^/]+[/])*[^/]+\.(?:md|markdown|txt|html?)$/i
 const invalidPathNotified = new Set<string>()
@@ -96,8 +97,7 @@ export function resolveInterfaceAssetUrl(
   if (isExternalUrl(resolvedValue)) {
     return resolvedValue
   }
-  const url = buildResourceUrl(resolvedValue)
-  return url
+  return buildResourceUrl(resolvedValue)
 }
 
 export async function resolveInterfaceDocumentContent(
@@ -124,13 +124,14 @@ export async function resolveInterfaceDocumentContent(
     return resolvedValue
   }
 
-  try {
-    const response = await fetch(url)
-    if (!response.ok) {
-      throw new Error(`Failed to load interface document: ${trimmedValue}`)
-    }
-    return await response.text()
-  } catch {
+  const [response, fetchErr] = await tryCatch(() => fetch(url))
+  if (fetchErr || !response?.ok) {
     return resolvedValue
   }
+
+  const [text, textErr] = await tryCatch(() => response.text())
+  if (textErr) {
+    return resolvedValue
+  }
+  return text
 }

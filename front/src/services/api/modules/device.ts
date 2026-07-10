@@ -12,8 +12,8 @@ export interface AdbDevice {
   name: string
   adb_path: string
   address: string
-  screencap_methods: string
-  input_methods: string
+  screencap_methods: number | string
+  input_methods: number | string
   config: Record<string, unknown>
 }
 
@@ -47,6 +47,18 @@ export type ConnectableDevice = AdbDevice | Win32Device | GamepadDevice | PlayCo
 export interface ConnectDevicePayload {
   controller_name: string
   device: ConnectableDevice
+}
+
+export interface SaveCustomDevicePayload {
+  controller_name: string
+  type: DeviceControllerType
+  address: string
+}
+
+export interface SaveCustomDeviceResult {
+  success: boolean
+  message: string
+  data?: ConnectableDevice
 }
 
 export interface DeviceControllerCapability {
@@ -83,6 +95,10 @@ interface DeviceStateResponse {
   state: DeviceRuntimeState
 }
 
+interface CustomDeviceResponse extends ApiResponse {
+  data?: ConnectableDevice
+}
+
 export function getDevices(controllerName?: string): Promise<DeviceSearchData> {
   const query = controllerName ? `?controller=${encodeURIComponent(controllerName)}` : ""
   return fetch(`/api/device${query}`, { method: "GET" })
@@ -110,6 +126,29 @@ export function postDevices(payload: ConnectDevicePayload): Promise<PostDeviceRe
     })
     .catch((error) => {
       console.error("Failed to connect device:", error)
+      return { success: false, message: "网络错误，请稍后重试" }
+    })
+}
+
+export function postCustomDevice(
+  payload: SaveCustomDevicePayload,
+): Promise<SaveCustomDeviceResult> {
+  return fetch("/api/device/custom", {
+    method: "POST",
+    body: JSON.stringify(payload),
+    headers: {
+      "Content-Type": "application/json",
+    },
+  })
+    .then((res) => res.json())
+    .then((data: CustomDeviceResponse) => {
+      if (data.status === "success" && data.data) {
+        return { success: true, message: data.message || "自定义设备已保存", data: data.data }
+      }
+      return { success: false, message: data.message || "保存自定义设备失败" }
+    })
+    .catch((error) => {
+      console.error("Failed to save custom device:", error)
       return { success: false, message: "网络错误，请稍后重试" }
     })
 }

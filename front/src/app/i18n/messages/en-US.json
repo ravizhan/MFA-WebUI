@@ -14,7 +14,18 @@
     "none": "None",
     "copy": "Copy",
     "start": "Start",
-    "pause": "Pause"
+    "pause": "Pause",
+    "darkMode": "Dark Mode",
+    "lightMode": "Light Mode",
+    "colon": ":",
+    "slash": "/"
+  },
+  "nav": {
+    "home": "Home",
+    "tasks": "Tasks",
+    "routines": "Routines",
+    "logs": "Logs",
+    "settings": "Settings"
   },
   "menu": {
     "home": "Home",
@@ -24,6 +35,9 @@
     "title": "Settings",
     "theme": "Theme",
     "general": "General",
+    "saveSuccess": "Settings saved",
+    "saveFailed": "Save failed",
+    "networkError": "Network error, please try again later",
     "anchor": {
       "update": "Update Settings",
       "runtime": "Runtime Settings",
@@ -146,7 +160,14 @@
         "deviceAndResource": "Device & Resource",
         "controller": "Controller",
         "deviceAddress": "Device Address",
-        "resource": "Resource"
+        "resource": "Resource",
+        "sections": {
+          "nav": "Sections",
+          "basic": "Basic Info",
+          "schedule": "Schedule",
+          "environment": "Environment",
+          "content": "Tasks"
+        }
       },
       "rules": {
         "nameRequired": "Please enter task name",
@@ -168,7 +189,11 @@
         "on": "On",
         "off": "Off"
       },
-      "language": "Language"
+      "language": "Language",
+      "languages": {
+        "zhCN": "简体中文",
+        "enUS": "English"
+      }
     },
     "notification": {
       "title": "Notification",
@@ -184,7 +209,25 @@
       "testResult": "Send failed: {message}",
       "testError": "Error sending test notification",
       "browserUnsupported": "Browser notifications are not supported in this environment",
-      "browserPermissionDenied": "Browser notification permission was not granted"
+      "browserPermissionDenied": "Browser notification permission was not granted",
+      "sections": {
+        "channels": "Channels",
+        "external": "External Webhook",
+        "triggers": "When to Notify"
+      },
+      "fields": {
+        "url": "URL",
+        "contentType": "Content-Type",
+        "json": "application/json",
+        "formUrlencoded": "application/x-www-form-urlencoded",
+        "headers": "Headers",
+        "method": "Method",
+        "post": "POST",
+        "get": "GET",
+        "body": "Body",
+        "username": "Username",
+        "password": "Password"
+      }
     },
     "about": {
       "title": "About",
@@ -198,7 +241,8 @@
       "defaultDescription": "General GUI for MaaFramework based on Vue",
       "reset": "Reset All Settings",
       "resetConfirm": "Are you sure you want to reset all settings? This cannot be undone.",
-      "resetSuccess": "Settings have been reset to default"
+      "resetSuccess": "Settings have been reset to default",
+      "githubIssues": "GitHub Issues"
     }
   },
   "panel": {
@@ -217,6 +261,8 @@
     "stop": "Stop Task",
     "resetConfig": "Reset Config",
     "noDevice": "No available device",
+    "noMatchingDevice": "No matching device",
+    "useCustomValue": "Use \"{value}\"",
     "recentDevices": "Recent",
     "discoveredDevices": "Discovered",
     "selectTask": "Please select at least one task",
@@ -245,6 +291,21 @@
       "modified": "Modified",
       "noDescription": "No preset description",
       "customDescription": "You are using a custom task snapshot and can continue editing it manually."
+    },
+    "health": {
+      "paused": "Paused",
+      "label": "Health",
+      "running": "Running:",
+      "total": "Total:"
+    },
+    "connection": {
+      "connected": "Connected",
+      "disconnected": "Disconnected"
+    },
+    "preview-fps": {
+      "fps15": "15 FPS",
+      "fps30": "30 FPS",
+      "fps60": "60 FPS"
     }
   },
   "taskConfig": {

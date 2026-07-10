@@ -1,79 +1,98 @@
 <template>
   <template v-if="option">
-    <n-list-item>
-      <div
-        :style="{ paddingLeft: (level || 0) * 20 + 'px' }"
-        class="flex items-center justify-between w-full gap-4"
-      >
-        <div class="min-w-0 flex-1">{{ resolvedLabel }}</div>
-        <div class="flex flex-1 justify-end">
-          <template v-if="option.type === 'switch'">
-            <n-switch
-              :checked-value="checkedValue"
-              :unchecked-value="uncheckedValue"
-              :round="false"
-              v-model:value="taskOptions[name]"
-            />
-          </template>
+    <div
+      class="flex items-center justify-between w-full gap-4 py-2 px-3 border-b border-base-300 last:border-b-0"
+      :style="{ paddingLeft: (level || 0) * 20 + 12 + 'px' }"
+    >
+      <div class="min-w-0 flex-1 text-sm">{{ resolvedLabel }}</div>
+      <div class="flex flex-1 justify-end">
+        <template v-if="option.type === 'switch'">
+          <input
+            type="checkbox"
+            class="toggle toggle-primary toggle-sm"
+            :true-value="checkedValue"
+            :false-value="uncheckedValue"
+            :checked="taskOptions[name] === checkedValue"
+            @change="handleSwitchChange($event)"
+          />
+        </template>
 
-          <template v-else-if="option.type === 'select'">
-            <n-select
-              class="w-full max-w-xs"
-              :options="selectOptions"
-              v-model:value="taskOptions[name]"
-            />
-          </template>
+        <template v-else-if="option.type === 'select'">
+          <select
+            v-model="taskOptions[name]"
+            class="select select-bordered select-sm w-full max-w-xs"
+          >
+            <option v-for="opt in selectOptions" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </option>
+          </select>
+        </template>
 
-          <template v-else-if="option.type === 'scan_select'">
-            <div class="flex w-full max-w-xs items-center gap-2">
-              <n-select class="flex-1" :options="selectOptions" v-model:value="taskOptions[name]" />
-              <n-button
-                circle
-                quaternary
-                size="small"
-                :loading="scanSelectRefreshing"
-                :disabled="scanSelectRefreshing"
-                @click="handleRescanScanSelect"
-              >
-                <template #icon>
-                  <n-icon>
-                    <div class="i-mdi-refresh" />
-                  </n-icon>
-                </template>
-              </n-button>
+        <template v-else-if="option.type === 'scan_select'">
+          <div class="flex w-full max-w-xs items-center gap-2">
+            <select v-model="taskOptions[name]" class="select select-bordered select-sm flex-1">
+              <option v-for="opt in selectOptions" :key="opt.value" :value="opt.value">
+                {{ opt.label }}
+              </option>
+            </select>
+            <button
+              class="btn btn-ghost btn-circle btn-sm"
+              :disabled="scanSelectRefreshing"
+              @click="handleRescanScanSelect"
+            >
+              <Icon
+                icon="mdi:refresh"
+                class="text-base"
+                :class="{ 'animate-spin': scanSelectRefreshing }"
+              />
+            </button>
+          </div>
+        </template>
+
+        <template v-else-if="option.type === 'input'">
+          <div class="flex w-full max-w-sm flex-col gap-2">
+            <div v-for="input in option.inputs" :key="input.name" class="flex flex-col gap-1">
+              <span class="text-xs opacity-60">{{
+                resolveInputLabel(input.label, input.name)
+              }}</span>
+              <input
+                type="text"
+                class="input input-bordered input-sm"
+                :class="{ 'input-error': isInputError(input.name, input.verify) }"
+                :value="getInputValue(input.name)"
+                @input="
+                  handleInputChange(
+                    input.name,
+                    getInputEventValue($event),
+                    input,
+                    $event.target instanceof HTMLInputElement ? $event.target : null,
+                  )
+                "
+              />
             </div>
-          </template>
+          </div>
+        </template>
 
-          <template v-else-if="option.type === 'input'">
-            <div class="flex w-full max-w-sm flex-col gap-2">
-              <div v-for="input in option.inputs" :key="input.name" class="flex flex-col gap-1">
-                <span class="text-sm text-gray-500">{{
-                  resolveInputLabel(input.label, input.name)
-                }}</span>
-                <n-input
-                  :value="getInputValue(input.name)"
-                  @update:value="(v: string) => setInputValue(input.name, v)"
-                  :allow-input="(v: string) => handleAllowInput(v, input.verify, input.pattern_msg)"
-                />
-              </div>
-            </div>
-          </template>
-
-          <template v-else-if="option.type === 'checkbox'">
-            <n-checkbox-group v-model:value="checkboxValue">
-              <n-space item-style="display: flex;" align="center">
-                <div v-for="checkbox in option.cases" :key="checkbox.name">
-                  <n-checkbox
-                    :value="checkbox.name"
-                    :label="resolveCaseLabel(checkbox.label, checkbox.name)"
-                  />
-                </div>
-              </n-space>
-            </n-checkbox-group>
-          </template>
-        </div>
+        <template v-else-if="option.type === 'checkbox'">
+          <div class="flex flex-wrap gap-3">
+            <label
+              v-for="checkbox in option.cases"
+              :key="checkbox.name"
+              class="flex items-center gap-1 cursor-pointer"
+            >
+              <input
+                type="checkbox"
+                class="checkbox checkbox-primary checkbox-sm"
+                :value="checkbox.name"
+                :checked="checkboxValue.includes(checkbox.name)"
+                @change="toggleCheckbox(checkbox.name, getChecked($event))"
+              />
+              <span class="text-sm">{{ resolveCaseLabel(checkbox.label, checkbox.name) }}</span>
+            </label>
+          </div>
+        </template>
       </div>
-    </n-list-item>
+    </div>
 
     <template v-if="nestedOptions.length > 0">
       <OptionItem
@@ -89,28 +108,36 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from "vue"
-import { useMessage } from "naive-ui"
 import { useI18n } from "vue-i18n"
+import { Icon } from "@iconify/vue"
+import { showGlobalMessage } from "@/services/feedback/message"
 import { useInterfaceStore } from "@/stores"
-import type { TaskOptionValue } from "@/types/scheduler/model"
+import type { InputCase } from "@/types/interfaceModel"
+import type { NullableTaskOptionValue } from "@/types/schedulerModel"
 import { resolveInterfaceText } from "@/utils/interface/content"
+import { tryCatch } from "@/utils/tryCatch"
 
-const props = defineProps<{
+const {
+  name,
+  level,
+  taskOptions: rawTaskOptions,
+} = defineProps<{
   name: string
   level?: number
-  taskOptions: Record<string, TaskOptionValue>
+  taskOptions: Record<string, NullableTaskOptionValue>
 }>()
-
-const message = useMessage()
+// sync setup
 const { locale } = useI18n()
 const interfaceStore = useInterfaceStore()
-const taskOptions = computed(() => props.taskOptions)
+const taskOptions = computed(() => rawTaskOptions)
 
-const option = computed(() => interfaceStore.interface?.option?.[props.name])
+const option = computed(() => interfaceStore.interface?.option?.[name])
 const resolvedLabel = computed(() =>
-  resolveInterfaceText(interfaceStore.interface, locale.value, option.value?.label, props.name),
+  resolveInterfaceText(interfaceStore.interface, locale.value, option.value?.label, name),
 )
 const scanSelectRefreshing = ref(false)
+/** Tracks which input fields currently fail verify, for one-shot pattern_msg on invalid transition. */
+const inputInvalidState = ref<Record<string, boolean>>({})
 
 const checkedValue = computed(() => {
   const currentOption = option.value
@@ -140,8 +167,20 @@ function resolveInputLabel(label: string | undefined, fallback: string) {
   return resolveInterfaceText(interfaceStore.interface, locale.value, label, fallback)
 }
 
+function isInputAllowed(value: string, verify?: string): boolean {
+  if (!verify || value === "") return true
+  const [ok, err] = tryCatch(() => new RegExp(verify).test(value))
+  if (err) return true
+  return ok === true
+}
+
+function isInputError(inputName: string, verify?: string): boolean {
+  // Current model value fails verify (e.g. preloaded invalid); blocked keystrokes never enter model
+  return !isInputAllowed(getInputValue(inputName), verify)
+}
+
 function getInputValue(inputName: string): string {
-  const currentValue = taskOptions.value[props.name]
+  const currentValue = taskOptions.value[name]
   if (currentValue && typeof currentValue === "object" && !Array.isArray(currentValue)) {
     const inputValue = currentValue[inputName]
     return typeof inputValue === "string" ? inputValue : ""
@@ -150,14 +189,45 @@ function getInputValue(inputName: string): string {
 }
 
 function setInputValue(inputName: string, value: string): void {
-  const currentValue = taskOptions.value[props.name]
+  const currentValue = taskOptions.value[name]
   const nextValue: Record<string, string> =
     currentValue && typeof currentValue === "object" && !Array.isArray(currentValue)
       ? { ...currentValue }
       : {}
 
   nextValue[inputName] = value
-  taskOptions.value[props.name] = nextValue
+  taskOptions.value[name] = nextValue
+}
+
+function handleInputChange(
+  inputName: string,
+  value: string,
+  input: InputCase,
+  target: HTMLInputElement | null,
+): void {
+  const allowed = isInputAllowed(value, input.verify)
+  const wasInvalid = inputInvalidState.value[inputName] === true
+
+  if (allowed) {
+    setInputValue(inputName, value)
+    inputInvalidState.value = { ...inputInvalidState.value, [inputName]: false }
+    return
+  }
+
+  // Invalid: do not update model; snap DOM back to previous value
+  if (target) {
+    target.value = getInputValue(inputName)
+  }
+  inputInvalidState.value = { ...inputInvalidState.value, [inputName]: true }
+  if (!wasInvalid && input.pattern_msg) {
+    const msg = resolveInterfaceText(
+      interfaceStore.interface,
+      locale.value,
+      input.pattern_msg,
+      input.pattern_msg,
+    )
+    showGlobalMessage("error", msg)
+  }
 }
 
 async function handleRescanScanSelect() {
@@ -166,39 +236,39 @@ async function handleRescanScanSelect() {
     return
   }
 
-  const previousValue = taskOptions.value[props.name]
+  const previousValue = taskOptions.value[name]
   scanSelectRefreshing.value = true
-  try {
-    taskOptions.value[props.name] = null as never
-    await interfaceStore.rescanScanSelectOption(props.name)
-  } catch (error) {
-    taskOptions.value[props.name] = previousValue
-    if (error instanceof Error && error.message) {
-      message.error(error.message)
+  taskOptions.value[name] = null
+  const [, err] = await tryCatch(() => interfaceStore.rescanScanSelectOption(name))
+  if (err) {
+    taskOptions.value[name] = previousValue
+    if (err.message) {
+      showGlobalMessage("error", err.message)
     }
-  } finally {
-    scanSelectRefreshing.value = false
   }
+  scanSelectRefreshing.value = false
 }
 
-function normalizeCheckboxValue(value: TaskOptionValue | undefined, caseOrder: string[]): string[] {
+function parseStringArray(value: string): string[] {
+  const [parsed, err] = tryCatch(() => JSON.parse(value))
+  if (err || !Array.isArray(parsed)) return []
+  return parsed.filter((item): item is string => typeof item === "string")
+}
+
+function normalizeCheckboxValue(
+  value: NullableTaskOptionValue | undefined,
+  caseOrder: string[],
+): string[] {
   let selectedValues: string[] = []
 
   if (Array.isArray(value)) {
     selectedValues = value.filter((item): item is string => typeof item === "string")
   } else if (typeof value === "string") {
-    try {
-      const parsed = JSON.parse(value)
-      if (Array.isArray(parsed)) {
-        selectedValues = parsed.filter((item): item is string => typeof item === "string")
-      }
-    } catch {
-      selectedValues = []
-    }
+    selectedValues = parseStringArray(value)
   }
 
   const selectedSet = new Set(selectedValues)
-  return caseOrder.filter((name) => selectedSet.has(name))
+  return caseOrder.filter((caseName) => selectedSet.has(caseName))
 }
 
 const checkboxValue = computed<string[]>({
@@ -209,7 +279,7 @@ const checkboxValue = computed<string[]>({
     }
 
     return normalizeCheckboxValue(
-      taskOptions.value[props.name],
+      taskOptions.value[name],
       currentOption.cases.map((item) => item.name),
     )
   },
@@ -219,12 +289,39 @@ const checkboxValue = computed<string[]>({
       return
     }
 
-    taskOptions.value[props.name] = normalizeCheckboxValue(
+    taskOptions.value[name] = normalizeCheckboxValue(
       value,
       currentOption.cases.map((item) => item.name),
     )
   },
 })
+
+function toggleCheckbox(checkboxName: string, checked: boolean) {
+  const current = new Set(checkboxValue.value)
+  if (checked) {
+    current.add(checkboxName)
+    checkboxValue.value = Array.from(current)
+    return
+  }
+  current.delete(checkboxName)
+  checkboxValue.value = Array.from(current)
+}
+
+function handleSwitchChange(event: Event) {
+  taskOptions.value[name] = getChecked(event) ? checkedValue.value : uncheckedValue.value
+}
+
+function getInputEventValue(event: Event): string {
+  const target = event.target
+  if (target instanceof HTMLInputElement) return target.value
+  return ""
+}
+
+function getChecked(event: Event): boolean {
+  const target = event.target
+  if (target instanceof HTMLInputElement) return target.checked
+  return false
+}
 
 const selectOptions = computed(() => {
   const currentOption = option.value
@@ -243,7 +340,7 @@ const isSelectValueInvalid = computed(() => {
     return false
   }
 
-  const currentValue = taskOptions.value[props.name]
+  const currentValue = taskOptions.value[name]
   if (currentValue == null || typeof currentValue !== "string") {
     return false
   }
@@ -255,74 +352,63 @@ watch(
   () => isSelectValueInvalid.value,
   (invalid) => {
     if (invalid) {
-      taskOptions.value[props.name] = null as never
+      taskOptions.value[name] = null
     }
   },
   { immediate: true },
 )
 
+function getSwitchNestedOptions(currentOption: NonNullable<typeof option.value>): string[] {
+  const currentValue = taskOptions.value[name]
+  const activeCase = currentOption.cases.find((caseItem) => caseItem.name === currentValue)
+  return activeCase?.option || []
+}
+
+function getSelectNestedOptions(currentOption: NonNullable<typeof option.value>): string[] {
+  const currentValue = taskOptions.value[name]
+  const activeCase = currentOption.cases.find((caseItem) => caseItem.name === currentValue)
+  return activeCase?.option || []
+}
+
+function getCheckboxNestedOptions(currentOption: NonNullable<typeof option.value>): string[] {
+  const activeNames = new Set(
+    normalizeCheckboxValue(
+      taskOptions.value[name],
+      currentOption.cases.map((item) => item.name),
+    ),
+  )
+  const childNames: string[] = []
+  const seen = new Set<string>()
+
+  for (const caseItem of currentOption.cases) {
+    if (!activeNames.has(caseItem.name)) continue
+
+    for (const childName of caseItem.option || []) {
+      if (seen.has(childName)) continue
+      seen.add(childName)
+      childNames.push(childName)
+    }
+  }
+
+  return childNames
+}
+
 const nestedOptions = computed(() => {
   const currentOption = option.value
   if (!currentOption) return []
-  const currentValue = taskOptions.value[props.name]
 
   if (currentOption.type === "switch") {
-    const activeCase = currentOption.cases.find((caseItem) => caseItem.name === currentValue)
-    return activeCase?.option || []
+    return getSwitchNestedOptions(currentOption)
   }
 
   if (currentOption.type === "select" || currentOption.type === "scan_select") {
-    const activeCase = currentOption.cases.find((caseItem) => caseItem.name === currentValue)
-    return activeCase?.option || []
+    return getSelectNestedOptions(currentOption)
   }
 
   if (currentOption.type === "checkbox") {
-    const activeNames = new Set(
-      normalizeCheckboxValue(
-        taskOptions.value[props.name],
-        currentOption.cases.map((item) => item.name),
-      ),
-    )
-    const childNames: string[] = []
-    const seen = new Set<string>()
-
-    for (const caseItem of currentOption.cases) {
-      if (!activeNames.has(caseItem.name)) {
-        continue
-      }
-
-      for (const childName of caseItem.option || []) {
-        if (seen.has(childName)) {
-          continue
-        }
-        seen.add(childName)
-        childNames.push(childName)
-      }
-    }
-
-    return childNames
+    return getCheckboxNestedOptions(currentOption)
   }
 
   return []
 })
-
-function handleAllowInput(value: string, verify?: string, patternMessage?: string) {
-  if (!verify || value === "") return true
-  try {
-    const isValid = new RegExp(verify).test(value)
-    if (!isValid && patternMessage) {
-      message.error(
-        resolveInterfaceText(
-          interfaceStore.interface,
-          locale.value,
-          patternMessage,
-          patternMessage,
-        ),
-      )
-    }
-    return isValid
-  } catch {
-    return true
-  }
-}
 </script>

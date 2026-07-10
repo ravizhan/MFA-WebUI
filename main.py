@@ -19,7 +19,7 @@ from pydantic import BaseModel
 import json_utils as json
 from app_state import AppState, LogBroadcaster, normalize_event
 from maa_utils import MaaWorker
-from models.api import DeviceModel
+from models.api import CustomDeviceCreate, DeviceModel
 from models.interface_loader import (
     InterfaceLoadError,
     load_interface_model,
@@ -44,6 +44,7 @@ from services.update_service import (
     download_file,
     get_platform_info,
 )
+import settings_io
 
 
 def _resolve_app_root_dir() -> Path:
@@ -289,6 +290,19 @@ async def connect_device(device: DeviceModel):
     return {"status": "failed", "message": msg}
 
 
+@app.post("/api/device/custom")
+def add_custom_device(payload: CustomDeviceCreate):
+    if app_state.worker is None:
+        return {"status": "failed", "message": "Worker未初始化"}
+    try:
+        device = app_state.worker.device.add_custom_device(payload)
+        return {"status": "success", "data": device}
+    except ValueError as e:
+        return {"status": "failed", "message": str(e)}
+    except OSError as e:
+        return {"status": "failed", "message": f"保存自定义设备失败: {e}"}
+
+
 @app.get("/api/device/state")
 def get_device_state():
     if app_state.worker is None:
@@ -358,11 +372,9 @@ async def set_resource(name: str):
 
 @app.get("/api/settings")
 def get_settings():
-    with SETTINGS_FILE.open("r", encoding="utf-8") as f:
-        config_data = json.load(f)
     with interface_lock:
-        app_state.settings = SettingsModel.model_validate(
-            config_data,
+        app_state.settings = settings_io.load_settings_model(
+            SETTINGS_FILE,
             context={"interface": interface},
         )
     return {"status": "success", "settings": app_state.settings.model_dump()}
@@ -370,9 +382,15 @@ def get_settings():
 
 @app.post("/api/settings")
 def set_settings(settings: SettingsModel):
-    with SETTINGS_FILE.open("w", encoding="utf-8") as f:
-        json.dump(settings.model_dump(), f, indent=4, ensure_ascii=False)
-    app_state.settings = settings
+    written = settings_io.write_settings_preserving_custom_devices(
+        SETTINGS_FILE, settings
+    )
+    # Re-validate so app_state reflects preserved customDevices from disk.
+    with interface_lock:
+        app_state.settings = SettingsModel.model_validate(
+            written,
+            context={"interface": interface},
+        )
     return {"status": "success"}
 
 

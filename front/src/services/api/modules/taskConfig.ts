@@ -1,5 +1,5 @@
 import type { ApiResponse } from "@/services/api/core/types"
-import { CUSTOM_PRESET_NAME, type PersistedTaskConfig } from "@/types/task-config/model"
+import { CUSTOM_PRESET_NAME, type PersistedTaskConfig } from "@/types/taskConfigModel"
 
 interface TaskConfigResponse {
   status: string

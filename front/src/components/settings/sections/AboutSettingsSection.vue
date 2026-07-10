@@ -1,96 +1,97 @@
 <template>
-  <n-card id="about" class="mb-6 scroll-mt-5 last:mb-0" :title="t('settings.about.title')">
-    <n-descriptions bordered :column="1">
-      <n-descriptions-item :label="t('settings.about.version')">
-        {{ settings.about.version || t("common.unknown") }}
-      </n-descriptions-item>
-      <n-descriptions-item :label="t('settings.about.author')">
-        <n-button
-          v-if="settings.about.author"
-          text
-          tag="a"
-          :href="`https://github.com/${settings.about.author}`"
-          target="_blank"
-          type="primary"
-        >
-          <template #icon>
-            <n-icon><div class="i-mdi-github" /></n-icon>
-          </template>
-          {{ settings.about.author }}
-        </n-button>
-        <span v-else>{{ t("common.unknown") }}</span>
-      </n-descriptions-item>
-      <n-descriptions-item :label="t('settings.about.license')">
-        {{ settings.about.license || "MIT" }}
-      </n-descriptions-item>
-      <n-descriptions-item :label="t('settings.about.homepage')">
-        <n-button
-          text
-          tag="a"
-          :href="settings.about.github || 'https://github.com/ravizhan/MWU'"
-          target="_blank"
-          type="primary"
-        >
-          <template #icon>
-            <n-icon><div class="i-mdi-github" /></n-icon>
-          </template>
-          {{ settings.about.github || "https://github.com/ravizhan/MWU" }}
-        </n-button>
-      </n-descriptions-item>
-      <n-descriptions-item :label="t('settings.about.issue')">
-        <n-button
-          text
-          tag="a"
-          :href="settings.about.issueUrl || 'https://github.com/ravizhan/MWU/issues'"
-          target="_blank"
-          type="primary"
-        >
-          <template #icon>
-            <n-icon><div class="i-mdi-bug" /></n-icon>
-          </template>
-          GitHub Issues
-        </n-button>
-      </n-descriptions-item>
-      <n-descriptions-item :label="t('settings.about.contact')" v-if="settings.about.contact">
-        {{ settings.about.contact }}
-      </n-descriptions-item>
-      <n-descriptions-item :label="t('settings.about.description')">
-        {{ settings.about.description || t("settings.about.defaultDescription") }}
-      </n-descriptions-item>
-    </n-descriptions>
-    <n-divider />
-    <n-space>
-      <n-button type="warning" @click="handleResetSettings">{{
-        t("settings.about.reset")
-      }}</n-button>
-    </n-space>
-  </n-card>
+  <div class="space-y-4">
+    <div class="overflow-x-auto">
+      <table class="table table-sm">
+        <tbody>
+          <tr>
+            <td class="font-medium text-base">{{ t("settings.about.version") }}</td>
+            <td class="text-base">{{ settings.about.version || t("common.unknown") }}</td>
+          </tr>
+          <tr>
+            <td class="font-medium text-base">{{ t("settings.about.author") }}</td>
+            <td class="text-base">
+              <a
+                v-if="settings.about.author"
+                :href="`https://github.com/${settings.about.author}`"
+                target="_blank"
+                class="link link-primary flex items-center gap-1"
+              >
+                <Icon icon="mdi:github" class="text-lg" />
+                {{ settings.about.author }}
+              </a>
+              <span v-else>{{ t("common.unknown") }}</span>
+            </td>
+          </tr>
+          <tr>
+            <td class="font-medium text-base">{{ t("settings.about.license") }}</td>
+            <td class="text-base">{{ settings.about.license || "MIT" }}</td>
+          </tr>
+          <tr>
+            <td class="font-medium text-base">{{ t("settings.about.homepage") }}</td>
+            <td class="text-base">
+              <a
+                :href="settings.about.github || 'https://github.com/ravizhan/MWU'"
+                target="_blank"
+                class="link link-primary flex items-center gap-1"
+              >
+                <Icon icon="mdi:github" class="text-lg" />
+                {{ settings.about.github || "https://github.com/ravizhan/MWU" }}
+              </a>
+            </td>
+          </tr>
+          <tr>
+            <td class="font-medium text-base">{{ t("settings.about.issue") }}</td>
+            <td class="text-base">
+              <a
+                :href="settings.about.issueUrl || 'https://github.com/ravizhan/MWU/issues'"
+                target="_blank"
+                class="link link-primary flex items-center gap-1"
+              >
+                <Icon icon="mdi:bug" class="text-lg" />
+                {{ t("settings.about.githubIssues") }}
+              </a>
+            </td>
+          </tr>
+          <tr v-if="settings.about.contact">
+            <td class="font-medium text-base">{{ t("settings.about.contact") }}</td>
+            <td class="text-base">{{ settings.about.contact }}</td>
+          </tr>
+          <tr>
+            <td class="font-medium text-base">{{ t("settings.about.description") }}</td>
+            <td class="text-base">
+              {{ settings.about.description || t("settings.about.defaultDescription") }}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="divider" />
+
+    <button class="btn btn-warning btn-sm" @click="handleResetSettings">
+      {{ t("settings.about.reset") }}
+    </button>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from "vue"
-import { useDialog, useMessage } from "naive-ui"
 import { useI18n } from "vue-i18n"
+import { Icon } from "@iconify/vue"
+import { showGlobalMessage } from "@/services/feedback/message"
 import { useSettingsStore } from "@/stores"
 
 const { t } = useI18n()
-const dialog = useDialog()
-const message = useMessage()
 const settingsStore = useSettingsStore()
 const settings = computed(() => settingsStore.settings)
 
 function handleResetSettings() {
-  dialog.warning({
-    title: t("common.confirm"),
-    content: t("settings.about.resetConfirm"),
-    positiveText: t("common.confirm"),
-    negativeText: t("common.cancel"),
-    onPositiveClick: async () => {
-      const success = await settingsStore.resetSettings()
+  if (confirm(t("settings.about.resetConfirm"))) {
+    void settingsStore.resetSettings().then((success) => {
       if (success) {
-        message.success(t("settings.about.resetSuccess"))
+        showGlobalMessage("success", t("settings.about.resetSuccess"))
       }
-    },
-  })
+    })
+  }
 }
 </script>

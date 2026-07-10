@@ -1,15 +1,13 @@
 <template>
-  <div class="col-name">{{ t("panel.taskSettings") }}</div>
-  <n-card hoverable content-style="padding: 0;" class="overflow-hidden transition-all duration-300">
+  <div class="space-y-3">
     <TaskOptionPanel
       :current-task-id="selectedTaskId"
       :options="configStore.options"
-      :scrollbar-class="scrollbarClass"
       :empty-text="t('settings.scheduler.dialog.selectTaskTip')"
       :no-options-text="t('settings.scheduler.dialog.noOptions')"
     />
-  </n-card>
-  <TaskDescriptionCard />
+    <TaskDescriptionCard />
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -22,6 +20,5 @@ import { useIndexStore, useTaskConfigStore } from "@/stores"
 const { t } = useI18n()
 const indexStore = useIndexStore()
 const configStore = useTaskConfigStore()
-const scrollbarClass = "max-h-65 !rounded-[12px]"
 const selectedTaskId = computed(() => indexStore.SelectedTaskID)
 </script>

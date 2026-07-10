@@ -1,102 +1,196 @@
 <template>
-  <n-card content-style="padding: 0.75rem;" hoverable>
-    <n-tabs type="segment" animated>
-      <n-tab-pane name="device" :tab="t('panel.device')">
-        <n-flex class="pb-[12px]" :wrap="true" :size="[12, 12]">
-          <n-select
+  <div v-if="mode === 'device'" class="flex flex-wrap gap-2">
+    <select
+      :value="selectedController"
+      class="select select-bordered select-sm flex-1 min-w-[8rem]"
+      :disabled="deviceDisabled"
+      @change="handleControllerUpdate(getSelectValue($event))"
+    >
+      <option value="" disabled>{{ t("panel.selectDeviceType") }}</option>
+      <option
+        v-for="opt in controllerOptions"
+        :key="opt.value"
+        :value="opt.value"
+        :disabled="opt.disabled"
+      >
+        {{ opt.label }}
+      </option>
+    </select>
+    <input
+      v-if="isPlayCover"
+      :value="playCoverAddress"
+      class="input input-bordered input-sm flex-1 min-w-[10rem]"
+      :placeholder="t('panel.playcoverAddress')"
+      :disabled="deviceDisabled"
+      @input="emit('update:play-cover-address', getInputValue($event))"
+    />
+    <CreatableSelect
+      v-else
+      :model-value="selectedDeviceKey"
+      :options="deviceOptions"
+      :placeholder="t('panel.selectDevice')"
+      :disabled="!selectedController || selectedControllerDisabled || deviceDisabled"
+      class="flex-1 min-w-[10rem]"
+      @update:model-value="emit('update:selected-device-key', $event)"
+      @open="emit('open-devices')"
+      @create="emit('create-device', $event)"
+    />
+  </div>
+
+  <!-- Resource-only mode: no tabs, no card wrapper -->
+  <div v-else-if="mode === 'resource'" class="flex flex-wrap gap-2">
+    <select
+      :value="resource"
+      class="select select-bordered select-sm flex-1 min-w-[12rem]"
+      :disabled="resourceDisabled"
+      @change="emit('update:resource', getSelectValue($event) || null)"
+    >
+      <option value="" disabled>{{ t("panel.selectResource") }}</option>
+      <option v-for="opt in resourcesList" :key="opt.value" :value="opt.value">
+        {{ opt.label }}
+      </option>
+    </select>
+  </div>
+
+  <!-- Tabs mode (default): full card with tab toggle -->
+  <div v-else class="space-y-3">
+    <div class="card bg-base-200">
+      <div class="card-body p-3">
+        <div class="tabs tabs-boxed tabs-sm mb-3">
+          <a
+            class="tab"
+            :class="{ 'tab-active': activeTab === 'device' }"
+            @click="activeTab = 'device'"
+          >
+            {{ t("panel.device") }}
+          </a>
+          <a
+            class="tab"
+            :class="{ 'tab-active': activeTab === 'resource' }"
+            @click="activeTab = 'resource'"
+          >
+            {{ t("panel.resource") }}
+          </a>
+        </div>
+
+        <div v-if="activeTab === 'device'" class="flex flex-wrap gap-2">
+          <select
             :value="selectedController"
-            :placeholder="t('panel.selectDeviceType')"
-            :options="controllerOptions"
-            :loading="loading"
+            class="select select-bordered select-sm flex-1 min-w-[8rem]"
             :disabled="deviceDisabled"
-            class="min-w-[8rem] flex-1"
-            @update:value="handleControllerUpdate"
-          />
-          <n-input
+            @change="handleControllerUpdate(getSelectValue($event))"
+          >
+            <option value="" disabled>{{ t("panel.selectDeviceType") }}</option>
+            <option
+              v-for="opt in controllerOptions"
+              :key="opt.value"
+              :value="opt.value"
+              :disabled="opt.disabled"
+            >
+              {{ opt.label }}
+            </option>
+          </select>
+          <input
             v-if="isPlayCover"
             :value="playCoverAddress"
+            class="input input-bordered input-sm flex-1 min-w-[10rem]"
             :placeholder="t('panel.playcoverAddress')"
             :disabled="deviceDisabled"
-            class="min-w-[10rem] flex-1"
-            @update:value="(value: string) => emit('update:playCoverAddress', value)"
+            @input="emit('update:play-cover-address', getInputValue($event))"
           />
-          <n-select
+          <CreatableSelect
             v-else
-            :value="selectedDeviceKey"
-            :placeholder="t('panel.selectDevice')"
+            :model-value="selectedDeviceKey"
             :options="deviceOptions"
-            :loading="loading"
+            :placeholder="t('panel.selectDevice')"
             :disabled="!selectedController || selectedControllerDisabled || deviceDisabled"
-            filterable
-            tag
-            clearable
-            class="min-w-[10rem] flex-1"
-            @update:value="(value: string | null) => emit('update:selectedDeviceKey', value)"
+            class="flex-1 min-w-[10rem]"
+            @update:model-value="emit('update:selected-device-key', $event)"
+            @open="emit('open-devices')"
+            @create="emit('create-device', $event)"
           />
-          <n-button
-            strong
-            secondary
-            type="info"
-            :disabled="!selectedController || selectedControllerDisabled || deviceDisabled"
-            @click="emit('refresh-devices')"
-          >
-            {{ t("panel.refresh") }}
-          </n-button>
-        </n-flex>
-      </n-tab-pane>
+        </div>
 
-      <n-tab-pane name="resource" :tab="t('panel.resource')">
-        <n-flex class="pb-[12px]" :wrap="true" :size="[12, 12]">
-          <n-select
+        <div v-else class="flex flex-wrap gap-2">
+          <select
             :value="resource"
-            :placeholder="t('panel.selectResource')"
-            :options="resourcesList"
-            :loading="loading"
+            class="select select-bordered select-sm flex-1 min-w-[12rem]"
             :disabled="resourceDisabled"
-            clearable
-            class="min-w-[12rem] flex-1"
-            @update:value="(value: string | null) => emit('update:resource', value)"
-          />
-        </n-flex>
-      </n-tab-pane>
-    </n-tabs>
-  </n-card>
+            @change="emit('update:resource', getSelectValue($event) || null)"
+          >
+            <option value="" disabled>{{ t("panel.selectResource") }}</option>
+            <option v-for="opt in resourcesList" :key="opt.value" :value="opt.value">
+              {{ opt.label }}
+            </option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
+import { ref } from "vue"
 import { useI18n } from "vue-i18n"
-import type { SelectOption, SelectGroupOption } from "naive-ui"
+import CreatableSelect from "@/components/common/CreatableSelect.vue"
 
-const props = defineProps<{
+const {
+  selectedController,
+  selectedDeviceKey,
+  playCoverAddress,
+  controllerOptions,
+  deviceOptions,
+  deviceDisabled,
+  resourceDisabled,
+  selectedControllerDisabled,
+  isPlayCover,
+  resource,
+  resourcesList,
+  mode = "tabs",
+} = defineProps<{
   selectedController: string | null
   selectedDeviceKey: string | null
   playCoverAddress: string
   controllerOptions: Array<{ label: string; value: string; disabled?: boolean }>
-  deviceOptions: Array<SelectOption | SelectGroupOption>
-  loading: boolean
+  deviceOptions: Array<{ label: string; value: string; disabled?: boolean }>
   deviceDisabled: boolean
   resourceDisabled: boolean
   selectedControllerDisabled: boolean
   isPlayCover: boolean
   resource: string | null
   resourcesList: Array<{ label: string; value: string }>
+  mode?: "device" | "resource" | "tabs"
 }>()
 
 const emit = defineEmits<{
-  (e: "update:selectedController", value: string | null): void
-  (e: "update:selectedDeviceKey", value: string | null): void
-  (e: "update:playCoverAddress", value: string): void
+  (e: "update:selected-controller", value: string | null): void
+  (e: "update:selected-device-key", value: string | null): void
+  (e: "update:play-cover-address", value: string): void
   (e: "update:resource", value: string | null): void
   (e: "controller-change"): void
-  (e: "refresh-devices"): void
+  (e: "open-devices"): void
+  (e: "create-device", value: string): void
 }>()
 
 const { t } = useI18n()
+const activeTab = ref<"device" | "resource">("device")
 
 function handleControllerUpdate(value: string | null) {
-  emit("update:selectedController", value)
-  if (value !== props.selectedController) {
+  emit("update:selected-controller", value)
+  if (value !== selectedController) {
     emit("controller-change")
   }
+}
+
+function getSelectValue(event: Event): string {
+  const target = event.target
+  if (target instanceof HTMLSelectElement) return target.value
+  return ""
+}
+
+function getInputValue(event: Event): string {
+  const target = event.target
+  if (target instanceof HTMLInputElement) return target.value
+  return ""
 }
 </script>
