@@ -3,7 +3,7 @@
     <!-- Header stats row -->
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
       <div class="card bg-base-100 shadow-xl">
-        <div class="card-body p-2">
+        <div class="card-body p-4">
           <div class="stat-title text-sm opacity-70">{{ t("panel.device") }}</div>
           <div class="stat-value text-lg flex items-center gap-2">
             <div
@@ -19,7 +19,7 @@
         </div>
       </div>
       <div class="card bg-base-100 shadow-xl">
-        <div class="card-body p-2">
+        <div class="card-body p-4">
           <div class="stat-title text-sm opacity-70">{{ t("panel.taskList") }}</div>
           <div class="stat-value text-lg">
             {{ selectedTaskCount }} {{ t("common.slash") }} {{ configStore.taskList.length }}
@@ -27,7 +27,7 @@
         </div>
       </div>
       <div class="card bg-base-100 shadow-xl">
-        <div class="card-body p-2">
+        <div class="card-body p-4">
           <div class="stat-title text-sm opacity-70">{{ t("nav.routines") }}</div>
           <div class="stat-value text-lg">
             {{ schedulerStore.enabledTasks.length }}
@@ -35,7 +35,7 @@
         </div>
       </div>
       <div class="card bg-base-100 shadow-xl">
-        <div class="card-body p-2">
+        <div class="card-body p-4">
           <div class="stat-title text-sm opacity-70">{{ t("settings.about.version") }}</div>
           <div class="stat-value text-lg">
             {{ settingsStore.settings.about.version || "-" }}
@@ -50,7 +50,7 @@
       <div class="space-y-3">
         <!-- Device Selection Card -->
         <div class="card bg-base-100 shadow-xl">
-          <div class="card-body p-2">
+          <div class="card-body p-4">
             <h2 class="card-title text-base">
               <Icon icon="mdi:cellphone-link" class="text-primary text-2xl" />
               {{ t("panel.device") }}
@@ -83,7 +83,7 @@
 
         <!-- Resource Selection Card -->
         <div class="card bg-base-100 shadow-xl">
-          <div class="card-body p-2">
+          <div class="card-body p-4">
             <h2 class="card-title text-base">
               <Icon icon="mdi:folder-open-outline" class="text-primary text-2xl" />
               {{ t("panel.resource") }}
@@ -112,7 +112,7 @@
       <!-- Right: Recipe Cards + Routine Health -->
       <div class="space-y-3 lg:col-span-2">
         <div class="card bg-base-100 shadow-xl">
-          <div class="card-body p-2">
+          <div class="card-body p-4">
             <h2 class="card-title text-base">
               <Icon icon="mdi:book-open-variant" class="text-primary text-2xl" />
               {{ t("panel.preset.title") }}
@@ -130,7 +130,7 @@
 
         <!-- Routine Health -->
         <div class="card bg-base-100 shadow-xl">
-          <div class="card-body p-2">
+          <div class="card-body p-4">
             <h2 class="card-title text-base">
               <Icon icon="mdi:heart-pulse" class="text-primary text-2xl" />
               {{ t("nav.routines") }}

@@ -54,7 +54,7 @@ watch(
 
 const htmlContent = computed(() => {
   const source = documentContent.value?.trim() ? documentContent.value : t("panel.empty")
-  const parsed = marked.parse(source || "")
+  const parsed = marked.parse(source || "", { gfm: true })
   return DOMPurify.sanitize(typeof parsed === "string" ? parsed : "")
 })
 </script>

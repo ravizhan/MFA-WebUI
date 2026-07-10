@@ -101,6 +101,9 @@ import { computed, onMounted, ref, watch, watchEffect } from "vue"
 import { useRoute } from "vue-router"
 import { useI18n } from "vue-i18n"
 import { Icon } from "@iconify/vue"
+import markdownAutoHref from "github-markdown-css/github-markdown.css?url"
+import markdownDarkHref from "github-markdown-css/github-markdown-dark.css?url"
+import markdownLightHref from "github-markdown-css/github-markdown-light.css?url"
 import UpdateDialog from "@/components/settings/dialogs/UpdateDialog.vue"
 import { checkUpdateApi, type UpdateInfo } from "@/services/api"
 import { useToasts } from "@/services/feedback/message"
@@ -206,12 +209,12 @@ watch(
 
 function markdownHref(mode: boolean | "auto"): string {
   if (mode === "auto") {
-    return "https://cdn.jsdelivr.net/npm/github-markdown-css@5/github-markdown-auto.css"
+    return markdownAutoHref
   }
   if (mode) {
-    return "https://cdn.jsdelivr.net/npm/github-markdown-css@5/github-markdown-dark.css"
+    return markdownDarkHref
   }
-  return "https://cdn.jsdelivr.net/npm/github-markdown-css@5/github-markdown-light.css"
+  return markdownLightHref
 }
 
 watchEffect(() => {

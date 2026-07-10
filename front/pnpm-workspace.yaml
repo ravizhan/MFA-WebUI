@@ -24,6 +24,7 @@ catalog:
   eslint-plugin-oxlint: ^1.72.0
   eslint-plugin-pnpm: ^1.6.1
   eslint-plugin-vue: ^10.9.2
+  github-markdown-css: ^5.9.0
   jsdom: ^29.1.1
   marked: ^18.0.5
   msw: ^2.14.6

@@ -19,6 +19,7 @@
   "dependencies": {
     "@iconify/vue": "catalog:",
     "dompurify": "catalog:",
+    "github-markdown-css": "catalog:",
     "marked": "catalog:",
     "pinia": "catalog:",
     "vue": "catalog:",

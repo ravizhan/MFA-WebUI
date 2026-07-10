@@ -55,6 +55,7 @@ body {
 
 /* Markdown viewer overrides */
 .markdown-body {
+  background-color: transparent !important;
   font-size: 0.9rem;
   line-height: 1.6;
 }

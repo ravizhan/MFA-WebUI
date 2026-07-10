@@ -11,7 +11,7 @@
         <Icon icon="mdi:playlist-play" class="text-primary text-2xl" />
         {{ $t("taskConfig.preTasks.title") }}
       </div>
-      <div class="collapse-content px-3 pb-3">
+      <div class="collapse-content px-3">
         <div class="flex items-center justify-between mb-2">
           <span class="text-sm opacity-60">{{ $t("taskConfig.preTasks.description") }}</span>
           <button class="btn btn-primary btn-sm" @click="handleAdd">
@@ -50,7 +50,7 @@
               />
               <input
                 type="checkbox"
-                class="toggle toggle-primary toggle-sm"
+                class="toggle toggle-primary toggle-md"
                 :checked="item.enabled"
                 @change="item.enabled = getChecked($event)"
               />
@@ -58,7 +58,7 @@
                 class="btn btn-ghost btn-circle btn-xs text-error"
                 @click="handleDelete(index)"
               >
-                <Icon icon="mdi:delete" class="text-base" />
+                <Icon icon="mdi:delete" class="text-xl" />
               </button>
             </div>
           </VueDraggable>
