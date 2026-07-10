@@ -2,7 +2,7 @@ import re
 from typing import Any, Literal, Optional
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, ValidationInfo, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 DeviceType = Literal["Adb", "Win32", "Gamepad", "PlayCover"]
 
@@ -87,11 +87,11 @@ class UI(BaseModel):
 
 
 class Runtime(BaseModel):
-    timeout: int = 300
-    reminderInterval: int = 30
+    timeout: int = Field(default=300, ge=60, le=3600)
+    reminderInterval: int = Field(default=30, ge=5, le=120)
     autoRetry: bool = True
-    maxRetryCount: int = 3
-    retryInterval: int = 5
+    maxRetryCount: int = Field(default=3, ge=1, le=10)
+    retryInterval: int = Field(default=5, ge=1)
 
 
 class About(BaseModel):

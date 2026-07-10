@@ -44,6 +44,7 @@ from services.update_service import (
     download_file,
     get_platform_info,
 )
+import settings_io
 
 
 def _resolve_app_root_dir() -> Path:
@@ -371,11 +372,9 @@ async def set_resource(name: str):
 
 @app.get("/api/settings")
 def get_settings():
-    with SETTINGS_FILE.open("r", encoding="utf-8") as f:
-        config_data = json.load(f)
     with interface_lock:
-        app_state.settings = SettingsModel.model_validate(
-            config_data,
+        app_state.settings = settings_io.load_settings_model(
+            SETTINGS_FILE,
             context={"interface": interface},
         )
     return {"status": "success", "settings": app_state.settings.model_dump()}
@@ -383,9 +382,15 @@ def get_settings():
 
 @app.post("/api/settings")
 def set_settings(settings: SettingsModel):
-    with SETTINGS_FILE.open("w", encoding="utf-8") as f:
-        json.dump(settings.model_dump(), f, indent=4, ensure_ascii=False)
-    app_state.settings = settings
+    written = settings_io.write_settings_preserving_custom_devices(
+        SETTINGS_FILE, settings
+    )
+    # Re-validate so app_state reflects preserved customDevices from disk.
+    with interface_lock:
+        app_state.settings = SettingsModel.model_validate(
+            written,
+            context={"interface": interface},
+        )
     return {"status": "success"}
 
 

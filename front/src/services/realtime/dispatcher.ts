@@ -14,9 +14,8 @@ export interface RealtimeStoreRefs {
  * 2. Show an in-app toast (if notify includes "toast")
  * 3. Show a browser Notification (if notify includes "notification")
  *
- * This replaces the old handleRealtimeEvent which had a double-notification
- * bug: it called showRealtimeMessage() unconditionally for any non-empty
- * notify array, duplicating the toast already shown by showToastMessage().
+ * Toast and browser notification are independent channels — never both
+ * from a single unconditional path (that used to duplicate toasts).
  */
 function handleCommon(event: RealtimeEvent, stores: RealtimeStoreRefs): void {
   if (event.display) {
@@ -52,11 +51,8 @@ function handleTaskFailed(event: RealtimeEvent, stores: RealtimeStoreRefs): void
  * Per-event-type handlers. Events not listed here fall through to
  * handleCommon (log + notify channels only).
  *
- * Only 7 of the 12 declared RealtimeEventName values are actually emitted
- * by the backend: log, focus.display, task.started, task.completed,
- * task.failed, notification.test. The other 6 (resource.loading,
- * controller.action, tasker.task, node.recognition, node.action, sink)
- * are dead code — all MAA sink callbacks funnel through "focus.display".
+ * Emitted RealtimeEventName values: log, focus.display, task.started,
+ * task.completed, task.failed, notification.test.
  */
 const typeHandlers: Partial<
   Record<RealtimeEventName, (event: RealtimeEvent, stores: RealtimeStoreRefs) => void>

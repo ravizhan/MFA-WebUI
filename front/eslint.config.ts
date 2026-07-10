@@ -2,7 +2,6 @@ import pluginEslintComments from "@eslint-community/eslint-plugin-eslint-comment
 import pluginVueI18n from "@intlify/eslint-plugin-vue-i18n"
 import skipFormatting from "@vue/eslint-config-prettier/skip-formatting"
 import { defineConfigWithVueTs, vueTsConfigs } from "@vue/eslint-config-typescript"
-import pluginImportX from "eslint-plugin-import-x"
 import pluginOxlint from "eslint-plugin-oxlint"
 import { configs as pnpmConfigs } from "eslint-plugin-pnpm"
 import pluginVue from "eslint-plugin-vue"
@@ -52,24 +51,6 @@ export default defineConfigWithVueTs(
           message: "Avoid else. Use early returns.",
         },
         { selector: "TryStatement", message: "Use tryCatch() instead of try/catch." },
-      ],
-    },
-  },
-
-  // Feature boundaries
-  {
-    files: ["src/**/*.{ts,vue}"],
-    plugins: { "import-x": pluginImportX },
-    rules: {
-      "import-x/no-restricted-paths": [
-        "error",
-        {
-          zones: [
-            { target: "./src/features/workout", from: "./src/features", except: ["./workout"] },
-            // ... other features
-            { target: "./src/features", from: "./src/views" }, // Unidirectional flow
-          ],
-        },
       ],
     },
   },

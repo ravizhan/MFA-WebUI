@@ -102,13 +102,14 @@
 
 <script setup lang="ts">
 import { storeToRefs } from "pinia"
-import { nextTick, onUnmounted, ref, useTemplateRef, watch } from "vue"
+import { nextTick, onMounted, onUnmounted, ref, useTemplateRef, watch } from "vue"
 import { useI18n } from "vue-i18n"
 import { Icon } from "@iconify/vue"
-import { useIndexStore } from "@/stores"
+import { useDeviceConnectionStore, useIndexStore } from "@/stores"
 
 const { t } = useI18n()
 const indexStore = useIndexStore()
+const deviceStore = useDeviceConnectionStore()
 const { Connected: connected, RunningLog: log } = storeToRefs(indexStore)
 const streaming = ref(false)
 const fps = ref(30)
@@ -157,8 +158,13 @@ watch(
   { immediate: true },
 )
 
+onMounted(() => {
+  deviceStore.init()
+})
+
 onUnmounted(() => {
   handleStopStream()
+  deviceStore.cleanup()
 })
 </script>
 

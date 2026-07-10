@@ -108,9 +108,9 @@ async function handleStart() {
   }
 }
 
-function handleStop() {
-  stopTask()
-  indexStore.setTaskRunning(false)
+async function handleStop() {
+  // Await stop API; leave TaskRunning true until SSE task.failed/completed clears it
+  await stopTask()
 }
 
 onMounted(() => {

@@ -5,12 +5,6 @@ export type RealtimeEventName =
   | "task.completed"
   | "task.failed"
   | "notification.test"
-  | "resource.loading"
-  | "controller.action"
-  | "tasker.task"
-  | "node.recognition"
-  | "node.action"
-  | "sink"
 
 export type RealtimeEventLevel = "info" | "success" | "error"
 

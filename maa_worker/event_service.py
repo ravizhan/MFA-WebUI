@@ -8,6 +8,7 @@ import plyer
 import json_utils as json
 from models.api import RealtimeEvent, RealtimeEventLevel, RealtimeEventName
 from models.settings import SettingsModel
+from settings_io import default_settings_path, load_settings_model
 
 if TYPE_CHECKING:
     from maa_utils import MaaWorker
@@ -18,9 +19,10 @@ def current_time() -> str:
 
 
 def load_settings() -> SettingsModel:
-    with open("config/settings.json", "r", encoding="utf-8") as f:
-        config_data = json.load(f)
-    return SettingsModel(**config_data)
+    try:
+        return load_settings_model(default_settings_path())
+    except Exception:
+        return SettingsModel()
 
 
 class EventService:

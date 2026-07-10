@@ -40,7 +40,6 @@
     "@vue/tsconfig": "catalog:",
     "daisyui": "catalog:",
     "eslint": "catalog:",
-    "eslint-plugin-import-x": "catalog:",
     "eslint-plugin-oxlint": "catalog:",
     "eslint-plugin-pnpm": "catalog:",
     "eslint-plugin-vue": "catalog:",

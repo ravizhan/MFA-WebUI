@@ -50,9 +50,9 @@ export interface ScheduledTask extends TaskExecutionPayload {
   enabled: boolean
   trigger_type: TriggerType
   trigger_config: TriggerConfig
-  controller_name?: string
+  controller_name?: string | null
   device?: ScheduledTaskDeviceConfig | null
-  resource_name?: string
+  resource_name?: string | null
   next_run_time?: string // ISO 8601 datetime string
   created_at: string // ISO 8601 datetime string
   updated_at: string // ISO 8601 datetime string
@@ -64,9 +64,9 @@ export interface ScheduledTaskCreate extends TaskExecutionPayload {
   enabled: boolean
   trigger_type: TriggerType
   trigger_config: TriggerConfig
-  controller_name?: string
+  controller_name?: string | null
   device?: ScheduledTaskDeviceConfig | null
-  resource_name?: string
+  resource_name?: string | null
 }
 
 export interface ScheduledTaskUpdate {
@@ -75,9 +75,9 @@ export interface ScheduledTaskUpdate {
   enabled?: boolean
   trigger_type?: TriggerType
   trigger_config?: TriggerConfig
-  controller_name?: string
+  controller_name?: string | null
   device?: ScheduledTaskDeviceConfig | null
-  resource_name?: string
+  resource_name?: string | null
   task_list?: string[]
   task_options?: TaskOptionsByTask
   preTasks?: PreTaskCommand[]

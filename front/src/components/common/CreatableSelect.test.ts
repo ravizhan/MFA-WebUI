@@ -4,7 +4,6 @@
  */
 import { describe, expect, it, vi, afterEach } from "vitest"
 import { createApp, nextTick, defineComponent, h, ref } from "vue"
-// @ts-expect-error Vue SFCs are resolved by the Vite plugin; this project has no global shim.
 import CreatableSelect from "@/components/common/CreatableSelect.vue"
 
 vi.mock("vue-i18n", () => ({

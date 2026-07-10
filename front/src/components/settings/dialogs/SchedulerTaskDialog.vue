@@ -170,7 +170,7 @@
               :value="dateConfigLocal"
               @input="
                 updateTriggerConfig({
-                  run_date: new Date(getInputValue($event)).toISOString(),
+                  run_date: toIsoOrEmpty(getInputValue($event)),
                 })
               "
             />
@@ -277,9 +277,7 @@
                 :value="intervalStartLocal"
                 @input="
                   updateTriggerConfig({
-                    start_date: getInputValue($event)
-                      ? new Date(getInputValue($event)).toISOString()
-                      : undefined,
+                    start_date: toIsoOrEmpty(getInputValue($event)) || undefined,
                   })
                 "
               />
@@ -294,9 +292,7 @@
                 :value="intervalEndLocal"
                 @input="
                   updateTriggerConfig({
-                    end_date: getInputValue($event)
-                      ? new Date(getInputValue($event)).toISOString()
-                      : undefined,
+                    end_date: toIsoOrEmpty(getInputValue($event)) || undefined,
                   })
                 "
               />
@@ -580,6 +576,23 @@ function getInputValue(event: Event): string {
   return target instanceof HTMLInputElement ? target.value : ""
 }
 
+/** Convert datetime-local / ISO string to ISO, or "" if empty/invalid. */
+function toIsoOrEmpty(value: string): string {
+  if (!value) return ""
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return ""
+  return d.toISOString()
+}
+
+/** Format ISO string for datetime-local input; "" if missing/invalid. */
+function toDatetimeLocalValue(iso: string | undefined): string {
+  if (!iso) return ""
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return ""
+  d.setMinutes(d.getMinutes() - d.getTimezoneOffset())
+  return d.toISOString().slice(0, 16)
+}
+
 const showDialog = computed({
   get: () => show,
   set: (value) => emit("update:show", value),
@@ -679,28 +692,13 @@ const dateConfig = computed<DateTriggerConfig>(() => {
   const config = formData.value.trigger_config
   return config.type === "date" ? config : { type: "date", run_date: "" }
 })
-const dateConfigLocal = computed(() => {
-  if (!dateConfig.value.run_date) return ""
-  const d = new Date(dateConfig.value.run_date)
-  d.setMinutes(d.getMinutes() - d.getTimezoneOffset())
-  return d.toISOString().slice(0, 16)
-})
+const dateConfigLocal = computed(() => toDatetimeLocalValue(dateConfig.value.run_date))
 const intervalConfig = computed<IntervalTriggerConfig>(() => {
   const config = formData.value.trigger_config
   return config.type === "interval" ? config : { type: "interval" }
 })
-const intervalStartLocal = computed(() => {
-  if (!intervalConfig.value.start_date) return ""
-  const d = new Date(intervalConfig.value.start_date)
-  d.setMinutes(d.getMinutes() - d.getTimezoneOffset())
-  return d.toISOString().slice(0, 16)
-})
-const intervalEndLocal = computed(() => {
-  if (!intervalConfig.value.end_date) return ""
-  const d = new Date(intervalConfig.value.end_date)
-  d.setMinutes(d.getMinutes() - d.getTimezoneOffset())
-  return d.toISOString().slice(0, 16)
-})
+const intervalStartLocal = computed(() => toDatetimeLocalValue(intervalConfig.value.start_date))
+const intervalEndLocal = computed(() => toDatetimeLocalValue(intervalConfig.value.end_date))
 
 const formData = ref<ScheduledTaskCreate>(initFormData(task))
 const taskListData = ref<TaskListItem[]>([])
@@ -765,7 +763,7 @@ watch(
 
     if (!suppressFormInit.value && oldVal != null && oldVal !== newVal) {
       formData.value.device = null
-      formData.value.resource_name = undefined
+      formData.value.resource_name = null
     }
 
     if (newVal && type) {
@@ -888,9 +886,9 @@ function initFormData(task?: ScheduledTask | null): ScheduledTaskCreate {
     task_list: [],
     task_options: configStore.buildOptionsForTasks([]),
     preTasks: [],
-    controller_name: undefined,
+    controller_name: null,
     device: null,
-    resource_name: undefined,
+    resource_name: null,
   }
 }
 

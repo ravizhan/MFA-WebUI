@@ -3,7 +3,6 @@ import type { RealtimeEvent } from "@/types/realtimeModel"
 import type { NotificationSettings } from "@/types/settingsModel"
 import {
   formatRealtimeLog,
-  showRealtimeMessage,
   showToastMessage,
   showBrowserRealtimeNotification,
 } from "@/services/realtime/events"
@@ -32,24 +31,6 @@ describe("formatRealtimeLog", () => {
   it("returns only message when time is absent", () => {
     const event = { ...baseEvent, time: "" }
     expect(formatRealtimeLog(event)).toBe("hello")
-  })
-})
-
-describe("showRealtimeMessage", () => {
-  beforeEach(() => {
-    vi.mocked(showGlobalMessage).mockClear()
-  })
-
-  it("calls showGlobalMessage with level and title:message content", () => {
-    const event: RealtimeEvent = { ...baseEvent, title: "Title" }
-    showRealtimeMessage(event)
-    expect(showGlobalMessage).toHaveBeenCalledWith("info", "Title: hello")
-  })
-
-  it("calls showGlobalMessage with level and message only when title is absent", () => {
-    const event: RealtimeEvent = { ...baseEvent, title: null }
-    showRealtimeMessage(event)
-    expect(showGlobalMessage).toHaveBeenCalledWith("info", "hello")
   })
 })
 

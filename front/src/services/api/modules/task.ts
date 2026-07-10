@@ -25,8 +25,8 @@ export function startTask(payload: TaskExecutionPayload): Promise<boolean> {
     })
 }
 
-export function stopTask(): void {
-  fetch("/api/stop", {
+export function stopTask(): Promise<boolean> {
+  return fetch("/api/stop", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -36,12 +36,14 @@ export function stopTask(): void {
     .then((data: ApiResponse) => {
       if (data.status === "success") {
         showGlobalMessage("success", "正在中止任务，请稍后")
-        return
+        return true
       }
       showGlobalMessage("error", data.message || "任务停止失败")
+      return false
     })
     .catch((error) => {
       console.error("Failed to stop task:", error)
       showGlobalMessage("error", "任务停止失败")
+      return false
     })
 }

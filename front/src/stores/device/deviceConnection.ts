@@ -1,6 +1,6 @@
 import { defineStore } from "pinia"
 import { watch } from "vue"
-import { useI18n } from "vue-i18n"
+import i18n from "@/app/i18n"
 import { tryCatch } from "@/utils/tryCatch"
 import {
   getDeviceState,
@@ -104,7 +104,7 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
     // Backend owns scan+custom merge; Home options are flat availableDevices only.
     // recentDevices remain in settings for scheduler/other consumers.
     deviceOptions(): Array<{ label: string; value: string; disabled?: boolean }> {
-      const { t } = useI18n()
+      const t = i18n.global.t
       if (this.availableDevices.length === 0) {
         return [{ label: t("panel.noDevice"), value: "none-device", disabled: true }]
       }
@@ -242,6 +242,25 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
       this.selectedDeviceKey = byIdentity ? buildDeviceFingerprint(byIdentity) : null
     },
 
+    /** When locked, backend controller_name/resource_name are authority. */
+    hydrateLockedSelection(
+      controllerName: string | null | undefined,
+      resourceName: string | null | undefined,
+    ) {
+      if (!this.isDeviceResourceLocked) {
+        return
+      }
+      if (controllerName) {
+        const capability = this.controllerCapabilities.find((item) => item.name === controllerName)
+        if (capability) {
+          this.selectedController = capability.display_label
+        }
+      }
+      if (resourceName != null) {
+        this.resource = resourceName
+      }
+    },
+
     applyDeviceRuntimeState(state: Awaited<ReturnType<typeof getDeviceState>>) {
       const indexStore = useIndexStore()
       indexStore.setConnected(state.connected)
@@ -249,20 +268,8 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
       this.connectedControllerName = state.controller_name
       this.connectedResourceName = state.resource_name
 
-      // Hydrate selected controller and resource from runtime state when locked
-      if (this.isDeviceResourceLocked) {
-        if (state.controller_name && !this.selectedController) {
-          const capability = this.controllerCapabilities.find(
-            (item) => item.name === state.controller_name,
-          )
-          if (capability) {
-            this.selectedController = capability.display_label
-          }
-        }
-        if (state.resource_name && !this.resource) {
-          this.resource = state.resource_name
-        }
-      }
+      // When locked, always apply backend controller/resource as authority
+      this.hydrateLockedSelection(state.controller_name, state.resource_name)
     },
 
     async syncDeviceRuntimeState() {
@@ -368,6 +375,12 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
       }
 
       this.applyDeviceData(selectedCapability, data, restoreStored)
+
+      // After capabilities load, re-apply locked runtime selection as authority
+      if (this.isDeviceResourceLocked && this.connectedControllerName) {
+        this.hydrateLockedSelection(this.connectedControllerName, this.connectedResourceName)
+      }
+
       this.resetDeviceLoading(requestId)
       return true
     },
@@ -387,8 +400,9 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
         this.playCoverAddress = getPlayCoverDefaultAddress(this.controllerCapabilities)
       }
 
-      void this.fetchDevices(capability?.name)
-      void this.getResourceList()
+      void this.fetchDevices(capability?.name).then((ok) => {
+        if (ok) return this.getResourceList()
+      })
     },
 
     openDevices() {
@@ -479,7 +493,7 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
     },
 
     buildPlayCoverDevice(): { device: ConnectableDevice } | { error: string } {
-      const { t } = useI18n()
+      const t = i18n.global.t
       const address = this.playCoverAddress.trim()
       if (!address) {
         return { error: t("panel.playcoverAddress") }
@@ -492,7 +506,7 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
     },
 
     async connectDevices(): Promise<PostDeviceResult> {
-      const { t } = useI18n()
+      const t = i18n.global.t
 
       if (this.isDeviceResourceLocked) {
         return { success: false, message: "设备与资源已锁定，无法切换" }
@@ -580,7 +594,7 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
     },
 
     async postResourceSelection(): Promise<PostResourceResult> {
-      const { t } = useI18n()
+      const t = i18n.global.t
 
       if (this.isDeviceResourceLocked) {
         return { success: false, message: "设备与资源已锁定，无法切换" }
@@ -601,7 +615,7 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
     },
 
     async StartTask(): Promise<boolean> {
-      const { t } = useI18n()
+      const t = i18n.global.t
       const indexStore = useIndexStore()
       const interfaceStore = useInterfaceStore()
       const configStore = useTaskConfigStore()
@@ -657,7 +671,7 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
     },
 
     resetConfig() {
-      const { t } = useI18n()
+      const t = i18n.global.t
       const configStore = useTaskConfigStore()
 
       if (confirm(t("panel.resetConfigConfirm"))) {
@@ -681,8 +695,9 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
 
       const fetchSavedDevice = () => {
         const savedDevice = settingsStore.settings.panel.lastConnectedDevice
-        void this.fetchDevices(savedDevice?.controller_name, true)
-        void this.getResourceList()
+        void this.fetchDevices(savedDevice?.controller_name, true).then((ok) => {
+          if (ok) return this.getResourceList()
+        })
       }
 
       // Fetch settings if not initialized

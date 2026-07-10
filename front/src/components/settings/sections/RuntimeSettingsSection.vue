@@ -14,13 +14,7 @@
           min="60"
           max="3600"
           step="30"
-          @input="
-            handleSettingChange(
-              'runtime',
-              'timeout',
-              Number(($event.target as HTMLInputElement).value),
-            )
-          "
+          @change="handleNumberChange('timeout', $event, 60, 3600)"
         />
         <span class="text-sm opacity-60">{{ t("settings.runtime.timeoutSuffix") }}</span>
       </div>
@@ -40,13 +34,7 @@
           min="5"
           max="120"
           step="5"
-          @input="
-            handleSettingChange(
-              'runtime',
-              'reminderInterval',
-              Number(($event.target as HTMLInputElement).value),
-            )
-          "
+          @change="handleNumberChange('reminderInterval', $event, 5, 120)"
         />
         <span class="text-sm opacity-60">{{ t("settings.runtime.reminderSuffix") }}</span>
       </div>
@@ -83,13 +71,7 @@
         class="input input-bordered w-32"
         min="1"
         max="10"
-        @input="
-          handleSettingChange(
-            'runtime',
-            'maxRetryCount',
-            Number(($event.target as HTMLInputElement).value),
-          )
-        "
+        @change="handleNumberChange('maxRetryCount', $event, 1, 10)"
       />
     </div>
   </div>
@@ -112,6 +94,8 @@ type EditableSettingValue<
   P extends keyof SettingsModel[K],
 > = MaybeNullForNumbers<SettingsModel[K][P]>
 
+type RuntimeNumberKey = "timeout" | "reminderInterval" | "maxRetryCount"
+
 async function handleSettingChange<K extends EditableCategory, P extends keyof SettingsModel[K]>(
   category: K,
   key: P,
@@ -120,5 +104,23 @@ async function handleSettingChange<K extends EditableCategory, P extends keyof S
   if (value === null) return
   if (typeof value === "number" && Number.isNaN(value)) return
   await settingsStore.updateSetting(category, key, value)
+}
+
+async function handleNumberChange(key: RuntimeNumberKey, event: Event, min: number, max: number) {
+  const target = event.target
+  if (!(target instanceof HTMLInputElement)) return
+
+  const raw = target.value
+  if (raw === "" || raw.trim() === "") return
+
+  const num = Number(raw)
+  if (Number.isNaN(num)) return
+
+  const clamped = Math.min(max, Math.max(min, num))
+  // Keep controlled input in sync if browser allowed out-of-range value
+  if (clamped !== num) {
+    target.value = String(clamped)
+  }
+  await handleSettingChange("runtime", key, clamped)
 }
 </script>

@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import re
 import sys
-import threading
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -16,14 +15,11 @@ from maa.controller import (
 )
 from maa.toolkit import Toolkit
 
-import json_utils as json
 from models.api import CustomDeviceCreate, DeviceModel
-from models.settings import SettingsModel
+from settings_io import SETTINGS_LOCK, atomic_write_settings, read_settings_raw
 
 if TYPE_CHECKING:
     from maa_utils import MaaWorker
-
-_SETTINGS_LOCK = threading.RLock()
 
 
 def is_controller_supported(controller) -> tuple[bool, str]:
@@ -156,15 +152,9 @@ class DeviceService:
         return self.worker.context.interface_base_dir / "config" / "settings.json"
 
     def _load_custom_devices(self) -> list[dict[str, Any]]:
-        with _SETTINGS_LOCK:
+        with SETTINGS_LOCK:
             path = self._settings_path()
-            if not path.exists():
-                return []
-            try:
-                with path.open("r", encoding="utf-8") as f:
-                    raw = json.load(f)
-            except Exception:
-                return []
+            raw = read_settings_raw(path)
             panel = raw.get("panel") if isinstance(raw, dict) else None
             custom_list = (
                 panel.get("customDevices") if isinstance(panel, dict) else None
@@ -200,16 +190,10 @@ class DeviceService:
             return records
 
     def _save_custom_devices(self, records: list[dict[str, Any]]) -> None:
-        with _SETTINGS_LOCK:
+        with SETTINGS_LOCK:
             path = self._settings_path()
             # Load existing settings to preserve all fields
-            raw: dict[str, Any] = {}
-            if path.exists():
-                try:
-                    with path.open("r", encoding="utf-8") as f:
-                        raw = json.load(f)
-                except Exception:
-                    raw = {}
+            raw = read_settings_raw(path)
             if not isinstance(raw, dict):
                 raw = {}
             panel = raw.get("panel")
@@ -217,22 +201,7 @@ class DeviceService:
                 panel = {}
             panel["customDevices"] = records
             raw["panel"] = panel
-
-            path.parent.mkdir(parents=True, exist_ok=True)
-            tmp_path = path.with_name(f".settings.json.{os.getpid()}.tmp")
-            try:
-                with tmp_path.open("w", encoding="utf-8") as f:
-                    json.dump(raw, f, indent=4, ensure_ascii=False)
-                    f.flush()
-                    os.fsync(f.fileno())
-                os.replace(tmp_path, path)
-            except Exception:
-                if tmp_path.exists():
-                    try:
-                        tmp_path.unlink()
-                    except OSError:
-                        pass
-                raise
+            atomic_write_settings(path, raw)
 
     def add_custom_device(self, payload: CustomDeviceCreate) -> dict[str, Any]:
         controller = self.get_controller_definition(payload.controller_name)
@@ -251,7 +220,7 @@ class DeviceService:
             record["controller_name"], record["type"], record["address"]
         )
 
-        with _SETTINGS_LOCK:
+        with SETTINGS_LOCK:
             records = self._load_custom_devices()
             for existing in records:
                 if (
@@ -280,7 +249,7 @@ class DeviceService:
             seen.add(_record_identity(controller_name, device_type, address))
 
         merged = list(devices)
-        with _SETTINGS_LOCK:
+        with SETTINGS_LOCK:
             custom_records = self._load_custom_devices()
         for record in custom_records:
             if record["controller_name"] != controller_name:

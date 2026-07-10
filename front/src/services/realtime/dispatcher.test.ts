@@ -81,14 +81,14 @@ describe("dispatchRealtimeEvent", () => {
   })
 
   describe("double-notification bug fix", () => {
-    it("does NOT call showRealtimeMessage for toast events (would duplicate toast)", () => {
+    it("does NOT duplicate toast for toast-only events", () => {
       const stores = makeStores()
       dispatchRealtimeEvent({ ...baseEvent, notify: ["toast"] }, stores)
       // showToastMessage is called exactly once — no duplicate
       expect(showToastMessage).toHaveBeenCalledTimes(1)
     })
 
-    it("does NOT call showRealtimeMessage for notification events", () => {
+    it("does NOT show toast for notification-only events", () => {
       const stores = makeStores()
       dispatchRealtimeEvent({ ...baseEvent, notify: ["notification"] }, stores)
       // Only browser notification, no extra toast
@@ -145,11 +145,12 @@ describe("dispatchRealtimeEvent", () => {
       },
     )
 
-    it("dead event types still get common handling", () => {
+    it("focus.display still gets common handling (log + toast)", () => {
       const stores = makeStores()
-      dispatchRealtimeEvent({ ...baseEvent, event: "resource.loading", notify: ["toast"] }, stores)
+      dispatchRealtimeEvent({ ...baseEvent, event: "focus.display", notify: ["toast"] }, stores)
       expect(stores.indexStore.RunningLog).toContain("hello")
       expect(showToastMessage).toHaveBeenCalledTimes(1)
+      expect(stores.indexStore.TaskRunning).toBe(false)
     })
   })
 })

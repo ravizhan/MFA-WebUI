@@ -196,6 +196,7 @@ function applyPreset(name: string) {
 
 onMounted(() => {
   deviceStore.init()
+  void schedulerStore.fetchTasks()
 })
 
 onUnmounted(() => {

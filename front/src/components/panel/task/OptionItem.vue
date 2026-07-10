@@ -58,8 +58,16 @@
               <input
                 type="text"
                 class="input input-bordered input-sm"
+                :class="{ 'input-error': isInputError(input.name, input.verify) }"
                 :value="getInputValue(input.name)"
-                @input="setInputValue(input.name, getInputEventValue($event))"
+                @input="
+                  handleInputChange(
+                    input.name,
+                    getInputEventValue($event),
+                    input,
+                    $event.target instanceof HTMLInputElement ? $event.target : null,
+                  )
+                "
               />
             </div>
           </div>
@@ -104,6 +112,7 @@ import { useI18n } from "vue-i18n"
 import { Icon } from "@iconify/vue"
 import { showGlobalMessage } from "@/services/feedback/message"
 import { useInterfaceStore } from "@/stores"
+import type { InputCase } from "@/types/interfaceModel"
 import type { NullableTaskOptionValue } from "@/types/schedulerModel"
 import { resolveInterfaceText } from "@/utils/interface/content"
 import { tryCatch } from "@/utils/tryCatch"
@@ -127,6 +136,8 @@ const resolvedLabel = computed(() =>
   resolveInterfaceText(interfaceStore.interface, locale.value, option.value?.label, name),
 )
 const scanSelectRefreshing = ref(false)
+/** Tracks which input fields currently fail verify, for one-shot pattern_msg on invalid transition. */
+const inputInvalidState = ref<Record<string, boolean>>({})
 
 const checkedValue = computed(() => {
   const currentOption = option.value
@@ -156,6 +167,18 @@ function resolveInputLabel(label: string | undefined, fallback: string) {
   return resolveInterfaceText(interfaceStore.interface, locale.value, label, fallback)
 }
 
+function isInputAllowed(value: string, verify?: string): boolean {
+  if (!verify || value === "") return true
+  const [ok, err] = tryCatch(() => new RegExp(verify).test(value))
+  if (err) return true
+  return ok === true
+}
+
+function isInputError(inputName: string, verify?: string): boolean {
+  // Current model value fails verify (e.g. preloaded invalid); blocked keystrokes never enter model
+  return !isInputAllowed(getInputValue(inputName), verify)
+}
+
 function getInputValue(inputName: string): string {
   const currentValue = taskOptions.value[name]
   if (currentValue && typeof currentValue === "object" && !Array.isArray(currentValue)) {
@@ -174,6 +197,37 @@ function setInputValue(inputName: string, value: string): void {
 
   nextValue[inputName] = value
   taskOptions.value[name] = nextValue
+}
+
+function handleInputChange(
+  inputName: string,
+  value: string,
+  input: InputCase,
+  target: HTMLInputElement | null,
+): void {
+  const allowed = isInputAllowed(value, input.verify)
+  const wasInvalid = inputInvalidState.value[inputName] === true
+
+  if (allowed) {
+    setInputValue(inputName, value)
+    inputInvalidState.value = { ...inputInvalidState.value, [inputName]: false }
+    return
+  }
+
+  // Invalid: do not update model; snap DOM back to previous value
+  if (target) {
+    target.value = getInputValue(inputName)
+  }
+  inputInvalidState.value = { ...inputInvalidState.value, [inputName]: true }
+  if (!wasInvalid && input.pattern_msg) {
+    const msg = resolveInterfaceText(
+      interfaceStore.interface,
+      locale.value,
+      input.pattern_msg,
+      input.pattern_msg,
+    )
+    showGlobalMessage("error", msg)
+  }
 }
 
 async function handleRescanScanSelect() {

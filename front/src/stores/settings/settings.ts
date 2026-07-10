@@ -47,6 +47,7 @@ const defaultSettings: SettingsModel = {
     lastResource: "",
     lastConnectedDevice: null,
     recentDevices: [],
+    customDevices: [],
   },
 }
 
@@ -124,6 +125,7 @@ export const useSettingsStore = defineStore("settings", {
             ...data.panel,
             lastConnectedDevice: data.panel?.lastConnectedDevice ?? null,
             recentDevices: data.panel?.recentDevices ?? [],
+            customDevices: data.panel?.customDevices ?? this.settings.panel.customDevices ?? [],
           },
         }
         // 确保本地缓存与服务器设置同步

@@ -22,8 +22,8 @@ vi.mock("@/services/feedback/message", () => ({
   showGlobalMessage: vi.fn<() => void>(),
 }))
 
-vi.mock("vue-i18n", () => ({
-  useI18n: () => ({ t: (key: string) => key }),
+vi.mock("@/app/i18n", () => ({
+  default: { global: { t: (key: string) => key } },
 }))
 
 import { useDeviceConnectionStore } from "@/stores/device/deviceConnection"
@@ -177,6 +177,21 @@ describe("useDeviceConnectionStore", () => {
         controller_name: null,
         resource_name: "res1",
       })
+      expect(store.resource).toBe("res1")
+    })
+
+    it("overwrites local selection with backend authority when locked", () => {
+      const store = useDeviceConnectionStore()
+      store.controllerCapabilities = [adbCapability, playCoverCapability]
+      store.selectedController = "PlayCover"
+      store.resource = "local-res"
+      store.applyDeviceRuntimeState({
+        connected: true,
+        configuration_locked: true,
+        controller_name: "adb",
+        resource_name: "res1",
+      })
+      expect(store.selectedController).toBe("ADB")
       expect(store.resource).toBe("res1")
     })
 
@@ -369,6 +384,23 @@ describe("useDeviceConnectionStore", () => {
       expect(store.controllerCapabilities).toEqual([adbCapability])
       expect(store.availableDevices).toEqual([adbDevice])
       expect(store.loading).toBe(false)
+    })
+
+    it("re-hydrates locked selection after capabilities load", async () => {
+      const store = useDeviceConnectionStore()
+      store.isDeviceResourceLocked = true
+      store.connectedControllerName = "adb"
+      store.connectedResourceName = "res1"
+      store.selectedController = "PlayCover"
+      store.resource = "stale"
+      vi.mocked(api.getDevices).mockResolvedValue({
+        controllers: [adbCapability, playCoverCapability],
+        selected_controller: "playcover",
+        devices: [],
+      })
+      await store.fetchDevices()
+      expect(store.selectedController).toBe("ADB")
+      expect(store.resource).toBe("res1")
     })
   })
 
