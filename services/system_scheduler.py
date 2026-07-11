@@ -250,7 +250,7 @@ class SystemTaskService:
             warnings=warnings,
             enabled=enabled,
             verified=verified,
-            reason=reason if not enabled else reg.last_error,
+            reason=reason if not enabled else "",
         )
 
     async def _observe_scopes(
@@ -460,10 +460,9 @@ class SystemTaskService:
                 identifier=identifier,
                 present=True,
                 verified=True,
-                details=detail if "detail" in dir() else "verified",
+                details="verified",
             )
         ]
-        reg.observed[0].details = "verified"
         self._save_state(state)
         return self._status_from_reg(
             reg, task_id, path_valid=True, os_registered=True, verified=True

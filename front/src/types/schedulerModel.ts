@@ -125,10 +125,10 @@ export interface OSTriggerSpec {
 
 export interface SystemTaskObservation {
   scope: SystemTaskScope
-  registered: boolean
+  identifier: string
+  present: boolean
   verified: boolean
-  native_present: boolean
-  last_error?: string
+  details?: string
 }
 
 export interface SystemTaskStatus {
@@ -155,11 +155,11 @@ export interface SystemTaskRegistration {
   task_id: string
   task_name: string
   platform: SystemTaskPlatform
-  scope: SystemTaskScope
+  scope: SystemTaskScope | null
   system_task_identifier: string
   trigger_spec: OSTriggerSpec
   registered_exe_path: string
-  last_registered_at: string
+  last_registered_at: string | null
   orphaned: boolean
   // Extended durable fields
   state: SystemTaskState

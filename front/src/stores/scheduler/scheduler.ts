@@ -236,15 +236,15 @@ export const useSchedulerStore = defineStore("scheduler", () => {
         const observed: SystemTaskObservation[] =
           reg.observed?.map((obs) => ({
             scope: obs.scope,
-            registered: obs.registered,
+            identifier: obs.identifier,
+            present: obs.present,
             verified: obs.verified,
-            native_present: obs.native_present,
-            last_error: obs.last_error,
+            details: obs.details,
           })) ?? []
         statuses[reg.task_id] = {
           task_id: reg.task_id,
           registered: isActive && !reg.orphaned,
-          scope: reg.scope,
+          scope: reg.scope ?? undefined,
           platform: reg.platform,
           path_valid: isActive,
           last_error: reg.last_error,

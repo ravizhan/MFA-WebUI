@@ -265,7 +265,15 @@ describe("useSchedulerStore", () => {
               platform: "windows",
               scope: "user",
               desired_scope: "user",
-              observed: [{ scope: "user", registered: true, verified: true, native_present: true }],
+              observed: [
+                {
+                  scope: "user",
+                  identifier: "test",
+                  present: true,
+                  verified: true,
+                  details: "verified",
+                },
+              ],
               warnings: [],
             }),
             mockRegistration({
@@ -286,7 +294,7 @@ describe("useSchedulerStore", () => {
         expect(active.state).toBe("active")
         expect(active.orphaned).toBe(false)
         expect(active.observed).toHaveLength(1)
-        expect(active.observed![0].native_present).toBe(true)
+        expect(active.observed![0].present).toBe(true)
 
         const orphaned = store.systemTaskStatuses["t2"]
         expect(orphaned.registered).toBe(false)
