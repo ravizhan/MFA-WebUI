@@ -16,7 +16,8 @@ const mockInstances: Array<{
   url: string
 }> = []
 
-const MockEventSource = vi.fn(function (this: any, url: string) {
+// eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+const MockEventSource = vi.fn(function (this: unknown, url: string) {
   const instance = {
     close: vi.fn(),
     onopen: null,

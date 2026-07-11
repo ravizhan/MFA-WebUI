@@ -12,6 +12,7 @@ describe("SSEClient", () => {
     if (!instance) {
       throw new Error(`No EventSource instance at index ${index}`)
     }
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
     return instance as {
       close: ReturnType<typeof vi.fn>
       onopen: (() => void) | null
@@ -22,6 +23,7 @@ describe("SSEClient", () => {
 
   beforeEach(() => {
     vi.useFakeTimers()
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
     mockEventSourceCtor = vi.mocked(globalThis.EventSource as unknown as ReturnType<typeof vi.fn>)
     mockEventSourceCtor.mockClear()
     // Suppress console output from sse.ts error/reconnect paths exercised below.
@@ -91,7 +93,7 @@ describe("SSEClient", () => {
   describe("event dispatching", () => {
     it("dispatches normalized events to registered listeners", () => {
       const client = new SSEClient("/api/logs")
-      const listener = vi.fn()
+      const listener = vi.fn<() => void>()
       client.addEventListener("log", listener)
 
       const instance = getESInstance()
@@ -119,7 +121,7 @@ describe("SSEClient", () => {
     it("ignores invalid JSON messages and logs to console.error", () => {
       const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {})
       const client = new SSEClient("/api/logs")
-      const listener = vi.fn()
+      const listener = vi.fn<() => void>()
       client.addEventListener("log", listener)
 
       const instance = getESInstance()
@@ -133,7 +135,7 @@ describe("SSEClient", () => {
 
     it("ignores messages without message field", () => {
       const client = new SSEClient("/api/logs")
-      const listener = vi.fn()
+      const listener = vi.fn<() => void>()
       client.addEventListener("log", listener)
 
       const instance = getESInstance()
@@ -147,7 +149,7 @@ describe("SSEClient", () => {
 
     it("adds and removes event listeners", () => {
       const client = new SSEClient("/api/logs")
-      const listener = vi.fn()
+      const listener = vi.fn<() => void>()
       client.addEventListener("task.started", listener)
       client.removeEventListener("task.started", listener)
 
@@ -168,7 +170,7 @@ describe("SSEClient", () => {
 
     it("normalizes legacy payload format (type instead of event)", () => {
       const client = new SSEClient("/api/logs")
-      const listener = vi.fn()
+      const listener = vi.fn<() => void>()
       client.addEventListener("custom", listener)
 
       const instance = getESInstance()
@@ -193,7 +195,7 @@ describe("SSEClient", () => {
 
     it("fills in missing fields with defaults", () => {
       const client = new SSEClient("/api/logs")
-      const listener = vi.fn()
+      const listener = vi.fn<() => void>()
       client.addEventListener("log", listener)
 
       const instance = getESInstance()
@@ -218,7 +220,7 @@ describe("SSEClient", () => {
 
     it("preserves display: false through normalization", () => {
       const client = new SSEClient("/api/logs")
-      const listener = vi.fn()
+      const listener = vi.fn<() => void>()
       client.addEventListener("log", listener)
 
       const instance = getESInstance()
@@ -240,7 +242,7 @@ describe("SSEClient", () => {
 
     it("normalizes title and details fields", () => {
       const client = new SSEClient("/api/logs")
-      const listener = vi.fn()
+      const listener = vi.fn<() => void>()
       client.addEventListener("log", listener)
 
       const instance = getESInstance()
@@ -264,7 +266,7 @@ describe("SSEClient", () => {
 
     it("sets title to null and details to null when absent", () => {
       const client = new SSEClient("/api/logs")
-      const listener = vi.fn()
+      const listener = vi.fn<() => void>()
       client.addEventListener("log", listener)
 
       const instance = getESInstance()
@@ -305,7 +307,7 @@ describe("SSEClient", () => {
       const client = new SSEClient("/api/logs")
 
       // First error: baseDelay = 1000 * 2^0 = 1000, with jitter=0 → delay=1000
-      const instance1 = getESInstance(0)!
+      const instance1 = getESInstance(0)
       instance1.onerror?.(new Event("error"))
 
       // At t=500ms, reconnect should NOT have happened yet
@@ -317,7 +319,7 @@ describe("SSEClient", () => {
       expect(mockEventSourceCtor).toHaveBeenCalledTimes(2)
 
       // Second error: baseDelay = 1000 * 2^1 = 2000
-      const instance2 = getESInstance(1)!
+      const instance2 = getESInstance(1)
       instance2.onerror?.(new Event("error"))
 
       // At t=1500ms (1000 + 500), reconnect should NOT have happened yet
@@ -337,7 +339,7 @@ describe("SSEClient", () => {
       vi.spyOn(Math, "random").mockReturnValue(0)
 
       const client = new SSEClient("/api/logs")
-      const instance1 = getESInstance(0)!
+      const instance1 = getESInstance(0)
 
       // First error → attempt #1 fires at t=1000
       instance1.onerror?.(new Event("error"))
@@ -345,7 +347,7 @@ describe("SSEClient", () => {
       expect(mockEventSourceCtor).toHaveBeenCalledTimes(2)
 
       // Simulate a successful reconnection (onopen fires)
-      const instance2 = getESInstance(1)!
+      const instance2 = getESInstance(1)
       instance2.onopen?.()
 
       // Now trigger another error → should be back to base delay of 1000

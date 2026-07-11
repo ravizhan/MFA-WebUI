@@ -199,6 +199,8 @@ class TaskService:
             timeout = task.timeout
             if state.stop_flag:
                 self.worker.events.send_log("前置程序已停止")
+                state.last_status = "failed"
+                state.last_error = "前置程序已停止"
                 return False
 
             self.worker.events.send_log(f"执行前置程序: {command}")
@@ -320,6 +322,13 @@ class TaskService:
             self.worker.events.emit_task_started(task_list)
             if pre_tasks:
                 if not self._run_pre_tasks(pre_tasks):
+                    if not state.last_error:
+                        state.last_error = "前置程序执行失败"
+                    if state.last_status not in ("failed", "stopped"):
+                        state.last_status = "failed"
+                    self.worker.events.emit_task_failed(
+                        task_list, state.last_error or "前置程序执行失败"
+                    )
                     return
             for task in task_list:
                 if state.stop_flag:
@@ -327,6 +336,7 @@ class TaskService:
                     state.last_status = "stopped"
                     state.last_error = "任务已终止"
                     self.worker.events.send_log("任务已终止")
+                    self.worker.events.emit_task_failed(task_list, "任务已终止")
                     return
 
                 pipeline_override = self.worker.pipeline.build_task_pipeline_override(
@@ -345,6 +355,7 @@ class TaskService:
                         state.last_status = "stopped"
                         state.last_error = "任务已终止"
                         self.worker.events.send_log("任务已终止")
+                        self.worker.events.emit_task_failed(task_list, "任务已终止")
                         return
             state.last_status = "success"
             state.last_error = None

@@ -12,6 +12,7 @@ describe("useIndexStore", () => {
     expect(store.SelectedTaskID).toBe("")
     expect(store.RunningLog).toBe("")
     expect(store.Connected).toBe(false)
+    expect(store.TaskRunning).toBe(false)
     expect(store.TaskSettingsDrawerVisible).toBe(false)
   })
 
@@ -38,6 +39,16 @@ describe("useIndexStore", () => {
       store.UpdateLog("line 1")
       store.UpdateLog("line 2")
       expect(store.RunningLog).toBe("line 1\nline 2\n")
+    })
+  })
+
+  describe("setTaskRunning", () => {
+    it("sets TaskRunning state", () => {
+      const store = useIndexStore()
+      store.setTaskRunning(true)
+      expect(store.TaskRunning).toBe(true)
+      store.setTaskRunning(false)
+      expect(store.TaskRunning).toBe(false)
     })
   })
 })

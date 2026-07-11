@@ -3,39 +3,86 @@ import type {
   ConnectableDevice,
   DeviceControllerCapability,
   GamepadDevice,
-  PlayCoverDevice,
   Win32Device,
 } from "@/services/api"
-import type { PanelLastConnectedDevice } from "@/types/settings/model"
+import type { PanelLastConnectedDevice } from "@/types/settingsModel"
 
 export function isAdbDevice(value: unknown): value is AdbDevice {
-  return !!value && typeof value === "object" && (value as Partial<AdbDevice>).type === "Adb"
+  return !!value && typeof value === "object" && "type" in value && value.type === "Adb"
 }
 
 export function isWin32Device(value: unknown): value is Win32Device {
-  return !!value && typeof value === "object" && (value as Partial<Win32Device>).type === "Win32"
+  return !!value && typeof value === "object" && "type" in value && value.type === "Win32"
 }
 
 export function isGamepadDevice(value: unknown): value is GamepadDevice {
-  return (
-    !!value && typeof value === "object" && (value as Partial<GamepadDevice>).type === "Gamepad"
-  )
+  return !!value && typeof value === "object" && "type" in value && value.type === "Gamepad"
 }
 
-export function isPlayCoverDevice(value: unknown): value is PlayCoverDevice {
-  return (
-    !!value && typeof value === "object" && (value as Partial<PlayCoverDevice>).type === "PlayCover"
-  )
+/** Stable identity used for merge/dedup matching (address or window handle). */
+export function getDeviceIdentity(deviceInfo: ConnectableDevice): string {
+  if (isAdbDevice(deviceInfo)) {
+    return deviceInfo.address
+  }
+  if (isWin32Device(deviceInfo)) {
+    return String(deviceInfo.hWnd)
+  }
+  if (isGamepadDevice(deviceInfo)) {
+    return `${deviceInfo.hWnd}|${deviceInfo.gamepad_type}`
+  }
+  return deviceInfo.address
+}
+
+/** Stable identity for a persisted last-connected snapshot (same semantics as getDeviceIdentity). */
+export function getStoredDeviceIdentity(stored: PanelLastConnectedDevice): string {
+  if (stored.type === "Adb" || stored.type === "PlayCover") {
+    return stored.address
+  }
+  if (stored.type === "Win32") {
+    return String(stored.hWnd)
+  }
+  return `${stored.hWnd}|${stored.gamepad_type}`
+}
+
+/** Prefer controller_name when present; fall back to type for legacy snapshots. */
+export function storedDeviceMatchesController(
+  stored: PanelLastConnectedDevice,
+  capability: Pick<DeviceControllerCapability, "name" | "type">,
+): boolean {
+  if (stored.controller_name) {
+    return stored.controller_name === capability.name
+  }
+  return stored.type === capability.type
+}
+
+/** Match by identity first, then fingerprint (scan may enrich a saved custom device). */
+export function findDeviceByIdentityOrFingerprint(
+  devices: ConnectableDevice[],
+  target: ConnectableDevice,
+): ConnectableDevice | undefined {
+  const targetIdentity = getDeviceIdentity(target)
+  const byIdentity = devices.find((item) => getDeviceIdentity(item) === targetIdentity)
+  if (byIdentity) {
+    return byIdentity
+  }
+  const targetFingerprint = buildDeviceFingerprint(target)
+  return devices.find((item) => buildDeviceFingerprint(item) === targetFingerprint)
+}
+
+function formatNamedLabel(name: string | undefined | null, address: string): string {
+  const trimmed = name?.trim()
+  return trimmed ? `${trimmed}(${address})` : address
 }
 
 export function buildDeviceLabel(deviceInfo: ConnectableDevice): string {
   if (isAdbDevice(deviceInfo)) {
-    return `${deviceInfo.name} (${deviceInfo.address})`
+    return formatNamedLabel(deviceInfo.name, deviceInfo.address)
   }
   if (isWin32Device(deviceInfo) || isGamepadDevice(deviceInfo)) {
-    return `${deviceInfo.window_name} (${deviceInfo.class_name})`
+    const address = deviceInfo.class_name?.trim() || String(deviceInfo.hWnd)
+    return formatNamedLabel(deviceInfo.window_name, address)
   }
-  return deviceInfo.address
+  return formatNamedLabel(deviceInfo.name, deviceInfo.address)
 }
 
 export function buildDeviceFingerprint(deviceInfo: ConnectableDevice): string {

@@ -1,4 +1,35 @@
-import type { ExecutionStatus, TriggerConfig, TriggerType } from "@/types/scheduler/model"
+import type { ExecutionStatus, TriggerConfig, TriggerType } from "@/types/schedulerModel"
+
+function formatCronTrigger(t: (key: string) => string, triggerConfig: TriggerConfig): string {
+  if (triggerConfig.type !== "cron") return t("common.unknown")
+  return `${t("settings.scheduler.formatter.cron")} ${triggerConfig.cron}`
+}
+
+function formatDateTrigger(
+  t: (key: string) => string,
+  locale: string,
+  triggerConfig: TriggerConfig,
+): string {
+  if (triggerConfig.type !== "date") return t("common.unknown")
+  return `${t("settings.scheduler.formatter.date")} ${formatDateTime(t, locale, triggerConfig.run_date)}`
+}
+
+function formatIntervalTrigger(t: (key: string) => string, triggerConfig: TriggerConfig): string {
+  if (triggerConfig.type !== "interval") return t("common.unknown")
+  const parts: string[] = []
+  if (triggerConfig.weeks)
+    parts.push(`${triggerConfig.weeks}${t("settings.scheduler.formatter.week")}`)
+  if (triggerConfig.days)
+    parts.push(`${triggerConfig.days}${t("settings.scheduler.formatter.day")}`)
+  if (triggerConfig.hours)
+    parts.push(`${triggerConfig.hours}${t("settings.scheduler.formatter.hour")}`)
+  if (triggerConfig.minutes)
+    parts.push(`${triggerConfig.minutes}${t("settings.scheduler.formatter.minute")}`)
+  if (triggerConfig.seconds)
+    parts.push(`${triggerConfig.seconds}${t("settings.scheduler.formatter.second")}`)
+  const intervalText = parts.length > 0 ? parts.join(" ") : t("settings.scheduler.formatter.unset")
+  return `${t("settings.scheduler.formatter.interval")} ${intervalText}`
+}
 
 export function formatTrigger(
   t: (key: string) => string,
@@ -8,28 +39,11 @@ export function formatTrigger(
 ): string {
   switch (triggerType) {
     case "cron":
-      if (triggerConfig.type !== "cron") return t("common.unknown")
-      return `${t("settings.scheduler.formatter.cron")} ${triggerConfig.cron}`
+      return formatCronTrigger(t, triggerConfig)
     case "date":
-      if (triggerConfig.type !== "date") return t("common.unknown")
-      return `${t("settings.scheduler.formatter.date")} ${formatDateTime(t, locale, triggerConfig.run_date)}`
-    case "interval": {
-      if (triggerConfig.type !== "interval") return t("common.unknown")
-      const parts: string[] = []
-      if (triggerConfig.weeks)
-        parts.push(`${triggerConfig.weeks}${t("settings.scheduler.formatter.week")}`)
-      if (triggerConfig.days)
-        parts.push(`${triggerConfig.days}${t("settings.scheduler.formatter.day")}`)
-      if (triggerConfig.hours)
-        parts.push(`${triggerConfig.hours}${t("settings.scheduler.formatter.hour")}`)
-      if (triggerConfig.minutes)
-        parts.push(`${triggerConfig.minutes}${t("settings.scheduler.formatter.minute")}`)
-      if (triggerConfig.seconds)
-        parts.push(`${triggerConfig.seconds}${t("settings.scheduler.formatter.second")}`)
-      const intervalText =
-        parts.length > 0 ? parts.join(" ") : t("settings.scheduler.formatter.unset")
-      return `${t("settings.scheduler.formatter.interval")} ${intervalText}`
-    }
+      return formatDateTrigger(t, locale, triggerConfig)
+    case "interval":
+      return formatIntervalTrigger(t, triggerConfig)
     default:
       return t("common.unknown")
   }

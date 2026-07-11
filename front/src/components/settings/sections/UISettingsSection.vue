@@ -1,44 +1,49 @@
 <template>
-  <n-card id="ui-settings" class="mb-6 scroll-mt-5 last:mb-0" :title="t('settings.ui.title')">
-    <n-form label-placement="left" label-width="120">
-      <n-form-item :label="t('settings.ui.language')">
-        <n-select :value="locale" :options="localeOptions" @update:value="handleLocaleChange" />
-      </n-form-item>
-      <n-form-item :label="t('settings.ui.darkMode')">
-        <n-select
-          v-model:value="settings.ui.darkMode"
-          :options="darkModeOptions"
-          @update:value="
-            (val: string | boolean) =>
-              (val === 'auto' || typeof val === 'boolean') &&
-              handleSettingChange('ui', 'darkMode', val as SettingsModel['ui']['darkMode'])
-          "
-        />
-      </n-form-item>
-    </n-form>
-  </n-card>
+  <div class="space-y-0">
+    <div
+      class="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-2 md:gap-4 items-center py-4 border-b border-base-200 last:border-b-0"
+    >
+      <label class="text-sm font-medium md:text-right">
+        {{ t("settings.ui.language") }}
+      </label>
+      <select
+        :value="locale"
+        class="select select-bordered w-full md:w-auto"
+        @change="handleLocaleChange(($event.target as HTMLSelectElement).value)"
+      >
+        <option value="zh-CN">{{ t("settings.ui.languages.zhCN") }}</option>
+        <option value="en-US">{{ t("settings.ui.languages.enUS") }}</option>
+      </select>
+    </div>
+
+    <div
+      class="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-2 md:gap-4 items-center py-4 border-b border-base-200 last:border-b-0"
+    >
+      <label class="text-sm font-medium md:text-right">
+        {{ t("settings.ui.darkMode") }}
+      </label>
+      <select
+        :value="String(settings.ui.darkMode)"
+        class="select select-bordered w-full md:w-auto"
+        @change="handleDarkModeChange(($event.target as HTMLSelectElement).value)"
+      >
+        <option value="auto">{{ t("settings.ui.darkModeOptions.auto") }}</option>
+        <option value="false">{{ t("settings.ui.darkModeOptions.off") }}</option>
+        <option value="true">{{ t("settings.ui.darkModeOptions.on") }}</option>
+      </select>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { computed } from "vue"
 import { useI18n } from "vue-i18n"
 import { useSettingsStore } from "@/stores"
-import type { SettingsModel } from "@/types/settings/model"
+import type { SettingsModel } from "@/types/settingsModel"
 
 const { t, locale } = useI18n()
 const settingsStore = useSettingsStore()
 const settings = computed(() => settingsStore.settings)
-
-const localeOptions = [
-  { label: "简体中文", value: "zh-CN" },
-  { label: "English", value: "en-US" },
-]
-
-const darkModeOptions = computed(() => [
-  { label: t("settings.ui.darkModeOptions.auto"), value: "auto" },
-  { label: t("settings.ui.darkModeOptions.off"), value: false },
-  { label: t("settings.ui.darkModeOptions.on"), value: true },
-])
 
 type EditableCategory = Exclude<keyof SettingsModel, "about">
 
@@ -53,5 +58,18 @@ async function handleSettingChange<K extends EditableCategory, P extends keyof S
 function handleLocaleChange(val: string) {
   locale.value = val
   localStorage.setItem("locale", val)
+  window.location.reload()
+}
+
+function handleDarkModeChange(val: string) {
+  if (val === "auto") {
+    void handleSettingChange("ui", "darkMode", "auto")
+    return
+  }
+  if (val === "true") {
+    void handleSettingChange("ui", "darkMode", true)
+    return
+  }
+  void handleSettingChange("ui", "darkMode", false)
 }
 </script>

@@ -1,28 +1,20 @@
-import type { NotificationSettings } from "@/types/settings/model"
-import type { RealtimeEvent } from "@/types/realtime/model"
+import type { NotificationSettings } from "@/types/settingsModel"
+import type { RealtimeEvent } from "@/types/realtimeModel"
 import { showGlobalMessage } from "@/services/feedback/message"
+import { tryCatch } from "@/utils/tryCatch"
 
-function formatMessageContent(event: RealtimeEvent): string {
-  return event.title ? `${event.title}: ${event.message}` : event.message
+function getToastType(level: string): "error" | "success" | "info" {
+  if (level === "error") return "error"
+  if (level === "success") return "success"
+  return "info"
 }
 
 export function formatRealtimeLog(event: RealtimeEvent): string {
   return event.time ? `${event.time} ${event.message}` : event.message
 }
 
-export function showRealtimeMessage(event: RealtimeEvent): void {
-  showGlobalMessage(event.level, formatMessageContent(event))
-}
-
-/**
- * Naive UI Toast 轻提示（notify 包含 "toast" 时触发）。
- */
 export function showToastMessage(event: RealtimeEvent): void {
-  if (typeof window === "undefined" || !window.$message) {
-    return
-  }
-  const type = event.level === "error" ? "error" : event.level === "success" ? "success" : "info"
-  window.$message[type](event.message, { duration: 3000 })
+  showGlobalMessage(getToastType(event.level), event.message)
 }
 
 export function showBrowserRealtimeNotification(
@@ -36,12 +28,13 @@ export function showBrowserRealtimeNotification(
     return
   }
 
-  try {
+  const [, notifyErr] = tryCatch(() => {
     new Notification(event.title || "MWU", {
       body: event.message,
       tag: `${event.event}:${event.time}`,
     })
-  } catch (error) {
-    console.error("浏览器通知发送失败:", error)
+  })
+  if (notifyErr) {
+    console.error("浏览器通知发送失败:", notifyErr)
   }
 }

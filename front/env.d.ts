@@ -1,13 +1,10 @@
 /// <reference types="vite/client" />
 
-declare global {
-  interface Window {
-    /** Naive UI message api (set in app startup / views as needed) */
-    $message?: import("naive-ui").MessageApi
-  }
+declare module "*.vue" {
+  import type { DefineComponent } from "vue"
+  const component: DefineComponent<object, object, unknown>
+  export default component
 }
-
-export {}
 
 declare module "*.css?url" {
   const href: string

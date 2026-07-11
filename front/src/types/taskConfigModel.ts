@@ -1,4 +1,4 @@
-import type { TaskOptionsByTask } from "@/types/scheduler/model"
+import type { TaskOptionsByTask } from "@/types/schedulerModel"
 
 export const CUSTOM_PRESET_NAME = "__mwu_reserved_custom_preset__"
 
