@@ -73,6 +73,8 @@ class AppState:
         self.subprocess_pipe: subprocess.Popen | None = None
         self.update_status: dict | None = None
         self.update_info: dict | None = None
+        # Runtime ownership (kernel advisory lock); only for real CLI process lifetime
+        self.runtime_ownership: Any | None = None
 
     def send_event(self, event: RealtimeEvent):
         self.message_conn.put(event)

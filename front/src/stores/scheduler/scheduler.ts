@@ -9,6 +9,10 @@ import type {
   SystemTaskStatus,
   SystemTaskRegistration,
   SystemTaskScope,
+  SystemTaskCapabilities,
+  SystemTaskCapabilityCell,
+  SystemTaskObservation,
+  TriggerType,
 } from "@/types/schedulerModel"
 import {
   getSchedulerTasks,
@@ -23,6 +27,7 @@ import {
   getSystemTaskStatus,
   getSystemTasks,
   repairSystemTasks,
+  getSystemCapabilities,
 } from "@/services/api"
 
 export const useSchedulerStore = defineStore("scheduler", () => {
@@ -33,6 +38,7 @@ export const useSchedulerStore = defineStore("scheduler", () => {
   const error = ref<string | null>(null)
   const systemTaskStatuses = ref<Record<string, SystemTaskStatus>>({})
   const systemRegistrations = ref<SystemTaskRegistration[]>([])
+  const systemCapabilities = ref<SystemTaskCapabilities | null>(null)
 
   // Computed
   const enabledTasks = computed(() => tasks.value.filter((t) => t.enabled))
@@ -226,13 +232,28 @@ export const useSchedulerStore = defineStore("scheduler", () => {
     if (response.status === "success" && response.registrations) {
       const statuses: Record<string, SystemTaskStatus> = {}
       for (const reg of response.registrations) {
+        const isActive = reg.state === "active" || reg.state === "pending_register"
+        const observed: SystemTaskObservation[] =
+          reg.observed?.map((obs) => ({
+            scope: obs.scope,
+            registered: obs.registered,
+            verified: obs.verified,
+            native_present: obs.native_present,
+            last_error: obs.last_error,
+          })) ?? []
         statuses[reg.task_id] = {
           task_id: reg.task_id,
-          registered: !reg.orphaned,
+          registered: isActive && !reg.orphaned,
           scope: reg.scope,
           platform: reg.platform,
-          path_valid: true,
-          last_error: reg.orphaned ? "APScheduler 任务已删除" : undefined,
+          path_valid: isActive,
+          last_error: reg.last_error,
+          state: reg.state,
+          pending_operation: reg.pending_operation,
+          orphaned: reg.orphaned,
+          desired_scope: reg.desired_scope,
+          observed,
+          warnings: reg.warnings,
         }
       }
       systemTaskStatuses.value = statuses
@@ -260,6 +281,27 @@ export const useSchedulerStore = defineStore("scheduler", () => {
     return false
   }
 
+  async function fetchSystemCapabilities() {
+    const [response, err] = await tryCatch(() => getSystemCapabilities())
+    if (err) {
+      console.error("Failed to fetch system capabilities:", err)
+      return
+    }
+    if (response.status === "success" && response.data) {
+      systemCapabilities.value = response.data
+    }
+  }
+
+  function getCapabilityCell(
+    platform: string,
+    scope: SystemTaskScope,
+    triggerType: TriggerType,
+  ): SystemTaskCapabilityCell | undefined {
+    return systemCapabilities.value?.cells.find(
+      (c) => c.platform === platform && c.scope === scope && c.trigger_type === triggerType,
+    )
+  }
+
   function getSystemStatus(taskId: string): SystemTaskStatus | undefined {
     return systemTaskStatuses.value[taskId]
   }
@@ -280,6 +322,7 @@ export const useSchedulerStore = defineStore("scheduler", () => {
     error,
     systemTaskStatuses,
     systemRegistrations,
+    systemCapabilities,
     // Computed
     enabledTasks,
     // Actions
@@ -295,6 +338,8 @@ export const useSchedulerStore = defineStore("scheduler", () => {
     fetchSystemRegistrations,
     fetchAllSystemStatuses,
     repairSystemTasksAll,
+    fetchSystemCapabilities,
+    getCapabilityCell,
     getSystemStatus,
     getTaskById,
     clearError,

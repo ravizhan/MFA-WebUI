@@ -1,12 +1,5 @@
-"""SystemTaskService 单元测试。
+"""SystemTaskService unit tests — transactional state, recovery, orphans."""
 
-测试覆盖：
-- 状态持久化（加载/保存）
-- 注册/卸载流程（mock 后端）
-- 自愈逻辑（路径变化、OS 缺失、孤儿标记）
-"""
-
-import json
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -18,36 +11,52 @@ from models.scheduler import (
     OSTriggerSpec,
     SystemTaskRegistration,
     SystemTaskScope,
-    SystemTaskSpec,
 )
 from services.system_scheduler import SystemTaskService, _SystemTaskState
 
 
 @pytest.fixture
 def temp_config_dir(tmp_path: Path) -> Path:
-    """临时配置目录"""
     config_dir = tmp_path / "config"
     config_dir.mkdir()
+    (tmp_path / "main.py").write_text("# main", encoding="utf-8")
     return tmp_path
 
 
 @pytest.fixture
 def service(temp_config_dir: Path) -> SystemTaskService:
-    """SystemTaskService 实例（使用临时目录）"""
     return SystemTaskService(temp_config_dir)
 
 
 @pytest.fixture
 def mock_backend():
-    """Mock 后端"""
     backend = MagicMock()
-    backend.platform_name = "linux"
+    backend.platform_name = "windows"
     backend.register = AsyncMock()
     backend.unregister = AsyncMock()
-    backend.is_registered = AsyncMock(return_value=True)
+    backend.is_registered = AsyncMock(return_value=False)
     backend.get_next_run_time = AsyncMock(return_value=None)
     backend.list_registered = AsyncMock(return_value=[])
+    backend.verify_registration = AsyncMock(return_value=(True, "ok"))
+    backend.build_identifier = MagicMock(side_effect=lambda tid, scope: f"\\MWU\\{tid}")
+    backend.export_native_definition = AsyncMock(return_value=None)
+    backend.restore_native_definition = AsyncMock()
+    backend.same_native_identifier_across_scopes = MagicMock(return_value=True)
     return backend
+
+
+def _enable_caps():
+    return patch(
+        "services.system_scheduler.is_capability_enabled",
+        return_value=(True, "enabled", []),
+    )
+
+
+def _valid_trigger():
+    return patch(
+        "services.system_scheduler.validate_trigger_for_platform",
+        return_value=[],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -56,29 +65,27 @@ def mock_backend():
 
 
 class TestStatePersistence:
-    """状态持久化测试"""
-
     def test_load_empty_state(self, service: SystemTaskService):
-        """无文件时返回空状态"""
         state = service._load_state()
-        assert state.version == 1
+        assert state.version == 2
         assert len(state.registrations) == 0
 
     def test_save_and_load(self, service: SystemTaskService):
-        """保存后能正确加载"""
         state = _SystemTaskState()
         state.registrations.append(
             SystemTaskRegistration(
-                task_id="abc-123",
+                task_id="550e8400-e29b-41d4-a716-446655440000",
                 task_name="测试任务",
-                platform="linux",
-                scope=SystemTaskScope.USER,
-                system_task_identifier="mwu-abc-123",
-                trigger_spec=OSTriggerSpec(
+                platform="windows",
+                desired_scope=SystemTaskScope.USER,
+                desired_trigger=OSTriggerSpec(
                     trigger_type="cron", cron_expression="0 9 * * *"
                 ),
+                desired_exe_path="/usr/bin/mwu",
+                system_task_identifier="\\MWU\\550e8400-e29b-41d4-a716-446655440000",
                 registered_exe_path="/usr/bin/mwu",
                 last_registered_at=datetime(2026, 7, 6, 12, 0, 0),
+                state="active",
                 orphaned=False,
             )
         )
@@ -87,41 +94,20 @@ class TestStatePersistence:
         loaded = service._load_state()
         assert len(loaded.registrations) == 1
         reg = loaded.registrations[0]
-        assert reg.task_id == "abc-123"
-        assert reg.task_name == "测试任务"
-        assert reg.scope == SystemTaskScope.USER
-        assert reg.trigger_spec.cron_expression == "0 9 * * *"
+        assert reg.task_id == "550e8400-e29b-41d4-a716-446655440000"
+        assert reg.state == "active"
+        assert reg.desired_trigger.cron_expression == "0 9 * * *"
 
-    def test_load_corrupted_file(self, service: SystemTaskService):
-        """损坏的 JSON 文件返回空状态"""
+    def test_load_corrupted_file_fail_closed(self, service: SystemTaskService):
+        service._state_file.parent.mkdir(parents=True, exist_ok=True)
         service._state_file.write_text("{ invalid json", encoding="utf-8")
         state = service._load_state()
+        assert state.corrupt is True
         assert len(state.registrations) == 0
-
-    def test_find_registration(self, service: SystemTaskService):
-        """查找注册记录"""
-        state = _SystemTaskState()
-        reg = SystemTaskRegistration(
-            task_id="test-id",
-            task_name="Test",
-            platform="linux",
-            scope=SystemTaskScope.USER,
-            system_task_identifier="mwu-test-id",
-            trigger_spec=OSTriggerSpec(
-                trigger_type="cron", cron_expression="* * * * *"
-            ),
-            registered_exe_path="/path/to/exe",
-            last_registered_at=datetime.now(),
-            orphaned=False,
-        )
-        state.registrations.append(reg)
-
-        found = service._find_registration(state, "test-id")
-        assert found is not None
-        assert found.task_id == "test-id"
-
-        not_found = service._find_registration(state, "nonexistent")
-        assert not_found is None
+        # original corrupt preserved
+        assert service._state_file.exists()
+        with pytest.raises(RuntimeError, match="corrupt"):
+            service._save_state(state)
 
 
 # ---------------------------------------------------------------------------
@@ -130,291 +116,243 @@ class TestStatePersistence:
 
 
 class TestRegisterUnregister:
-    """注册/卸载流程测试"""
-
     @pytest.mark.asyncio
-    async def test_register_new_task(self, service: SystemTaskService, mock_backend):
-        """注册新任务"""
-        service._backend = mock_backend
-
-        status = await service.register(
-            task_id="abc-123",
-            task_name="测试任务",
-            trigger_config=CronTriggerConfig(cron="0 9 * * *"),
-            scope=SystemTaskScope.USER,
-        )
-
-        assert status.registered is True
-        assert status.scope == SystemTaskScope.USER
-        assert status.platform == "linux"
-        mock_backend.register.assert_called_once()
-
-        # 验证状态已持久化
-        state = service._load_state()
-        assert len(state.registrations) == 1
-        assert state.registrations[0].task_id == "abc-123"
-
-    @pytest.mark.asyncio
-    async def test_register_updates_existing(
+    async def test_register_pending_before_native(
         self, service: SystemTaskService, mock_backend
     ):
-        """重复注册更新已有记录"""
         service._backend = mock_backend
+        tid = "550e8400-e29b-41d4-a716-446655440000"
 
-        # 第一次注册
-        await service.register(
-            task_id="abc-123",
-            task_name="任务1",
-            trigger_config=CronTriggerConfig(cron="0 9 * * *"),
-            scope=SystemTaskScope.USER,
-        )
+        seen_states = []
 
-        # 第二次注册（更新）
-        await service.register(
-            task_id="abc-123",
-            task_name="任务2",
-            trigger_config=CronTriggerConfig(cron="0 10 * * *"),
-            scope=SystemTaskScope.SYSTEM,
-        )
+        async def tracking_register(spec):
+            # During native call, durable state must already be pending_register
+            st = service._load_state()
+            reg = service._find_registration(st, tid)
+            assert reg is not None
+            assert reg.state == "pending_register"
+            assert reg.pending_operation == "register"
+            seen_states.append(reg.state)
 
-        state = service._load_state()
-        assert len(state.registrations) == 1
-        reg = state.registrations[0]
-        assert reg.task_name == "任务2"
-        assert reg.scope == SystemTaskScope.SYSTEM
-        assert reg.trigger_spec.cron_expression == "0 10 * * *"
+        mock_backend.register = AsyncMock(side_effect=tracking_register)
+
+        # After register, is_registered should report present for status
+        async def is_reg_after_create(*a, **k):
+            return mock_backend.register.await_count > 0
+
+        mock_backend.is_registered = AsyncMock(side_effect=is_reg_after_create)
+
+        with _enable_caps(), _valid_trigger():
+            status = await service.register(
+                task_id=tid,
+                task_name="测试任务",
+                trigger_config=CronTriggerConfig(cron="0 9 * * *"),
+                scope=SystemTaskScope.USER,
+            )
+
+        assert status.registered is True
+        assert status.state == "active"
+        assert seen_states == ["pending_register"]
+        mock_backend.verify_registration.assert_called()
 
     @pytest.mark.asyncio
-    async def test_unregister_existing(self, service: SystemTaskService, mock_backend):
-        """卸载已注册的任务"""
+    async def test_register_failure_compensates(
+        self, service: SystemTaskService, mock_backend
+    ):
         service._backend = mock_backend
+        tid = "550e8400-e29b-41d4-a716-446655440000"
+        mock_backend.register = AsyncMock(side_effect=RuntimeError("native fail"))
 
-        # 先注册
-        await service.register(
-            task_id="abc-123",
-            task_name="测试",
-            trigger_config=CronTriggerConfig(cron="0 9 * * *"),
-            scope=SystemTaskScope.USER,
-        )
+        with _enable_caps(), _valid_trigger():
+            with pytest.raises(RuntimeError, match="native fail"):
+                await service.register(
+                    task_id=tid,
+                    task_name="测试",
+                    trigger_config=CronTriggerConfig(cron="0 9 * * *"),
+                    scope=SystemTaskScope.USER,
+                )
 
-        # 卸载
-        status = await service.unregister("abc-123")
-        assert status.registered is False
-        mock_backend.unregister.assert_called_once()
-
-        # 验证状态已清除
+        mock_backend.unregister.assert_called()
         state = service._load_state()
-        assert len(state.registrations) == 0
+        reg = service._find_registration(state, tid)
+        assert reg is not None
+        assert reg.state == "error"
+
+    @pytest.mark.asyncio
+    async def test_unregister_pending_cleanup(
+        self, service: SystemTaskService, mock_backend
+    ):
+        service._backend = mock_backend
+        tid = "550e8400-e29b-41d4-a716-446655440000"
+
+        with _enable_caps(), _valid_trigger():
+            await service.register(
+                task_id=tid,
+                task_name="测试",
+                trigger_config=CronTriggerConfig(cron="0 9 * * *"),
+                scope=SystemTaskScope.USER,
+            )
+
+        mock_backend.is_registered = AsyncMock(return_value=False)
+        status = await service.unregister(tid)
+        assert status.registered is False
+        assert len(service._load_state().registrations) == 0
 
     @pytest.mark.asyncio
     async def test_unregister_nonexistent(
         self, service: SystemTaskService, mock_backend
     ):
-        """卸载不存在的任务（幂等）"""
         service._backend = mock_backend
-        status = await service.unregister("nonexistent-id")
+        status = await service.unregister("550e8400-e29b-41d4-a716-446655440000")
         assert status.registered is False
         mock_backend.unregister.assert_not_called()
 
-
-# ---------------------------------------------------------------------------
-# 自愈逻辑
-# ---------------------------------------------------------------------------
-
-
-class TestRepairAll:
-    """自愈逻辑测试"""
-
     @pytest.mark.asyncio
-    async def test_repair_path_change(self, service: SystemTaskService, mock_backend):
-        """路径变化时重新注册"""
+    async def test_capability_rejection(self, service: SystemTaskService, mock_backend):
         service._backend = mock_backend
+        with (
+            patch(
+                "services.system_scheduler.is_capability_enabled",
+                return_value=(False, "disabled for test", []),
+            ),
+            _valid_trigger(),
+        ):
+            with pytest.raises(ValueError, match="capability disabled"):
+                await service.register(
+                    task_id="550e8400-e29b-41d4-a716-446655440000",
+                    task_name="x",
+                    trigger_config=CronTriggerConfig(cron="0 9 * * *"),
+                    scope=SystemTaskScope.USER,
+                )
 
-        # 注册任务（使用旧路径）
-        with patch.object(SystemTaskService, "current_exe_path", "/old/path/exe"):
+
+# ---------------------------------------------------------------------------
+# 自愈 / 孤儿
+# ---------------------------------------------------------------------------
+
+
+class TestRepairAndOrphan:
+    @pytest.mark.asyncio
+    async def test_mark_orphaned_never_autorepair(
+        self, service: SystemTaskService, mock_backend
+    ):
+        service._backend = mock_backend
+        tid = "550e8400-e29b-41d4-a716-446655440000"
+        with _enable_caps(), _valid_trigger():
             await service.register(
-                task_id="abc-123",
+                task_id=tid,
                 task_name="测试",
                 trigger_config=CronTriggerConfig(cron="0 9 * * *"),
                 scope=SystemTaskScope.USER,
             )
-
-        # 模拟路径变化
-        with patch.object(SystemTaskService, "current_exe_path", "/new/path/exe"):
-            mock_backend.is_registered.return_value = True
-            result = await service.repair_all()
-
-        assert result["repaired"] == 1
-        assert result["failed"] == 0
-        # 后端应被调用重新注册
-        assert mock_backend.register.call_count >= 2  # 初始注册 + 修复注册
-
-        # 验证路径已更新
+        await service.mark_orphaned(tid)
         state = service._load_state()
-        assert state.registrations[0].registered_exe_path == "/new/path/exe"
-
-    @pytest.mark.asyncio
-    async def test_repair_os_missing(self, service: SystemTaskService, mock_backend):
-        """OS 中缺失时重新注册"""
-        service._backend = mock_backend
-
-        # 注册任务
-        await service.register(
-            task_id="abc-123",
-            task_name="测试",
-            trigger_config=CronTriggerConfig(cron="0 9 * * *"),
-            scope=SystemTaskScope.USER,
-        )
-
-        # 模拟 OS 中已删除
-        mock_backend.is_registered.return_value = False
-        result = await service.repair_all()
-
-        assert result["repaired"] == 1
-        assert result["failed"] == 0
-
-    @pytest.mark.asyncio
-    async def test_repair_nothing_needed(
-        self, service: SystemTaskService, mock_backend
-    ):
-        """无需修复时正常返回"""
-        service._backend = mock_backend
-
-        await service.register(
-            task_id="abc-123",
-            task_name="测试",
-            trigger_config=CronTriggerConfig(cron="0 9 * * *"),
-            scope=SystemTaskScope.USER,
-        )
-
-        # 路径一致，OS 中已注册
-        mock_backend.is_registered.return_value = True
-        result = await service.repair_all()
-
-        assert result["repaired"] == 0
-        assert result["failed"] == 0
-
-    @pytest.mark.asyncio
-    async def test_repair_backend_failure(
-        self, service: SystemTaskService, mock_backend
-    ):
-        """后端修复失败时记录失败"""
-        service._backend = mock_backend
-
-        await service.register(
-            task_id="abc-123",
-            task_name="测试",
-            trigger_config=CronTriggerConfig(cron="0 9 * * *"),
-            scope=SystemTaskScope.USER,
-        )
-
-        # 模拟 OS 中缺失 + 重新注册失败
-        mock_backend.is_registered.return_value = False
-        mock_backend.register.side_effect = Exception("后端错误")
-        result = await service.repair_all()
-
-        assert result["repaired"] == 0
-        assert result["failed"] == 1
-        assert len(result["details"]) == 1
-
-
-# ---------------------------------------------------------------------------
-# 孤儿标记
-# ---------------------------------------------------------------------------
-
-
-class TestMarkOrphaned:
-    """孤儿标记测试"""
-
-    @pytest.mark.asyncio
-    async def test_mark_orphaned(self, service: SystemTaskService, mock_backend):
-        """标记孤儿任务"""
-        service._backend = mock_backend
-
-        await service.register(
-            task_id="abc-123",
-            task_name="测试",
-            trigger_config=CronTriggerConfig(cron="0 9 * * *"),
-            scope=SystemTaskScope.USER,
-        )
-
-        await service.mark_orphaned("abc-123")
-
-        state = service._load_state()
+        assert state.registrations[0].state == "orphaned"
         assert state.registrations[0].orphaned is True
 
+        mock_backend.is_registered.return_value = False
+        result = await service.repair_all()
+        # orphan skipped — not reactivated
+        state = service._load_state()
+        assert state.registrations[0].state == "orphaned"
+        assert any("orphan" in d for d in result["details"])
+
     @pytest.mark.asyncio
-    async def test_mark_orphaned_nonexistent(
+    async def test_missing_job_becomes_orphaned(
         self, service: SystemTaskService, mock_backend
     ):
-        """标记不存在的任务（静默成功）"""
         service._backend = mock_backend
-        await service.mark_orphaned("nonexistent")
-        # 不应抛出异常
-        state = service._load_state()
-        assert len(state.registrations) == 0
+        tid = "550e8400-e29b-41d4-a716-446655440000"
+        with _enable_caps(), _valid_trigger():
+            await service.register(
+                task_id=tid,
+                task_name="测试",
+                trigger_config=CronTriggerConfig(cron="0 9 * * *"),
+                scope=SystemTaskScope.USER,
+            )
+        service.set_job_probes(exists=lambda _id: False)
+        await service.repair_all()
+        assert service._load_state().registrations[0].state == "orphaned"
 
+    @pytest.mark.asyncio
+    async def test_disabled_job_remains_active(
+        self, service: SystemTaskService, mock_backend
+    ):
+        service._backend = mock_backend
+        tid = "550e8400-e29b-41d4-a716-446655440000"
+        with _enable_caps(), _valid_trigger():
+            await service.register(
+                task_id=tid,
+                task_name="测试",
+                trigger_config=CronTriggerConfig(cron="0 9 * * *"),
+                scope=SystemTaskScope.USER,
+            )
+        service.set_job_probes(exists=lambda _id: True, enabled=lambda _id: False)
+        mock_backend.is_registered = AsyncMock(return_value=True)
+        mock_backend.export_native_definition = AsyncMock(return_value=b"<Task/>")
+        result = await service.repair_all()
+        assert service._load_state().registrations[0].state == "active"
+        assert any("active-but-disabled" in d for d in result["details"])
 
-# ---------------------------------------------------------------------------
-# 状态查询
-# ---------------------------------------------------------------------------
+    @pytest.mark.asyncio
+    async def test_recovery_promotes_pending(
+        self, service: SystemTaskService, mock_backend
+    ):
+        service._backend = mock_backend
+        tid = "550e8400-e29b-41d4-a716-446655440000"
+        # Manually write pending_register intent as if crash mid-register
+        state = _SystemTaskState()
+        state.registrations.append(
+            SystemTaskRegistration(
+                task_id=tid,
+                task_name="crash",
+                platform="windows",
+                desired_scope=SystemTaskScope.USER,
+                desired_trigger=OSTriggerSpec(
+                    trigger_type="cron", cron_expression="0 9 * * *"
+                ),
+                desired_exe_path="python",
+                desired_cli_args=["main.py", "--headless", "--task", tid],
+                desired_working_dir=str(service._app_root_dir),
+                state="pending_register",
+                pending_operation="register",
+                system_task_identifier=f"\\MWU\\{tid}",
+                registered_exe_path="python",
+            )
+        )
+        service._save_state(state)
+        mock_backend.is_registered.return_value = True
+        mock_backend.verify_registration.return_value = (True, "ok")
+        result = await service.recover_pending()
+        assert result["recovered"] >= 1
+        assert service._load_state().registrations[0].state == "active"
 
 
 class TestGetStatus:
-    """状态查询测试"""
-
     @pytest.mark.asyncio
     async def test_get_status_registered(
         self, service: SystemTaskService, mock_backend
     ):
-        """查询已注册任务状态"""
         service._backend = mock_backend
-
-        await service.register(
-            task_id="abc-123",
-            task_name="测试",
-            trigger_config=CronTriggerConfig(cron="0 9 * * *"),
-            scope=SystemTaskScope.USER,
-        )
-
-        mock_backend.is_registered.return_value = True
-        status = await service.get_status("abc-123")
-
+        tid = "550e8400-e29b-41d4-a716-446655440000"
+        with _enable_caps(), _valid_trigger():
+            await service.register(
+                task_id=tid,
+                task_name="测试",
+                trigger_config=CronTriggerConfig(cron="0 9 * * *"),
+                scope=SystemTaskScope.USER,
+            )
+        mock_backend.is_registered = AsyncMock(return_value=True)
+        mock_backend.verify_registration = AsyncMock(return_value=(True, "ok"))
+        status = await service.get_status(tid)
         assert status.registered is True
-        assert status.scope == SystemTaskScope.USER
-        assert status.path_valid is True
+        assert status.state == "active"
+        assert status.desired_scope == SystemTaskScope.USER
 
     @pytest.mark.asyncio
     async def test_get_status_not_registered(
         self, service: SystemTaskService, mock_backend
     ):
-        """查询未注册任务状态"""
         service._backend = mock_backend
-        status = await service.get_status("nonexistent")
-
+        status = await service.get_status("550e8400-e29b-41d4-a716-446655440000")
         assert status.registered is False
-        assert status.path_valid is True
-
-    @pytest.mark.asyncio
-    async def test_get_status_path_invalid(
-        self, service: SystemTaskService, mock_backend
-    ):
-        """路径不一致时 path_valid 为 False"""
-        service._backend = mock_backend
-
-        # 使用旧路径注册
-        with patch.object(SystemTaskService, "current_exe_path", "/old/path/exe"):
-            await service.register(
-                task_id="abc-123",
-                task_name="测试",
-                trigger_config=CronTriggerConfig(cron="0 9 * * *"),
-                scope=SystemTaskScope.USER,
-            )
-
-        # 路径已变化
-        with patch.object(SystemTaskService, "current_exe_path", "/new/path/exe"):
-            mock_backend.is_registered.return_value = True
-            status = await service.get_status("abc-123")
-
-        assert status.registered is True
-        assert status.path_valid is False

@@ -170,6 +170,23 @@ class SystemTaskScope(str, Enum):
     SYSTEM = "system"
 
 
+RegistrationState = Literal[
+    "pending_register",
+    "active",
+    "orphaned",
+    "pending_cleanup",
+    "error",
+]
+
+PendingOperation = Literal[
+    "register",
+    "unregister",
+    "migrate",
+    "repair",
+    "none",
+]
+
+
 class OSTriggerSpec(BaseModel):
     """OS 级触发器规格，由 APScheduler 触发器映射而来"""
 
@@ -179,7 +196,7 @@ class OSTriggerSpec(BaseModel):
     )
     run_date: Optional[datetime] = Field(None, description="date 类型：一次性执行时间")
     interval_minutes: Optional[int] = Field(
-        None, description="interval 类型：间隔分钟数（秒级降级为分钟）"
+        None, description="interval 类型：间隔分钟数（整分钟，禁止静默取整）"
     )
 
 
@@ -188,35 +205,97 @@ class SystemTaskSpec(BaseModel):
 
     task_id: str
     task_name: str
-    exe_path: str = Field(..., description="MWU 可执行文件路径 (sys.executable)")
+    exe_path: str = Field(
+        ..., description="命令可执行文件（frozen: exe；source: python）"
+    )
     cli_args: List[str] = Field(
-        ..., description="命令行参数，如 ['--headless', '--task', task_id]"
+        ..., description="命令行参数，如 source 下 [main.py, --headless, --task, id]"
     )
     trigger: OSTriggerSpec
     scope: SystemTaskScope
     working_dir: str
 
 
+class ObservedNativeState(BaseModel):
+    """Observed native registration state for one scope/identifier."""
+
+    scope: SystemTaskScope
+    identifier: str
+    present: bool = False
+    verified: bool = False
+    details: Optional[str] = None
+
+
 class SystemTaskRegistration(BaseModel):
-    """持久化的系统级任务注册记录"""
+    """持久化的系统级任务注册记录（transactional durable state）"""
 
     task_id: str
     task_name: str
     platform: Literal["windows", "macos", "linux"]
-    scope: SystemTaskScope
+    # Desired state
+    desired_scope: SystemTaskScope
+    desired_trigger: OSTriggerSpec
+    desired_exe_path: str = Field(..., description="期望注册的可执行命令路径")
+    desired_cli_args: List[str] = Field(default_factory=list)
+    desired_working_dir: str = ""
+    # Durable lifecycle
+    state: RegistrationState = "pending_register"
+    pending_operation: PendingOperation = "none"
+    # Observed
+    observed: List[ObservedNativeState] = Field(default_factory=list)
     system_task_identifier: str = Field(
-        ..., description="schtasks 名称 / plist label / cron marker"
+        "", description="Primary native identifier for desired scope"
     )
-    trigger_spec: OSTriggerSpec
+    # Diagnostics
     registered_exe_path: str = Field(
-        ..., description="注册时的 exe 路径（用于自愈比对）"
+        "", description="最后成功注册的 exe/command 路径（兼容旧字段）"
     )
-    last_registered_at: datetime
+    last_registered_at: Optional[datetime] = None
+    last_error: Optional[str] = None
+    warnings: List[str] = Field(default_factory=list)
+    # Migration helper
+    migration_from_scope: Optional[SystemTaskScope] = None
+    # Compatibility: orphaned flag mirrors state==orphaned
     orphaned: bool = Field(False, description="APScheduler 任务已删除但 OS 注册仍存在")
+    # Legacy mirrors
+    scope: Optional[SystemTaskScope] = None
+    trigger_spec: Optional[OSTriggerSpec] = None
+
+    def model_post_init(self, __context) -> None:
+        if self.scope is None:
+            object.__setattr__(self, "scope", self.desired_scope)
+        if self.trigger_spec is None:
+            object.__setattr__(self, "trigger_spec", self.desired_trigger)
+        if self.orphaned and self.state == "active":
+            object.__setattr__(self, "state", "orphaned")
+        if self.state == "orphaned":
+            object.__setattr__(self, "orphaned", True)
+
+
+class CapabilityCell(BaseModel):
+    """One platform/scope/trigger capability cell."""
+
+    platform: Literal["windows", "macos", "linux"]
+    scope: SystemTaskScope
+    trigger_type: Literal["cron", "date", "interval"]
+    implemented: bool
+    verified: bool
+    enabled: bool
+    reason: str = ""
+    warnings: List[str] = Field(default_factory=list)
+
+
+class SystemCapabilitiesResponse(BaseModel):
+    """Capability matrix for native registration."""
+
+    platform: Literal["windows", "macos", "linux"]
+    cells: List[CapabilityCell]
+    system_scope_enabled: bool
+    warnings: List[str] = Field(default_factory=list)
 
 
 class SystemTaskStatusResponse(BaseModel):
-    """系统级注册状态查询响应"""
+    """系统级注册状态查询响应（authoritative desired + observed）"""
 
     task_id: str
     registered: bool
@@ -224,7 +303,17 @@ class SystemTaskStatusResponse(BaseModel):
     platform: Optional[str] = None
     next_run_time: Optional[datetime] = None
     last_error: Optional[str] = None
-    path_valid: bool = Field(..., description="注册路径是否与当前 exe 一致")
+    path_valid: bool = Field(..., description="注册路径是否与当前 command 一致")
+    # Extended authoritative fields
+    state: Optional[RegistrationState] = None
+    pending_operation: Optional[PendingOperation] = None
+    orphaned: bool = False
+    desired_scope: Optional[SystemTaskScope] = None
+    observed: List[ObservedNativeState] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    enabled: Optional[bool] = None
+    verified: Optional[bool] = None
+    reason: Optional[str] = None
 
 
 class SystemRegisterRequest(BaseModel):

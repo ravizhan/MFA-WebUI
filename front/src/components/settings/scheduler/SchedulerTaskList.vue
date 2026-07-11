@@ -21,7 +21,7 @@
             <div class="min-w-0">
               <div class="font-medium truncate">{{ task.name }}</div>
               <div class="text-xs opacity-60">{{ task.description }}</div>
-              <div class="flex flex-wrap gap-x-3 text-xs opacity-50 mt-1">
+              <div class="flex flex-wrap gap-x-3 gap-y-1 text-xs opacity-50 mt-1">
                 <span>
                   {{ t("settings.scheduler.trigger") }}{{ t("common.colon") }}
                   {{ formatTriggerText(task.trigger_type, task.trigger_config) }}
@@ -30,12 +30,16 @@
                   {{ t("settings.scheduler.nextRun") }}{{ t("common.colon") }}
                   {{ formatDateTimeText(task.next_run_time) }}
                 </span>
+                <SystemStatusBadge :status="getSystemStatus(task.id)" @repair="handleRepair" />
               </div>
             </div>
           </div>
           <div class="flex gap-1 shrink-0">
             <button class="btn btn-ghost btn-xs" @click="emit('edit', task)">
               {{ t("common.edit") }}
+            </button>
+            <button class="btn btn-ghost btn-xs" @click="handleRepair">
+              {{ t("settings.scheduler.dialog.repair") }}
             </button>
             <button class="btn btn-ghost btn-xs text-error" @click="emit('delete', task.id)">
               {{ t("common.delete") }}
@@ -50,8 +54,10 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n"
 import { Icon } from "@iconify/vue"
+import { useSchedulerStore } from "@/stores"
 import { formatDateTime, formatTrigger } from "@/utils/scheduler/display"
 import type { ScheduledTask, TriggerConfig, TriggerType } from "@/types/schedulerModel"
+import SystemStatusBadge from "./SystemStatusBadge.vue"
 
 const { tasks } = defineProps<{
   tasks: ScheduledTask[]
@@ -64,6 +70,7 @@ const emit = defineEmits<{
 }>()
 
 const { t, locale } = useI18n()
+const schedulerStore = useSchedulerStore()
 
 function formatTriggerText(triggerType: TriggerType, triggerConfig: TriggerConfig): string {
   return formatTrigger(t, locale.value, triggerType, triggerConfig)
@@ -71,5 +78,13 @@ function formatTriggerText(triggerType: TriggerType, triggerConfig: TriggerConfi
 
 function formatDateTimeText(dateStr?: string): string {
   return formatDateTime(t, locale.value, dateStr)
+}
+
+function getSystemStatus(taskId: string) {
+  return schedulerStore.getSystemStatus(taskId)
+}
+
+async function handleRepair() {
+  await schedulerStore.repairSystemTasksAll()
 }
 </script>

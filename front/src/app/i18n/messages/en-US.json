@@ -184,7 +184,11 @@
         "systemRegisterSuccess": "System registration successful",
         "systemRegisterFail": "System registration failed",
         "systemUnregisterSuccess": "System registration removed",
-        "systemUnregisterFail": "Failed to remove system registration"
+        "systemUnregisterFail": "Failed to remove system registration",
+        "capabilityDisabled": "System scheduling unavailable for this trigger: {reason}",
+        "partialFailure": "Task saved, but system registration failed: {message}",
+        "orphaned": "Orphaned",
+        "repair": "Repair"
       },
       "rules": {
         "nameRequired": "Please enter task name",

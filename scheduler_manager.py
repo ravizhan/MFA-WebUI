@@ -75,8 +75,13 @@ class SchedulerManager:
         """设置 MaaWorker 实例"""
         self._worker = worker
 
-    async def initialize(self):
-        """初始化调度器"""
+    async def initialize(self, *, start_scheduler: bool = True, paused: bool = False):
+        """初始化调度器
+
+        Args:
+            start_scheduler: whether to start APScheduler (headless may need job store only)
+            paused: if True, start in paused mode so no background dispatch occurs
+        """
         global _ACTIVE_MANAGER
         _ACTIVE_MANAGER = self
 
@@ -88,9 +93,18 @@ class SchedulerManager:
             jobstores={"default": SQLAlchemyJobStore(url=db_url)}
         )
 
-        # 启动调度器
-        self.scheduler.start()
-        logger.info("调度器已启动")
+        if start_scheduler:
+            # paused=True prevents background job dispatch while allowing get_job
+            self.scheduler.start(paused=paused)
+            if paused:
+                logger.info("调度器已启动（paused，无后台派发）")
+            else:
+                logger.info("调度器已启动")
+        else:
+            # Still need start for SQLAlchemy jobstore access on some versions;
+            # use paused if job-store access requires start.
+            self.scheduler.start(paused=True)
+            logger.info("调度器已启动（job-store only, paused）")
 
     async def shutdown(self):
         """关闭调度器"""

@@ -1,7 +1,5 @@
 """Tests for models/task_config.py — config normalization and snapshot building."""
 
-import pytest
-
 from typing import cast
 
 from models.interface import (
@@ -20,7 +18,6 @@ from models.task_config import (
     CUSTOM_PRESET_NAME,
     TaskConfigModel,
     TaskPresetSnapshotModel,
-    _build_default_task_order,
     _build_option_defaults,
     _build_task_option_maps,
     _clone_option_value,

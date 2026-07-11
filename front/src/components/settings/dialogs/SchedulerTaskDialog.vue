@@ -360,6 +360,81 @@
             </select>
           </fieldset>
 
+          <!-- System Scheduling -->
+          <fieldset v-if="activeSection === 'system'" class="fieldset p-0">
+            <legend class="fieldset-legend flex items-center gap-1.5">
+              <Icon icon="mdi:monitor-shimmer" class="text-base opacity-70" aria-hidden="true" />
+              {{ t("settings.scheduler.dialog.systemScheduling") }}
+            </legend>
+
+            <div v-if="!hasAnyEnabledScope" role="alert" class="alert alert-info mb-3">
+              <Icon icon="mdi:information-outline" class="text-lg" aria-hidden="true" />
+              <span>
+                {{
+                  t("settings.scheduler.dialog.capabilityDisabled", {
+                    reason:
+                      userCapabilityCell?.reason ||
+                      systemCapabilityCell?.reason ||
+                      t("common.unknown"),
+                  })
+                }}
+              </span>
+            </div>
+
+            <label class="flex cursor-pointer items-center gap-3">
+              <input
+                v-model="systemSchedulingEnabled"
+                type="checkbox"
+                class="toggle toggle-primary"
+                :disabled="!hasAnyEnabledScope"
+              />
+              <span class="text-sm">{{
+                t("settings.scheduler.dialog.enableSystemScheduling")
+              }}</span>
+            </label>
+          </fieldset>
+
+          <fieldset
+            v-if="activeSection === 'system' && systemSchedulingEnabled"
+            class="fieldset p-0"
+          >
+            <legend class="fieldset-legend">
+              {{ t("settings.scheduler.dialog.scope.label") }}
+            </legend>
+            <div class="flex flex-wrap gap-2">
+              <label
+                class="border-base-300 hover:border-primary/40 has-[:checked]:border-primary has-[:checked]:bg-primary/5 flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors"
+                :class="{ 'opacity-50': !userCapabilityCell?.enabled }"
+              >
+                <input
+                  v-model="systemScope"
+                  type="radio"
+                  class="radio radio-primary radio-sm"
+                  value="user"
+                  :disabled="!userCapabilityCell?.enabled"
+                />
+                <span class="text-sm">{{ t("settings.scheduler.dialog.scope.user") }}</span>
+              </label>
+              <label
+                class="border-base-300 hover:border-primary/40 has-[:checked]:border-primary has-[:checked]:bg-primary/5 flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors"
+                :class="{ 'opacity-50': !systemCapabilityCell?.enabled }"
+              >
+                <input
+                  v-model="systemScope"
+                  type="radio"
+                  class="radio radio-primary radio-sm"
+                  value="system"
+                  :disabled="!systemCapabilityCell?.enabled"
+                />
+                <span class="text-sm">{{ t("settings.scheduler.dialog.scope.system") }}</span>
+              </label>
+            </div>
+            <div v-if="systemScope === 'system'" role="alert" class="alert alert-warning mt-2">
+              <Icon icon="mdi:alert-outline" class="text-lg" aria-hidden="true" />
+              <span>{{ t("settings.scheduler.dialog.scope.systemWarning") }}</span>
+            </div>
+          </fieldset>
+
           <!-- Content: tasks -->
           <div v-if="activeSection === 'content'" class="flex min-h-0 flex-col gap-3">
             <div role="tablist" class="tabs tabs-box tabs-sm w-full flex-nowrap overflow-x-auto">
@@ -487,6 +562,7 @@ import type {
   CronTriggerConfig,
   DateTriggerConfig,
   IntervalTriggerConfig,
+  SystemTaskScope,
 } from "@/types/schedulerModel"
 import { showGlobalMessage } from "@/services/feedback/message"
 import { tryCatch } from "@/utils/tryCatch"
@@ -501,7 +577,7 @@ interface Emits {
   (e: "saved"): void
 }
 
-type DialogSection = "basic" | "schedule" | "environment" | "content"
+type DialogSection = "basic" | "schedule" | "environment" | "system" | "content"
 
 const { show, task } = defineProps<Props>()
 const emit = defineEmits<Emits>()
@@ -526,6 +602,9 @@ const availableResources = ref<Array<{ name: string; label?: string; controller?
 const loadingDevices = ref(false)
 const loadingResources = ref(false)
 
+const systemSchedulingEnabled = ref(false)
+const systemScope = ref<SystemTaskScope>("user")
+
 const sections = computed(() => [
   {
     id: "basic" as const,
@@ -543,11 +622,31 @@ const sections = computed(() => [
     icon: "mdi:devices",
   },
   {
+    id: "system" as const,
+    label: t("settings.scheduler.dialog.systemScheduling"),
+    icon: "mdi:monitor-shimmer",
+  },
+  {
     id: "content" as const,
     label: t("settings.scheduler.dialog.sections.content"),
     icon: "mdi:playlist-check",
   },
 ])
+
+const currentPlatform = computed(() => schedulerStore.systemCapabilities?.platform || "")
+
+const userCapabilityCell = computed(() =>
+  schedulerStore.getCapabilityCell(currentPlatform.value, "user", formData.value.trigger_type),
+)
+
+const systemCapabilityCell = computed(() =>
+  schedulerStore.getCapabilityCell(currentPlatform.value, "system", formData.value.trigger_type),
+)
+
+const hasAnyEnabledScope = computed(
+  () =>
+    (userCapabilityCell.value?.enabled ?? false) || (systemCapabilityCell.value?.enabled ?? false),
+)
 
 const triggerOptions = computed(() => [
   {
@@ -724,8 +823,27 @@ watch(
   async (open) => {
     await nextTick()
     syncDialogVisibility(open)
-    if (open) {
-      activeSection.value = "basic"
+    if (!open) {
+      return
+    }
+    activeSection.value = "basic"
+    systemSchedulingEnabled.value = false
+    systemScope.value = "user"
+    if (task) {
+      const status = schedulerStore.getSystemStatus(task.id)
+      if (status && (status.state === "active" || status.state === "pending_register")) {
+        systemSchedulingEnabled.value = true
+        systemScope.value = status.scope || "user"
+      }
+    }
+  },
+)
+
+watch(
+  () => activeSection.value,
+  (section) => {
+    if (section === "system") {
+      void schedulerStore.fetchSystemCapabilities()
     }
   },
 )
@@ -826,6 +944,8 @@ function resetForm() {
   currentSettingTaskId.value = null
   activeTab.value = "task-list"
   activeSection.value = "basic"
+  systemSchedulingEnabled.value = false
+  systemScope.value = "user"
 }
 
 function syncTaskListData(preferredOrder: string[]) {
@@ -1165,25 +1285,83 @@ function validateForm(): boolean {
   return validateTaskList()
 }
 
+async function syncSystemRegistration(taskId: string, wasRegistered: boolean) {
+  if (systemSchedulingEnabled.value) {
+    const result = await schedulerStore.registerSystem(taskId, systemScope.value)
+    if (!result) {
+      return {
+        success: false,
+        message: schedulerStore.error || t("settings.scheduler.dialog.systemRegisterFail"),
+      }
+    }
+    return { success: true, message: "" }
+  }
+  if (wasRegistered) {
+    const result = await schedulerStore.unregisterSystem(taskId)
+    if (!result) {
+      return {
+        success: false,
+        message: schedulerStore.error || t("settings.scheduler.dialog.systemUnregisterFail"),
+      }
+    }
+    return { success: true, message: "" }
+  }
+  return { success: true, message: "" }
+}
+
+async function saveTaskPayload(): Promise<{ taskId: string; success: boolean }> {
+  const taskPayload = {
+    ...formData.value,
+    ...configStore.buildExecutionPayload(formData.value.task_list, formData.value.task_options),
+    preTasks: formData.value.preTasks ?? [],
+  }
+
+  if (isEditMode.value && task) {
+    const success = await schedulerStore.updateTask(task.id, taskPayload)
+    if (!success) {
+      return { taskId: "", success: false }
+    }
+    return { taskId: task.id, success: true }
+  }
+
+  const createdTask = await schedulerStore.createTask(taskPayload)
+  if (!createdTask) {
+    return { taskId: "", success: false }
+  }
+  return { taskId: createdTask.id, success: true }
+}
+
 async function handleSave() {
   if (!validateForm()) {
     return
   }
 
   loading.value = true
-  const taskPayload = {
-    ...formData.value,
-    ...configStore.buildExecutionPayload(formData.value.task_list, formData.value.task_options),
-    preTasks: formData.value.preTasks ?? [],
-  }
-  const [success, err] = await tryCatch(() =>
-    isEditMode.value && task
-      ? schedulerStore.updateTask(task.id, taskPayload)
-      : schedulerStore.createTask(taskPayload),
-  )
-  loading.value = false
-  if (err || !success) {
+  const { taskId, success } = await saveTaskPayload()
+
+  if (!success) {
+    loading.value = false
     showGlobalMessage("error", schedulerStore.error || t("settings.scheduler.dialog.saveFail"))
+    return
+  }
+
+  const previousStatus = schedulerStore.getSystemStatus(taskId)
+  const wasRegistered =
+    !!previousStatus &&
+    (previousStatus.state === "active" || previousStatus.state === "pending_register")
+
+  const systemResult = await syncSystemRegistration(taskId, wasRegistered)
+  loading.value = false
+
+  if (!systemResult.success) {
+    showGlobalMessage(
+      "error",
+      t("settings.scheduler.dialog.partialFailure", { message: systemResult.message }),
+    )
+    closingFromUi.value = true
+    showDialog.value = false
+    emit("saved")
+    resetForm()
     return
   }
 

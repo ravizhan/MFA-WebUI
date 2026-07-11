@@ -3,6 +3,7 @@ import type {
   ScheduledTaskUpdate,
   SchedulerApiResponse,
   SystemRegisterRequest,
+  SystemTaskCapabilities,
   SystemTaskRegistration,
   SystemTaskRepairResult,
   SystemTaskStatus,
@@ -115,4 +116,12 @@ export function repairSystemTasks(): Promise<{
   message?: string
 }> {
   return fetch("/api/scheduler/system-tasks/repair", { method: "POST" }).then((res) => res.json())
+}
+
+export function getSystemCapabilities(): Promise<{
+  status: string
+  data?: SystemTaskCapabilities
+  message?: string
+}> {
+  return fetch("/api/scheduler/system-capabilities", { method: "GET" }).then((res) => res.json())
 }

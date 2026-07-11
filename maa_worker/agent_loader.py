@@ -16,7 +16,6 @@ if TYPE_CHECKING:
     from maa_utils import MaaWorker
 
 
-from maa.resource import Resource
 from maa.agent_client import AgentClient
 
 # Sink 基类名称映射 — 用于 AST 隐式继承检测

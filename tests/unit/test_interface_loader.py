@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from models.interface import InterfaceModel, Option, OptionCase
+from models.interface import InterfaceModel
 from models.interface_loader import (
     InterfaceLoadError,
     _normalize_import_list,

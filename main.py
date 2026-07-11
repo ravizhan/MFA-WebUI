@@ -4,7 +4,6 @@ import hashlib
 import logging
 import os
 import signal
-import socket
 import subprocess
 import sys
 import threading
@@ -43,6 +42,7 @@ from models.task_config import (
     normalize_task_execution_payload,
 )
 from scheduler_manager import SchedulerManager
+from services.process_lock import LockBusyError, LockError, RuntimeOwnership
 from services.system_scheduler import SystemTaskService
 from services.update_service import (
     check_github_update,
@@ -64,7 +64,6 @@ CONFIG_DIR = APP_ROOT_DIR / "config"
 SETTINGS_FILE = CONFIG_DIR / "settings.json"
 TASK_CONFIG_FILE = CONFIG_DIR / "task_config.json"
 LOGS_DIR = CONFIG_DIR / "logs"
-PID_FILE = CONFIG_DIR / "mwu.pid"
 INDEX_FILE = APP_ROOT_DIR / "page/index.html"
 
 # Headless 模式退出码
@@ -138,35 +137,21 @@ async def log_monitor():
         await asyncio.sleep(0.1)
 
 
-def _is_app_running() -> bool:
-    """检测 MWU 是否已在运行（通过端口检测）"""
-    try:
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.settimeout(1)
-            s.connect(("127.0.0.1", 5566))
-            return True
-    except (socket.timeout, ConnectionRefusedError, OSError):
-        return False
+def acquire_runtime_ownership() -> RuntimeOwnership:
+    """Acquire process-lifetime runtime lock (not on import/test)."""
+    ownership = RuntimeOwnership(APP_ROOT_DIR)
+    ownership.acquire()
+    return ownership
 
 
-def _is_updating() -> bool:
-    """检测是否正在更新（Go updater 写入的锁文件）"""
-    lock_file = Path.home() / ".mwu" / "updating.lock"
-    return lock_file.exists()
-
-
-def _write_pid_file():
-    """写入 PID 文件"""
-    PID_FILE.parent.mkdir(parents=True, exist_ok=True)
-    PID_FILE.write_text(str(os.getpid()), encoding="utf-8")
-
-
-def _remove_pid_file():
-    """删除 PID 文件"""
-    try:
-        PID_FILE.unlink(missing_ok=True)
-    except Exception:
-        pass
+def release_runtime_ownership() -> None:
+    ownership = app_state.runtime_ownership
+    if ownership is not None:
+        try:
+            ownership.release()
+        except Exception:
+            pass
+        app_state.runtime_ownership = None
 
 
 async def _headless_log_consumer(logger: logging.Logger):
@@ -190,61 +175,58 @@ async def run_headless(task_id: str) -> int:
     """Headless 模式：不启动 Web 服务器，执行指定任务后退出
 
     流程：
-    1. 检测应用是否已在运行 → 退出码 4（APScheduler 会处理）
-    2. 检测更新锁 → 退出码 5
-    3. 写入 PID 文件
-    4. 初始化 MaaWorker + SchedulerManager（不启动 LogBroadcaster/SSE/浏览器）
-    5. 从 APScheduler 加载任务
-    6. 调用 execute_scheduled_task 执行
-    7. 根据 task_state.last_status 确定退出码
-    8. 清理并退出
+    1. Runtime ownership（update 锁 30s + runtime 独占 + recheck）
+    2. 文件日志（失败也释放锁）
+    3. MaaWorker + SchedulerManager（paused，无后台派发）
+    4. 拒绝禁用任务；执行恰好一个 job
+    5. 清理并退出
     """
-    # 1. 检测应用是否已在运行
-    if _is_app_running():
-        print("应用已在运行，委托 APScheduler 处理")
-        return EXIT_APP_RUNNING
-
-    # 2. 检测更新锁
-    if _is_updating():
-        print("更新进行中，跳过执行")
-        return EXIT_UPDATING
-
-    # 3. 设置文件日志
-    LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_file = LOGS_DIR / f"headless_{task_id}_{timestamp}.log"
-
-    file_handler = logging.FileHandler(log_file, encoding="utf-8")
-    file_handler.setFormatter(
-        logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-    )
+    ownership = None
+    file_handler = None
     root_logger = logging.getLogger()
-    root_logger.addHandler(file_handler)
-    root_logger.setLevel(logging.INFO)
-
-    logger = logging.getLogger("headless")
-    logger.info(f"Headless 模式启动，任务 ID: {task_id}")
-
-    # 4. 写入 PID 文件
-    _write_pid_file()
-
     scheduler_manager = None
     worker = None
     log_task = None
 
     try:
-        # 5. 初始化 MaaWorker（不启动 LogBroadcaster/SSE/浏览器）
-        worker = MaaWorker(app_state.message_conn, interface, APP_ROOT_DIR)
+        try:
+            ownership = acquire_runtime_ownership()
+            app_state.runtime_ownership = ownership
+        except LockBusyError as e:
+            msg = str(e).lower()
+            if "update" in msg:
+                print("更新进行中，跳过执行")
+                return EXIT_UPDATING
+            print("应用已在运行，委托现有实例处理")
+            return EXIT_APP_RUNNING
+        except LockError as e:
+            print(f"锁协议失败: {e}")
+            return EXIT_UPDATING
 
-        # 6. 初始化调度器
+        try:
+            LOGS_DIR.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            log_file = LOGS_DIR / f"headless_{task_id}_{timestamp}.log"
+            file_handler = logging.FileHandler(log_file, encoding="utf-8")
+            file_handler.setFormatter(
+                logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+            )
+            root_logger.addHandler(file_handler)
+            root_logger.setLevel(logging.INFO)
+        except Exception as e:
+            print(f"日志初始化失败: {e}")
+            return EXIT_TASK_FAILED
+
+        logger = logging.getLogger("headless")
+        logger.info(f"Headless 模式启动，任务 ID: {task_id}")
+
+        worker = MaaWorker(app_state.message_conn, interface, APP_ROOT_DIR)
         scheduler_manager = SchedulerManager()
         scheduler_manager.set_worker(worker)
-        await scheduler_manager.initialize()
+        await scheduler_manager.initialize(start_scheduler=True, paused=True)
 
-        # 7. 启动日志消费者（替代 log_monitor）
         log_task = asyncio.create_task(_headless_log_consumer(logger))
 
-        # 8. 从 APScheduler 加载任务
         if scheduler_manager.scheduler is None:
             logger.error("调度器未初始化")
             return EXIT_TASK_FAILED
@@ -253,50 +235,49 @@ async def run_headless(task_id: str) -> int:
             logger.error(f"APScheduler 中未找到任务: {task_id}")
             return EXIT_TASK_NOT_FOUND
 
-        # 9. 执行任务（复用 APScheduler 的执行入口）
+        if job.next_run_time is None:
+            logger.error(f"任务已禁用，拒绝 headless 执行: {task_id}")
+            return EXIT_TASK_FAILED
+
         from scheduler_manager import execute_scheduled_task
 
         await execute_scheduled_task(**job.kwargs)
 
-        # 10. 根据执行结果确定退出码
         last_status = getattr(worker.task_state, "last_status", "failed")
         logger.info(f"任务执行完成，状态: {last_status}")
 
         if last_status == "success":
             return EXIT_SUCCESS
         elif last_status == "idle":
-            # 任务未启动，可能是设备连接失败
             return EXIT_DEVICE_FAILED
         else:
             return EXIT_TASK_FAILED
 
     except Exception as e:
-        logger.error(f"Headless 执行异常: {e}", exc_info=True)
+        logging.getLogger("headless").error(f"Headless 执行异常: {e}", exc_info=True)
         return EXIT_TASK_FAILED
     finally:
-        # 清理日志消费者
         if log_task is not None:
             log_task.cancel()
             with suppress(asyncio.CancelledError):
                 await log_task
-        # 清理调度器
         if scheduler_manager is not None:
             try:
                 await scheduler_manager.shutdown()
             except Exception:
                 pass
-        # 清理 Worker
         if worker is not None:
             try:
                 worker.shutdown()
             except Exception:
                 pass
-        # 删除 PID 文件
-        _remove_pid_file()
-        # 移除文件日志 handler
-        root_logger.removeHandler(file_handler)
-        file_handler.close()
-        logger.info("Headless 模式退出")
+        release_runtime_ownership()
+        if file_handler is not None:
+            try:
+                root_logger.removeHandler(file_handler)
+                file_handler.close()
+            except Exception:
+                pass
 
 
 @asynccontextmanager
@@ -318,6 +299,23 @@ async def lifespan(app: FastAPI):
 
     # 初始化系统级调度服务并自愈
     app_state.system_scheduler = SystemTaskService(APP_ROOT_DIR)
+
+    def _job_exists(task_id: str) -> bool:
+        sm = app_state.scheduler_manager
+        if sm is None or sm.scheduler is None:
+            return False
+        return sm.scheduler.get_job(task_id) is not None
+
+    def _job_enabled(task_id: str):
+        sm = app_state.scheduler_manager
+        if sm is None or sm.scheduler is None:
+            return None
+        job = sm.scheduler.get_job(task_id)
+        if job is None:
+            return None
+        return job.next_run_time is not None
+
+    app_state.system_scheduler.set_job_probes(_job_exists, _job_enabled)
     try:
         repair_result = await app_state.system_scheduler.repair_all()
         if repair_result["repaired"] or repair_result["failed"]:
@@ -327,9 +325,6 @@ async def lifespan(app: FastAPI):
             )
     except Exception as e:
         app_state.send_log(f"系统任务修复失败: {e}")
-
-    # 写入 PID 文件
-    _write_pid_file()
 
     monitor_task = asyncio.create_task(log_monitor())
     webbrowser.open_new("http://127.0.0.1:5566")
@@ -343,8 +338,7 @@ async def lifespan(app: FastAPI):
     # 关闭调度器
     if app_state.scheduler_manager:
         await app_state.scheduler_manager.shutdown()
-    # 删除 PID 文件
-    _remove_pid_file()
+    release_runtime_ownership()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -1013,16 +1007,37 @@ async def delete_scheduler_task(task_id: str):
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
     try:
+        # Persist orphan intent BEFORE APS deletion (fail closed on corrupt)
+        orphaned_marked = False
+        if app_state.system_scheduler is not None:
+            try:
+                orphaned_marked = (
+                    await app_state.system_scheduler.begin_orphan_before_delete(task_id)
+                )
+            except RuntimeError as e:
+                msg = str(e)
+                app_state.send_log(f"删除调度任务失败: {msg}")
+                return {"status": "failed", "message": msg}
+
         success = await app_state.scheduler_manager.delete_task(task_id)
         if success:
-            # 标记系统级注册为孤儿（不自动卸载，由用户手动处理）
-            if app_state.system_scheduler is not None:
-                await app_state.system_scheduler.mark_orphaned(task_id)
             return {"status": "success"}
+
+        # APS deletion failed: restore active if we had marked orphan
+        if orphaned_marked and app_state.system_scheduler is not None:
+            await app_state.system_scheduler.restore_active_after_failed_delete(task_id)
         msg = "任务不存在"
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
     except Exception as e:
+        # Best-effort restore if orphan intent was already persisted
+        if app_state.system_scheduler is not None:
+            try:
+                await app_state.system_scheduler.restore_active_after_failed_delete(
+                    task_id
+                )
+            except Exception:
+                pass
         msg = str(e)
         app_state.send_log(f"删除调度任务失败: {msg}")
         return {"status": "failed", "message": msg}
@@ -1092,6 +1107,18 @@ async def get_scheduler_executions(limit: int = 50):
 # ---------------------------------------------------------------------------
 
 
+@app.get("/api/scheduler/system-capabilities")
+async def get_system_capabilities():
+    """Authoritative capability matrix for native registration."""
+    if app_state.system_scheduler is None:
+        return {"status": "failed", "message": "系统调度服务未初始化"}
+    try:
+        caps = app_state.system_scheduler.get_capabilities()
+        return {"status": "success", "data": caps.model_dump(mode="json")}
+    except Exception as e:
+        return {"status": "failed", "message": str(e)}
+
+
 @app.post("/api/scheduler/tasks/{task_id}/system-register")
 async def register_system_task(task_id: str, request: SystemRegisterRequest):
     """注册定时任务到 OS 级调度器（Windows Task Scheduler / macOS launchd / Linux cron）"""
@@ -1117,7 +1144,7 @@ async def register_system_task(task_id: str, request: SystemRegisterRequest):
     except PermissionError as e:
         msg = str(e)
         app_state.send_log(f"系统级注册失败: {msg}")
-        return {"status": "error", "message": msg}
+        return {"status": "failed", "message": msg}
     except ValueError as e:
         msg = str(e)
         app_state.send_log(f"系统级注册失败: {msg}")
@@ -1213,9 +1240,26 @@ if __name__ == "__main__":
         exit_code = asyncio.run(run_headless(args.task))
         sys.exit(exit_code)
     else:
-        uvicorn.run(
-            app,
-            host="0.0.0.0",
-            port=5566,
-            timeout_graceful_shutdown=1,
-        )
+        # Acquire runtime ownership for GUI process lifetime (not on import)
+        try:
+            app_state.runtime_ownership = acquire_runtime_ownership()
+        except LockBusyError as e:
+            msg = str(e).lower()
+            if "update" in msg:
+                print("更新进行中，无法启动")
+                sys.exit(EXIT_UPDATING)
+            print("应用已在运行")
+            sys.exit(EXIT_APP_RUNNING)
+        except LockError as e:
+            print(f"锁协议失败: {e}")
+            sys.exit(EXIT_UPDATING)
+
+        try:
+            uvicorn.run(
+                app,
+                host="0.0.0.0",
+                port=5566,
+                timeout_graceful_shutdown=1,
+            )
+        finally:
+            release_runtime_ownership()

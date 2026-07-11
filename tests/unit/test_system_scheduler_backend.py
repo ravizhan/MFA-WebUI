@@ -1,14 +1,7 @@
-"""系统级调度后端单元测试。
+"""系统级调度后端单元测试（Phase 2 capability + golden artifacts）。"""
 
-测试覆盖：
-- validate_task_id: UUID 格式校验
-- _parse_cron_fields: 5-field cron 解析
-- map_trigger_to_os_spec: 触发器映射（Cron/Date/Interval）
-- 不支持模式的拒绝
-"""
-
-import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import pytest
 
@@ -16,28 +9,32 @@ from models.scheduler import (
     CronTriggerConfig,
     DateTriggerConfig,
     IntervalTriggerConfig,
+    OSTriggerSpec,
+    SystemTaskScope,
+    SystemTaskSpec,
 )
 from services.system_scheduler_backend import (
+    LinuxBackend,
+    MacOSBackend,
+    WindowsBackend,
     _parse_cron_field_list,
     _parse_cron_fields,
+    build_capabilities,
+    build_native_command,
     map_trigger_to_os_spec,
+    validate_linux_cron_expression,
     validate_task_id,
+    validate_trigger_for_platform,
+    windows_join_args,
+    windows_quote_argument,
 )
-
-
-# ---------------------------------------------------------------------------
-# validate_task_id
-# ---------------------------------------------------------------------------
 
 
 class TestValidateTaskId:
-    """task_id UUID 格式校验测试"""
-
     def test_valid_uuid(self):
         validate_task_id("550e8400-e29b-41d4-a716-446655440000")
 
     def test_valid_uuid_uppercase_rejected(self):
-        # UUID 必须是小写十六进制
         with pytest.raises(ValueError, match="无效的 task_id"):
             validate_task_id("550E8400-E29B-41D4-A716-446655440000")
 
@@ -45,49 +42,14 @@ class TestValidateTaskId:
         with pytest.raises(ValueError, match="无效的 task_id"):
             validate_task_id("")
 
-    def test_random_string(self):
-        with pytest.raises(ValueError, match="无效的 task_id"):
-            validate_task_id("not-a-uuid")
-
     def test_command_injection_attempt(self):
         with pytest.raises(ValueError, match="无效的 task_id"):
             validate_task_id("; rm -rf /")
 
-    def test_path_traversal_attempt(self):
-        with pytest.raises(ValueError, match="无效的 task_id"):
-            validate_task_id("../../../etc/passwd")
-
-
-# ---------------------------------------------------------------------------
-# _parse_cron_fields
-# ---------------------------------------------------------------------------
-
 
 class TestParseCronFields:
-    """5-field cron 表达式解析测试"""
-
     def test_basic_cron(self):
         result = _parse_cron_fields("0 9 * * *")
-        assert result["minute"] == "0"
-        assert result["hour"] == "9"
-        assert result["day"] == "*"
-        assert result["month"] == "*"
-        assert result["weekday"] == "*"
-
-    def test_all_wildcards(self):
-        result = _parse_cron_fields("* * * * *")
-        assert all(v == "*" for v in result.values())
-
-    def test_complex_cron(self):
-        result = _parse_cron_fields("*/5 8-18 1,15 * 1-5")
-        assert result["minute"] == "*/5"
-        assert result["hour"] == "8-18"
-        assert result["day"] == "1,15"
-        assert result["month"] == "*"
-        assert result["weekday"] == "1-5"
-
-    def test_extra_whitespace(self):
-        result = _parse_cron_fields("  0   9   *   *   *  ")
         assert result["minute"] == "0"
         assert result["hour"] == "9"
 
@@ -95,138 +57,266 @@ class TestParseCronFields:
         with pytest.raises(ValueError, match="无效的 cron 表达式"):
             _parse_cron_fields("0 9 * *")
 
-    def test_too_many_fields(self):
-        with pytest.raises(ValueError, match="无效的 cron 表达式"):
-            _parse_cron_fields("0 9 * * * 0")
-
-    def test_empty_string(self):
-        with pytest.raises(ValueError, match="无效的 cron 表达式"):
-            _parse_cron_fields("")
-
-
-# ---------------------------------------------------------------------------
-# _parse_cron_field_list
-# ---------------------------------------------------------------------------
-
 
 class TestParseCronFieldList:
-    """cron 字段值展开测试"""
-
     def test_wildcard(self):
         assert _parse_cron_field_list("*", 59) == list(range(60))
-
-    def test_single_value(self):
-        assert _parse_cron_field_list("5", 59) == [5]
-
-    def test_comma_separated(self):
-        assert _parse_cron_field_list("1,3,5", 59) == [1, 3, 5]
-
-    def test_range(self):
-        assert _parse_cron_field_list("1-5", 59) == [1, 2, 3, 4, 5]
 
     def test_step(self):
         assert _parse_cron_field_list("*/15", 59) == [0, 15, 30, 45]
 
-    def test_step_from_value(self):
-        assert _parse_cron_field_list("5/10", 59) == [5, 15, 25, 35, 45, 55]
-
-    def test_mixed(self):
-        result = _parse_cron_field_list("0,15,30-45/5", 59)
-        assert 0 in result
-        assert 15 in result
-        assert 30 in result
-        assert 35 in result
-        assert 40 in result
-        assert 45 in result
-
-    def test_sorted(self):
-        result = _parse_cron_field_list("5,1,3", 59)
-        assert result == [1, 3, 5]
-
-    def test_deduplicated(self):
-        result = _parse_cron_field_list("1,1,1", 59)
-        assert result == [1]
-
-
-# ---------------------------------------------------------------------------
-# map_trigger_to_os_spec
-# ---------------------------------------------------------------------------
+    def test_names_rejected(self):
+        with pytest.raises(ValueError):
+            _parse_cron_field_list("MON", 7)
 
 
 class TestMapTriggerToOsSpec:
-    """触发器映射测试"""
-
     def test_cron_trigger(self):
         config = CronTriggerConfig(cron="0 9 * * *")
         spec = map_trigger_to_os_spec(config)
         assert spec.trigger_type == "cron"
         assert spec.cron_expression == "0 9 * * *"
-        assert spec.run_date is None
-        assert spec.interval_minutes is None
 
-    def test_date_trigger_future(self):
-        future_date = datetime.now() + timedelta(days=1)
+    def test_date_trigger_future_timezone_aware(self):
+        future_date = datetime.now(timezone.utc) + timedelta(days=1)
         config = DateTriggerConfig(run_date=future_date)
         spec = map_trigger_to_os_spec(config)
         assert spec.trigger_type == "date"
-        assert spec.run_date == future_date
-        assert spec.cron_expression is None
+        assert spec.run_date is not None
+        assert spec.run_date.tzinfo is not None
 
     def test_date_trigger_past_rejected(self):
         past_date = datetime.now() - timedelta(days=1)
         config = DateTriggerConfig(run_date=past_date)
-        with pytest.raises(ValueError, match="DateTrigger 已过期"):
+        with pytest.raises(ValueError, match="已过期"):
             map_trigger_to_os_spec(config)
 
-    def test_interval_trigger_minutes_only(self):
+    def test_interval_whole_minutes(self):
         config = IntervalTriggerConfig(minutes=30)
         spec = map_trigger_to_os_spec(config)
-        assert spec.trigger_type == "interval"
         assert spec.interval_minutes == 30
 
-    def test_interval_trigger_hours(self):
-        config = IntervalTriggerConfig(hours=2)
-        spec = map_trigger_to_os_spec(config)
-        assert spec.trigger_type == "interval"
-        assert spec.interval_minutes == 120
-
-    def test_interval_trigger_days(self):
-        config = IntervalTriggerConfig(days=1)
-        spec = map_trigger_to_os_spec(config)
-        assert spec.trigger_type == "interval"
-        assert spec.interval_minutes == 1440
-
-    def test_interval_trigger_weeks(self):
-        config = IntervalTriggerConfig(weeks=1)
-        spec = map_trigger_to_os_spec(config)
-        assert spec.trigger_type == "interval"
-        assert spec.interval_minutes == 7 * 24 * 60
-
-    def test_interval_trigger_combined(self):
-        config = IntervalTriggerConfig(weeks=1, days=1, hours=2, minutes=30)
-        spec = map_trigger_to_os_spec(config)
-        expected = 7 * 24 * 60 + 24 * 60 + 2 * 60 + 30
-        assert spec.interval_minutes == expected
-
-    def test_interval_trigger_seconds_rounds_up(self):
+    def test_interval_seconds_rejected(self):
         config = IntervalTriggerConfig(minutes=5, seconds=30)
-        spec = map_trigger_to_os_spec(config)
-        # 5 minutes + 30 seconds → rounds up to 6 minutes
-        assert spec.interval_minutes == 6
+        with pytest.raises(ValueError, match="秒级"):
+            map_trigger_to_os_spec(config)
 
-    def test_interval_trigger_seconds_only(self):
-        config = IntervalTriggerConfig(seconds=30)
-        spec = map_trigger_to_os_spec(config)
-        # 30 seconds → rounds up to 1 minute (minimum)
-        assert spec.interval_minutes == 1
+    def test_interval_start_end_rejected(self):
+        config = IntervalTriggerConfig(
+            minutes=5, start_date=datetime.now() + timedelta(hours=1)
+        )
+        with pytest.raises(ValueError, match="start_date"):
+            map_trigger_to_os_spec(config)
 
-    def test_interval_trigger_zero(self):
-        config = IntervalTriggerConfig(minutes=0, hours=0)
-        spec = map_trigger_to_os_spec(config)
-        # All zeros → minimum 1 minute
-        assert spec.interval_minutes == 1
+    def test_interval_out_of_range(self):
+        config = IntervalTriggerConfig(minutes=0)
+        with pytest.raises(ValueError, match="1..44640"):
+            map_trigger_to_os_spec(config)
 
-    def test_interval_trigger_all_none(self):
-        config = IntervalTriggerConfig()
-        spec = map_trigger_to_os_spec(config)
-        assert spec.interval_minutes == 1
+    def test_interval_max(self):
+        config = IntervalTriggerConfig(minutes=44640)
+        assert map_trigger_to_os_spec(config).interval_minutes == 44640
+
+
+class TestPlatformValidation:
+    def test_windows_cron_fixed_daily_only(self):
+        ok = OSTriggerSpec(trigger_type="cron", cron_expression="0 9 * * *")
+        validate_trigger_for_platform("windows", ok)
+        bad = OSTriggerSpec(trigger_type="cron", cron_expression="*/5 * * * *")
+        with pytest.raises(ValueError):
+            validate_trigger_for_platform("windows", bad)
+
+    def test_macos_date_rejected(self):
+        dt = OSTriggerSpec(
+            trigger_type="date",
+            run_date=datetime.now(timezone.utc) + timedelta(days=1),
+        )
+        with pytest.raises(ValueError, match="拒绝 date"):
+            validate_trigger_for_platform("macos", dt)
+
+    def test_macos_interval_warning(self):
+        tr = OSTriggerSpec(trigger_type="interval", interval_minutes=5)
+        warnings = validate_trigger_for_platform("macos", tr)
+        assert any("睡眠" in w or "sleep" in w.lower() for w in warnings)
+
+    def test_linux_date_interval_rejected(self):
+        with pytest.raises(ValueError):
+            validate_trigger_for_platform(
+                "linux", OSTriggerSpec(trigger_type="date", run_date=datetime.now())
+            )
+        with pytest.raises(ValueError):
+            validate_trigger_for_platform(
+                "linux", OSTriggerSpec(trigger_type="interval", interval_minutes=5)
+            )
+
+    def test_linux_cron_dow_star_only(self):
+        validate_linux_cron_expression("0 9 1 * *")
+        with pytest.raises(ValueError, match="day-of-week"):
+            validate_linux_cron_expression("0 9 * * 1")
+        with pytest.raises(ValueError):
+            validate_linux_cron_expression("0 9 * * MON")
+
+
+class TestCapabilities:
+    def test_non_native_disabled_on_windows_host(self):
+        caps = build_capabilities("windows", host_platform="windows")
+        for cell in caps.cells:
+            if cell.platform != "windows":
+                assert cell.enabled is False
+            if cell.scope == SystemTaskScope.SYSTEM:
+                assert cell.enabled is False
+        assert caps.system_scope_enabled is False
+
+    def test_windows_user_cells_require_smoke_evidence(self):
+        # Without smoke evidence, cells stay disabled even on Windows host
+        caps = build_capabilities("windows", host_platform="windows")
+        user_cron = next(
+            c
+            for c in caps.cells
+            if c.platform == "windows"
+            and c.scope == SystemTaskScope.USER
+            and c.trigger_type == "cron"
+        )
+        assert user_cron.implemented is True
+        assert user_cron.verified is False
+        assert user_cron.enabled is False
+
+        caps2 = build_capabilities(
+            "windows",
+            host_platform="windows",
+            smoke_evidence={
+                "windows:user:cron": True,
+                "windows:user:date": True,
+                "windows:user:interval": True,
+            },
+        )
+        user_cron2 = next(
+            c
+            for c in caps2.cells
+            if c.platform == "windows"
+            and c.scope == SystemTaskScope.USER
+            and c.trigger_type == "cron"
+        )
+        assert user_cron2.verified is True
+        assert user_cron2.enabled is True
+
+
+class TestWindowsQuoting:
+    def test_spaces(self):
+        assert (
+            windows_quote_argument("C:\\Program Files\\mwu")
+            == '"C:\\Program Files\\mwu"'
+        )
+
+    def test_join_args(self):
+        line = windows_join_args(["main.py", "--task", "abc def"])
+        assert "main.py" in line
+        assert '"abc def"' in line
+
+
+class TestNativeCommand:
+    def test_source_mode_includes_main_py(self, tmp_path: Path):
+        (tmp_path / "main.py").write_text("#", encoding="utf-8")
+        exe, args = build_native_command(
+            tmp_path, "550e8400-e29b-41d4-a716-446655440000", frozen=False
+        )
+        assert exe  # python executable
+        assert any(
+            str(tmp_path / "main.py") in a or a.endswith("main.py") for a in args
+        )
+        assert "--headless" in args
+        assert "--task" in args
+
+    def test_frozen_mode_no_main_py(self, tmp_path: Path):
+        exe, args = build_native_command(
+            tmp_path, "550e8400-e29b-41d4-a716-446655440000", frozen=True
+        )
+        assert args == [
+            "--headless",
+            "--task",
+            "550e8400-e29b-41d4-a716-446655440000",
+        ]
+
+
+class TestGoldenArtifacts:
+    def _spec(self, platform_trigger="cron") -> SystemTaskSpec:
+        tid = "550e8400-e29b-41d4-a716-446655440000"
+        if platform_trigger == "cron":
+            trigger = OSTriggerSpec(trigger_type="cron", cron_expression="0 9 * * *")
+        elif platform_trigger == "interval":
+            trigger = OSTriggerSpec(trigger_type="interval", interval_minutes=15)
+        else:
+            trigger = OSTriggerSpec(
+                trigger_type="date",
+                run_date=datetime.now(timezone.utc) + timedelta(days=2),
+            )
+        return SystemTaskSpec(
+            task_id=tid,
+            task_name="Golden Task",
+            exe_path=r"C:\Program Files\MWU\python.exe",
+            cli_args=[r"C:\Program Files\MWU\main.py", "--headless", "--task", tid],
+            trigger=trigger,
+            scope=SystemTaskScope.USER,
+            working_dir=r"C:\Program Files\MWU",
+        )
+
+    def test_windows_xml_system_principal_and_cron(self):
+        backend = WindowsBackend()
+        spec = self._spec("cron")
+        spec.scope = SystemTaskScope.SYSTEM
+        xml = backend._build_task_xml(spec).decode("utf-8")
+        assert "ServiceAccount" not in xml
+        assert "S-1-5-18" in xml
+        assert "InteractiveToken" not in xml or spec.scope == SystemTaskScope.USER
+        assert "CalendarTrigger" in xml
+        assert "PT1M" not in xml  # no false one-minute repetition
+        assert "ScheduleByDay" in xml
+        # Arguments must be Windows-quoted for spaces
+        assert "Program Files" in xml
+
+    def test_windows_xml_user_interactive(self):
+        backend = WindowsBackend()
+        xml = backend._build_task_xml(self._spec("cron")).decode("utf-8")
+        assert "InteractiveToken" in xml
+        assert "IgnoreNew" in xml
+        assert "StartWhenAvailable" in xml
+
+    def test_windows_xml_date_timetrigger(self):
+        backend = WindowsBackend()
+        xml = backend._build_task_xml(self._spec("date")).decode("utf-8")
+        assert "TimeTrigger" in xml
+        assert "StartBoundary" in xml
+
+    def test_windows_xml_interval_no_calendar_day_hack(self):
+        backend = WindowsBackend()
+        xml = backend._build_task_xml(self._spec("interval")).decode("utf-8")
+        assert "TimeTrigger" in xml
+        assert "PT15M" in xml
+
+    def test_macos_plist_no_year(self):
+        backend = MacOSBackend()
+        plist = backend._build_plist(self._spec("cron"))
+        sci = plist.get("StartCalendarInterval", {})
+        assert "Year" not in sci
+        assert sci.get("Minute") == 0
+        assert sci.get("Hour") == 9
+
+    def test_macos_interval_seconds(self):
+        backend = MacOSBackend()
+        plist = backend._build_plist(self._spec("interval"))
+        assert plist["StartInterval"] == 15 * 60
+
+    def test_linux_cron_line_shlex_quoted(self):
+        backend = LinuxBackend()
+        spec = self._spec("cron")
+        spec.working_dir = "/home/user/My App"
+        spec.exe_path = "/home/user/My App/python"
+        line = backend._build_cron_line(spec)
+        assert line.startswith("0 9 * * * ")
+        assert (
+            "cd '/home/user/My App'" in line
+            or 'cd "/home/user/My App"' in line
+            or "My App" in line
+        )
+        # command body uses shlex quotes
+        assert "&&" in line

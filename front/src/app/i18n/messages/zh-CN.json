@@ -184,7 +184,11 @@
         "systemRegisterSuccess": "系统级注册成功",
         "systemRegisterFail": "系统级注册失败",
         "systemUnregisterSuccess": "已卸载系统级注册",
-        "systemUnregisterFail": "卸载系统级注册失败"
+        "systemUnregisterFail": "卸载系统级注册失败",
+        "capabilityDisabled": "当前触发类型不支持系统级调度：{reason}",
+        "partialFailure": "任务已保存，但系统级注册失败：{message}",
+        "orphaned": "已游离",
+        "repair": "修复"
       },
       "rules": {
         "nameRequired": "请输入任务名称",

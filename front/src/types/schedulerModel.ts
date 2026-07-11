@@ -109,11 +109,26 @@ export type SystemTaskScope = "user" | "system"
 
 export type SystemTaskPlatform = "windows" | "macos" | "linux"
 
+export type SystemTaskState =
+  | "pending_register"
+  | "active"
+  | "orphaned"
+  | "pending_cleanup"
+  | "error"
+
 export interface OSTriggerSpec {
   trigger_type: TriggerType
   cron_expression?: string
   run_date?: string
   interval_minutes?: number
+}
+
+export interface SystemTaskObservation {
+  scope: SystemTaskScope
+  registered: boolean
+  verified: boolean
+  native_present: boolean
+  last_error?: string
 }
 
 export interface SystemTaskStatus {
@@ -124,6 +139,16 @@ export interface SystemTaskStatus {
   next_run_time?: string
   last_error?: string
   path_valid: boolean
+  // Extended authoritative fields
+  state?: SystemTaskState
+  pending_operation?: string
+  orphaned?: boolean
+  desired_scope?: SystemTaskScope
+  observed?: SystemTaskObservation[]
+  warnings?: string[]
+  enabled?: boolean
+  verified?: boolean
+  reason?: string
 }
 
 export interface SystemTaskRegistration {
@@ -136,6 +161,36 @@ export interface SystemTaskRegistration {
   registered_exe_path: string
   last_registered_at: string
   orphaned: boolean
+  // Extended durable fields
+  state: SystemTaskState
+  pending_operation?: string
+  desired_scope: SystemTaskScope
+  desired_trigger?: OSTriggerSpec
+  desired_exe_path?: string
+  desired_cli_args?: string[]
+  desired_working_dir?: string
+  observed?: SystemTaskObservation[]
+  warnings?: string[]
+  last_error?: string
+  migration_from_scope?: SystemTaskScope
+}
+
+export interface SystemTaskCapabilityCell {
+  platform: SystemTaskPlatform
+  scope: SystemTaskScope
+  trigger_type: TriggerType
+  implemented: boolean
+  verified: boolean
+  enabled: boolean
+  reason: string
+  warnings: string[]
+}
+
+export interface SystemTaskCapabilities {
+  platform: string
+  cells: SystemTaskCapabilityCell[]
+  system_scope_enabled: boolean
+  warnings: string[]
 }
 
 export interface SystemRegisterRequest {

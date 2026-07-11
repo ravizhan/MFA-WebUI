@@ -18,18 +18,91 @@ import (
 	"time"
 
 	"github.com/mholt/archives"
+	"github.com/ravizhan/MWU/updater/internal/filelock"
 	"github.com/zeebo/xxh3"
 )
 
 const (
 	exitCodeSelfUpdate = 10
 	exitCodeError      = 1
+	exitCodeOK         = 0
 	defaultChangesFile = "changes.json"
+
+	// Cross-account modes for updater-owned coordination/log artifacts.
+	// Staging/install dirs stay 0755 (not world-writable); ownership is restored
+	// to the install-root owner after elevated runs (POSIX).
+	logFileMode     = 0o666
+	stagingDirMode  = 0o755
+	installFileMode = 0o755
+	installDirMode  = 0o755
+
+	selfUpdateBackupSuffix = ".old"
+	selfUpdateNewSuffix    = ".new"
 )
+
+// deps holds injectable collaborators for unit tests.
+type deps struct {
+	getwd          func() (string, error)
+	executable     func() (string, error)
+	acquireUpdate  func(appRoot string, timeout, interval time.Duration) (*filelock.Lock, error)
+	acquireRuntime func(appRoot string, timeout, interval time.Duration) (*filelock.Lock, error)
+	extract        func(ctx context.Context, archivePath, destDir string) error
+	selfUpdate     func(installDir, extractDir string) (bool, error)
+	notify         func(url string) error
+	getChanges     func(installDir, extractDir string) (ChangeLog, error)
+	apply          func(installDir, extractDir string, changes ChangeLog) error
+	writeChanges   func(path string, changes ChangeLog) error
+	restart        func(exePath string) error
+	removeAll      func(path string) error
+	remove         func(path string) error
+	mkdirAll       func(path string, perm os.FileMode) error
+	openLog        func(name string, flag int, perm os.FileMode) (*os.File, error)
+	output         func(v any)
+	sleep          func(d time.Duration)
+	now            func() time.Time
+	// test hooks
+	onUpdateLocked    func()
+	runtimeUnlock     func(l *filelock.Lock) error // default: l.Close
+	atomicReplaceHook func(src, dst string, mode os.FileMode) error
+	syncDirHook       func(dir string) error
+	lockTimeout       time.Duration
+	lockInterval      time.Duration
+	shutdownWait      time.Duration
+}
+
+func defaultDeps() deps {
+	return deps{
+		getwd:          os.Getwd,
+		executable:     os.Executable,
+		acquireUpdate:  filelock.AcquireUpdateLock,
+		acquireRuntime: filelock.AcquireRuntimeLock,
+		extract:        extractArchive,
+		selfUpdate:     nil, // set in run to bind executable resolver
+		notify:         notifyShutdown,
+		getChanges:     getChanges,
+		apply:          nil,
+		writeChanges: func(path string, changes ChangeLog) error {
+			return writeChanges(path, changes)
+		},
+		restart:      restartMain,
+		removeAll:    os.RemoveAll,
+		remove:       os.Remove,
+		mkdirAll:     os.MkdirAll,
+		openLog:      os.OpenFile,
+		output:       outputJSON,
+		sleep:        time.Sleep,
+		now:          time.Now,
+		lockTimeout:  filelock.DefaultTimeout,
+		lockInterval: filelock.DefaultRetryInterval,
+		shutdownWait: 2 * time.Second,
+	}
+}
 
 type Config struct {
 	Archive    string
 	WebhookURL string
+	// RestartCmd is an opaque executable path (NOT a shell command line).
+	// Paths may contain spaces, e.g. C:\Program Files\MWU\MWU.exe.
 	RestartCmd string
 }
 
@@ -39,136 +112,239 @@ type UpdateResult struct {
 	RestartRequired bool   `json:"restart_required"`
 }
 
-func updatingLockPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".mwu", "updating.lock"), nil
-}
-
-func createUpdatingLock() error {
-	lockPath, err := updatingLockPath()
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(lockPath), 0755); err != nil {
-		return err
-	}
-	return os.WriteFile(lockPath, []byte("updating"), 0644)
-}
-
-func removeUpdatingLock() {
-	lockPath, err := updatingLockPath()
-	if err != nil {
-		return
-	}
-	os.Remove(lockPath)
-}
-
 func main() {
-	logFile, _ := os.OpenFile("updater.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-	if logFile != nil {
-		log.SetOutput(logFile)
+	os.Exit(run(defaultDeps(), parseFlags(os.Args[1:])))
+}
+
+// run executes the updater and always returns an exit code so lock owners are
+// released via defers before process exit.
+//
+// Ordering (normative):
+//  1. Resolve single install root (locks + mutations share it)
+//  2. Capture install owner; recover interrupted self-update
+//  3. Acquire update.lock BEFORE any staging/self-update/file mutation
+//  4. Stage extract + optional self-update (exit 10 after cleanup)
+//  5. Notify shutdown, wait for runtime.lock
+//  6. Apply changes (atomic replace + fsync), hold both locks
+//  7. Handoff: unlock runtime (fail aborts) → Start replacement → release update
+func run(d deps, cfg Config) int {
+	if d.openLog == nil {
+		d.openLog = os.OpenFile
+	}
+	if d.output == nil {
+		d.output = outputJSON
+	}
+	if d.sleep == nil {
+		d.sleep = time.Sleep
+	}
+	if d.lockTimeout <= 0 {
+		d.lockTimeout = filelock.DefaultTimeout
+	}
+	if d.lockInterval <= 0 {
+		d.lockInterval = filelock.DefaultRetryInterval
+	}
+	if d.executable == nil {
+		d.executable = os.Executable
+	}
+	if d.runtimeUnlock == nil {
+		d.runtimeUnlock = func(l *filelock.Lock) error {
+			if l == nil {
+				return nil
+			}
+			return l.Close()
+		}
+	}
+	if d.selfUpdate == nil {
+		d.selfUpdate = func(installDir, extractDir string) (bool, error) {
+			return handleSelfUpdate(d, installDir, extractDir)
+		}
+	}
+	if d.apply == nil {
+		d.apply = func(installDir, extractDir string, changes ChangeLog) error {
+			return applyChanges(d, installDir, extractDir, changes)
+		}
 	}
 
-	cfg := parseFlags()
-	ctx := context.Background()
+	logFile, logErr := d.openLog("updater.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, logFileMode)
+	if logFile != nil {
+		defer logFile.Close()
+		log.SetOutput(logFile)
+		if err := ensureCrossAccountFileMode("updater.log", logFileMode); err != nil {
+			log.Printf("警告：updater.log 权限规范化失败：%v", err)
+		}
+	} else if logErr != nil {
+		log.Printf("警告：无法打开 updater.log：%v", logErr)
+	}
 
 	if cfg.Archive == "" {
-		fail("Missing -archive argument")
+		return failResult(d, "Missing -archive argument")
 	}
 	if cfg.WebhookURL == "" {
-		fail("Missing -webhook argument")
+		return failResult(d, "Missing -webhook argument")
 	}
 	if cfg.RestartCmd == "" {
-		fail("Missing -restart-cmd argument")
+		return failResult(d, "Missing -restart-cmd argument")
 	}
 
-	installDir, err := os.Getwd()
+	wd, err := d.getwd()
 	if err != nil {
-		fail("Failed to get working directory: %v", err)
+		return failResult(d, "Failed to get working directory: %v", err)
 	}
 
-	extractDir := filepath.Join(installDir, "update_temp")
-	_ = os.RemoveAll(extractDir)
-	if err := os.MkdirAll(extractDir, 0o755); err != nil {
-		fail("Failed to create temp dir: %v", err)
+	installDir, err := filelock.ResolveInstallRoot(wd, "")
+	if err != nil {
+		return failResult(d, "Failed to resolve install root: %v", err)
 	}
+	log.Printf("安装根目录（锁与变更同一根）：%s", installDir)
+
+	owner, err := captureInstallOwner(installDir)
+	if err != nil {
+		return failResult(d, "Failed to capture install owner: %v", err)
+	}
+
+	// Recover interrupted self-update before new work (journal/backup present).
+	if err := recoverInterruptedSelfUpdate(d, installDir); err != nil {
+		return failResult(d, "Self-update recovery failed: %v", err)
+	}
+
+	// --- update.lock BEFORE any staging / self-update / install mutation ---
+	log.Println("获取 update.lock...")
+	updateLock, err := d.acquireUpdate(installDir, d.lockTimeout, d.lockInterval)
+	if err != nil {
+		return failResult(d, "Could not acquire update.lock: %v", err)
+	}
+	defer func() {
+		if updateLock != nil {
+			if err := updateLock.Close(); err != nil {
+				log.Printf("警告：释放 update.lock 失败：%v", err)
+			} else {
+				log.Println("已释放 update.lock")
+			}
+		}
+	}()
+
+	if d.onUpdateLocked != nil {
+		d.onUpdateLocked()
+	}
+
+	ctx := context.Background()
+	extractDir := filepath.Join(installDir, "update_temp")
+
+	if err := d.removeAll(extractDir); err != nil && !os.IsNotExist(err) {
+		return failResult(d, "Failed to clear staging dir: %v", err)
+	}
+	if err := d.mkdirAll(extractDir, stagingDirMode); err != nil {
+		return failResult(d, "Failed to create temp dir: %v", err)
+	}
+	if err := ensureCrossAccountFileMode(extractDir, stagingDirMode); err != nil {
+		return failResult(d, "Failed to set staging dir mode: %v", err)
+	}
+	if err := owner.apply(extractDir); err != nil {
+		return failResult(d, "Failed to assign staging ownership: %v", err)
+	}
+	defer func() {
+		// Re-assign ownership before remove so a root crash mid-run still leaves
+		// a tree the install owner can delete; then remove.
+		_ = owner.applyTree(extractDir)
+		_ = d.removeAll(extractDir)
+	}()
 
 	log.Printf("正在将 %s 解压到 %s", cfg.Archive, extractDir)
-	if err := extractArchive(ctx, cfg.Archive, extractDir); err != nil {
-		fail("Failed to extract archive: %v", err)
+	if err := d.extract(ctx, cfg.Archive, extractDir); err != nil {
+		return failResult(d, "Failed to extract archive: %v", err)
+	}
+	// Staging contents must be owned by install owner for crash cleanup.
+	if err := owner.applyTree(extractDir); err != nil {
+		return failResult(d, "Failed to assign staging tree ownership: %v", err)
 	}
 
 	log.Println("检查自更新...")
-	if performedSelfUpdate, err := handleSelfUpdate(installDir, extractDir); err != nil {
-		fail("Self update failed: %v", err)
+	if performedSelfUpdate, err := d.selfUpdate(installDir, extractDir); err != nil {
+		return failResult(d, "Self update failed: %v", err)
 	} else if performedSelfUpdate {
-		log.Println("已执行自更新。以代码 10 退出。")
-		os.RemoveAll(extractDir)
-		os.Exit(exitCodeSelfUpdate)
+		log.Println("已执行自更新。清理后以代码 10 退出。")
+		_ = owner.applyTree(extractDir)
+		_ = d.removeAll(extractDir)
+		return exitCodeSelfUpdate
 	}
 
 	log.Println("通知主程序退出...")
 	if cfg.WebhookURL != "" {
-		if err := notifyShutdown(cfg.WebhookURL); err != nil {
+		if err := d.notify(cfg.WebhookURL); err != nil {
 			log.Printf("警告：通知关闭失败：%v。", err)
-		} else {
-			time.Sleep(2 * time.Second)
+		} else if d.shutdownWait > 0 {
+			d.sleep(d.shutdownWait)
 		}
 	}
 
-	log.Println("等待文件锁释放...")
-	if err := waitForLocks(installDir, cfg.RestartCmd); err != nil {
-		fail("Could not acquire file locks: %v", err)
+	log.Println("等待 runtime.lock...")
+	runtimeLock, err := d.acquireRuntime(installDir, d.lockTimeout, d.lockInterval)
+	if err != nil {
+		return failResult(d, "Could not acquire runtime.lock: %v", err)
 	}
-
-	log.Println("创建更新锁...")
-	if err := createUpdatingLock(); err != nil {
-		log.Printf("警告：无法创建更新锁文件：%v", err)
-		// Continue anyway — the lock is advisory, not mandatory
-	}
-	defer removeUpdatingLock()
+	runtimeHeld := true
+	defer func() {
+		if runtimeHeld && runtimeLock != nil {
+			// Deferred cleanup retry if handoff never unlocked.
+			if err := d.runtimeUnlock(runtimeLock); err != nil {
+				log.Printf("警告：释放 runtime.lock 失败：%v", err)
+			}
+			runtimeHeld = false
+		}
+	}()
 
 	log.Println("计算更改...")
-	changes, err := getChanges(installDir, extractDir)
+	changes, err := d.getChanges(installDir, extractDir)
 	if err != nil {
-		fail("Failed to get changes: %v", err)
+		return failResult(d, "Failed to get changes: %v", err)
 	}
 
 	log.Println("应用更新...")
-	if err := applyChanges(installDir, extractDir, changes); err != nil {
-		fail("Failed to apply changes: %v", err)
+	if err := d.apply(installDir, extractDir, changes); err != nil {
+		return failResult(d, "Failed to apply changes: %v", err)
 	}
 
 	changesPath := filepath.Join(installDir, defaultChangesFile)
-	writeChanges(changesPath, changes)
+	if err := d.writeChanges(changesPath, changes); err != nil {
+		return failResult(d, "Failed to write changes log: %v", err)
+	}
+	_ = owner.apply(changesPath)
 
-	os.RemoveAll(extractDir)
-	os.Remove(cfg.Archive)
+	_ = owner.applyTree(extractDir)
+	_ = d.removeAll(extractDir)
+	_ = d.remove(cfg.Archive)
 
-	if cfg.RestartCmd != "" {
-		log.Printf("重启主程序：%s", cfg.RestartCmd)
-		if err := restartMain(cfg.RestartCmd); err != nil {
-			log.Printf("Failed to restart main program: %v", err)
-		}
+	// Handoff: runtime unlock MUST succeed before restart/success.
+	log.Println("重启交接：释放 runtime.lock...")
+	if err := d.runtimeUnlock(runtimeLock); err != nil {
+		// Keep runtimeHeld true so deferred cleanup retries Close; abort handoff.
+		return failResult(d, "Failed to release runtime.lock before restart: %v", err)
+	}
+	runtimeHeld = false
+
+	log.Printf("启动替换进程：%s", cfg.RestartCmd)
+	if err := d.restart(cfg.RestartCmd); err != nil {
+		return failResult(d, "Failed to start replacement process: %v", err)
 	}
 
 	log.Println("更新完成。")
-	outputJSON(UpdateResult{
+	d.output(UpdateResult{
 		Status:          "success",
 		Message:         "更新成功完成",
 		RestartRequired: true,
 	})
+	return exitCodeOK
 }
 
-func parseFlags() Config {
+func parseFlags(args []string) Config {
 	cfg := Config{}
-	flag.StringVar(&cfg.Archive, "archive", "", "更新包路径（zip/7z）")
-	flag.StringVar(&cfg.WebhookURL, "webhook", "", "用于请求主程序关闭的URL")
-	flag.StringVar(&cfg.RestartCmd, "restart-cmd", "", "重启主程序的命令")
-	flag.Parse()
+	fs := flag.NewFlagSet("updater", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	fs.StringVar(&cfg.Archive, "archive", "", "更新包路径（zip/7z）")
+	fs.StringVar(&cfg.WebhookURL, "webhook", "", "用于请求主程序关闭的URL")
+	// Opaque executable path — may contain spaces. Not a shell command line.
+	fs.StringVar(&cfg.RestartCmd, "restart-cmd", "", "重启主程序的可执行文件路径（可含空格）")
+	_ = fs.Parse(args)
 	return cfg
 }
 
@@ -202,14 +378,18 @@ func extractArchive(ctx context.Context, archivePath, destDir string) error {
 			return err
 		}
 		if f.IsDir() {
-			return os.MkdirAll(outPath, 0o755)
+			return os.MkdirAll(outPath, stagingDirMode)
 		}
 
-		if err := os.MkdirAll(filepath.Dir(outPath), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(outPath), stagingDirMode); err != nil {
 			return err
 		}
 
-		outFile, err := os.OpenFile(outPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, f.Mode())
+		mode := f.Mode()
+		if mode == 0 {
+			mode = 0o644
+		}
+		outFile, err := os.OpenFile(outPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
 		if err != nil {
 			return err
 		}
@@ -221,51 +401,169 @@ func extractArchive(ctx context.Context, archivePath, destDir string) error {
 		}
 		defer rc.Close()
 
-		_, err = io.Copy(outFile, rc)
-		return err
+		if _, err := io.Copy(outFile, rc); err != nil {
+			return err
+		}
+		return outFile.Sync()
 	})
 }
 
-func handleSelfUpdate(installDir, extractDir string) (bool, error) {
-	exePath, err := os.Executable()
+// pathWithinRoot reports whether target is the root or a path strictly inside it.
+func pathWithinRoot(root, target string) (bool, error) {
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return false, err
+	}
+	absTarget, err := filepath.Abs(target)
+	if err != nil {
+		return false, err
+	}
+	if resolved, err := filepath.EvalSymlinks(absRoot); err == nil {
+		absRoot = resolved
+	}
+	if resolved, err := filepath.EvalSymlinks(absTarget); err == nil {
+		absTarget = resolved
+	}
+	absRoot = filepath.Clean(absRoot)
+	absTarget = filepath.Clean(absTarget)
+	rel, err := filepath.Rel(absRoot, absTarget)
+	if err != nil {
+		return false, err
+	}
+	relSlash := filepath.ToSlash(rel)
+	if relSlash == ".." || strings.HasPrefix(relSlash, "../") {
+		return false, nil
+	}
+	return true, nil
+}
+
+// recoverInterruptedSelfUpdate restores a canonical updater if a previous
+// self-update left .new / .old journal artifacts.
+func recoverInterruptedSelfUpdate(d deps, installDir string) error {
+	exePath, err := d.executable()
+	if err != nil {
+		return nil // cannot recover without knowing exe
+	}
+	if ok, err := pathWithinRoot(installDir, exePath); err != nil || !ok {
+		return nil
+	}
+	newPath := exePath + selfUpdateNewSuffix
+	oldPath := exePath + selfUpdateBackupSuffix
+
+	// Case A: .new exists and canonical missing/corrupt → promote .new
+	if st, err := os.Stat(newPath); err == nil && !st.IsDir() {
+		if _, err := os.Stat(exePath); err != nil {
+			log.Printf("恢复自更新：提升 %s → 规范路径", newPath)
+			if err := replaceFile(newPath, exePath); err != nil {
+				return fmt.Errorf("promote .new: %w", err)
+			}
+			_ = doSyncDir(d, filepath.Dir(exePath))
+		} else {
+			// Canonical exists; drop stale .new
+			_ = os.Remove(newPath)
+		}
+	}
+
+	// Case B: .old exists and canonical missing → restore .old
+	if _, err := os.Stat(exePath); err != nil {
+		if st, err := os.Stat(oldPath); err == nil && !st.IsDir() {
+			log.Printf("恢复自更新：从备份恢复 %s", oldPath)
+			if err := replaceFile(oldPath, exePath); err != nil {
+				return fmt.Errorf("restore .old: %w", err)
+			}
+			_ = doSyncDir(d, filepath.Dir(exePath))
+		}
+	}
+	return nil
+}
+
+func handleSelfUpdate(d deps, installDir, extractDir string) (bool, error) {
+	exePath, err := d.executable()
 	if err != nil {
 		return false, err
 	}
 
+	ok, err := pathWithinRoot(installDir, exePath)
+	if err != nil {
+		return false, fmt.Errorf("validate executable path: %w", err)
+	}
+	if !ok {
+		return false, fmt.Errorf("executable outside install root: %s (root %s)", exePath, installDir)
+	}
+
 	relPath, err := filepath.Rel(installDir, exePath)
 	if err != nil {
-		return false, nil
+		return false, fmt.Errorf("executable not relative to install root: %w", err)
+	}
+	// Reject .. components even if Rel succeeded on some edge cases.
+	if strings.HasPrefix(filepath.ToSlash(relPath), "../") || relPath == ".." {
+		return false, fmt.Errorf("executable path escapes install root: %s", relPath)
 	}
 
 	candidate := filepath.Join(extractDir, relPath)
 	if _, err := os.Stat(candidate); os.IsNotExist(err) {
 		candidate = filepath.Join(extractDir, filepath.Base(exePath))
 	}
-
 	if _, err := os.Stat(candidate); err != nil {
 		return false, nil
 	}
 
 	currentHash, _ := hashFile(exePath)
 	candidateHash, _ := hashFile(candidate)
-
 	if currentHash == candidateHash {
 		return false, nil
 	}
 
-	oldPath := exePath + ".old"
-	_ = os.Remove(oldPath)
+	// Prepare + sync candidate beside canonical as .new BEFORE touching canonical.
+	newPath := exePath + selfUpdateNewSuffix
+	oldPath := exePath + selfUpdateBackupSuffix
+	_ = os.Remove(newPath)
 
-	if err := os.Rename(exePath, oldPath); err != nil {
-		return false, fmt.Errorf("移动当前可执行文件失败：%w", err)
+	if err := prepareSelfUpdateCandidate(d, candidate, newPath, installFileMode); err != nil {
+		_ = os.Remove(newPath)
+		return false, fmt.Errorf("prepare self-update candidate: %w", err)
 	}
 
-	if err := copyFile(candidate, exePath, 0755); err != nil {
-		_ = os.Rename(oldPath, exePath)
-		return false, fmt.Errorf("复制新可执行文件失败：%w", err)
+	// Atomic replace with backup: never leave a window with no canonical updater.
+	if err := replaceFileWithBackup(newPath, exePath, oldPath); err != nil {
+		_ = os.Remove(newPath)
+		return false, fmt.Errorf("atomic self-update replace: %w", err)
 	}
-
 	return true, nil
+}
+
+// prepareSelfUpdateCandidate copies src to dst (same dir as final), chmod, fsync.
+func prepareSelfUpdateCandidate(d deps, src, dst string, mode os.FileMode) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	dir := filepath.Dir(dst)
+	if err := os.MkdirAll(dir, installDirMode); err != nil {
+		return err
+	}
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	if err := out.Chmod(mode); err != nil && runtime.GOOS != "windows" {
+		out.Close()
+		return fmt.Errorf("chmod candidate: %w", err)
+	}
+	if err := out.Sync(); err != nil {
+		out.Close()
+		return fmt.Errorf("fsync candidate: %w", err)
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	return doSyncDir(d, dir)
 }
 
 func notifyShutdown(urlStr string) error {
@@ -285,31 +583,6 @@ func notifyShutdown(urlStr string) error {
 		return fmt.Errorf("服务器返回 %d", resp.StatusCode)
 	}
 	return nil
-}
-
-func waitForLocks(installDir, restartCmd string) error {
-	deadline := time.Now().Add(30 * time.Second)
-	executable := strings.TrimSpace(restartCmd)
-
-	var path string
-	if filepath.IsAbs(executable) {
-		path = executable
-	} else {
-		path = filepath.Join(installDir, executable)
-	}
-
-	for time.Now().Before(deadline) {
-		if _, err := os.Stat(path); err != nil {
-			return nil
-		}
-		f, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0644)
-		if err == nil {
-			f.Close()
-			return nil
-		}
-		time.Sleep(1 * time.Second)
-	}
-	return errors.New("等待文件锁超时")
 }
 
 type ChangeLog struct {
@@ -350,7 +623,6 @@ func getChanges(installDir, extractDir string) (ChangeLog, error) {
 		path string
 		rel  string
 	}
-
 	type localChanges struct {
 		added    []string
 		modified []string
@@ -359,11 +631,8 @@ func getChanges(installDir, extractDir string) (ChangeLog, error) {
 	pkgFiles := make(chan fileInfo, 100)
 	pkgFileMap := make(map[string]bool)
 	var mapMu sync.Mutex
-
 	numWorkers := runtime.NumCPU()
 	var wg sync.WaitGroup
-
-	// 使用通道收集每个 worker 的结果
 	results := make(chan localChanges, numWorkers)
 
 	go func() {
@@ -376,11 +645,9 @@ func getChanges(installDir, extractDir string) (ChangeLog, error) {
 			if rel == defaultChangesFile || rel == filepath.Base(os.Args[0]) {
 				return nil
 			}
-
 			mapMu.Lock()
 			pkgFileMap[rel] = true
 			mapMu.Unlock()
-
 			pkgFiles <- fileInfo{path, rel}
 			return nil
 		})
@@ -391,36 +658,26 @@ func getChanges(installDir, extractDir string) (ChangeLog, error) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			local := localChanges{
-				added:    make([]string, 0),
-				modified: make([]string, 0),
-			}
-
+			local := localChanges{added: make([]string, 0), modified: make([]string, 0)}
 			for f := range pkgFiles {
 				targetPath := filepath.Join(installDir, f.rel)
 				if _, err := os.Stat(targetPath); err != nil {
 					local.added = append(local.added, f.rel)
 					continue
 				}
-
 				h1, _ := hashFile(f.path)
 				h2, _ := hashFile(targetPath)
 				if h1 != h2 {
 					local.modified = append(local.modified, f.rel)
 				}
 			}
-
 			results <- local
 		}()
 	}
-
-	// 等待所有 worker 完成并关闭结果通道
 	go func() {
 		wg.Wait()
 		close(results)
 	}()
-
-	// 合并所有结果
 	for local := range results {
 		changes.Added = append(changes.Added, local.added...)
 		changes.Modified = append(changes.Modified, local.modified...)
@@ -432,7 +689,6 @@ func getChanges(installDir, extractDir string) (ChangeLog, error) {
 		}
 		rel, _ := filepath.Rel(installDir, path)
 		rel = filepath.ToSlash(rel)
-
 		if strings.HasPrefix(rel, "config/") ||
 			rel == "update_temp" ||
 			strings.HasPrefix(rel, "update_temp/") ||
@@ -440,119 +696,234 @@ func getChanges(installDir, extractDir string) (ChangeLog, error) {
 			rel == filepath.Base(os.Args[0]) ||
 			rel == "updater.log" ||
 			strings.HasSuffix(rel, ".old") ||
+			strings.HasSuffix(rel, ".new") ||
 			rel == defaultChangesFile {
 			return nil
 		}
-
 		mapMu.Lock()
 		exists := pkgFileMap[rel]
 		mapMu.Unlock()
-
 		if !exists {
 			changes.Deleted = append(changes.Deleted, rel)
 		}
 		return nil
 	})
-
 	return changes, nil
 }
 
-func applyChanges(installDir, extractDir string, changes ChangeLog) error {
+func applyChanges(d deps, installDir, extractDir string, changes ChangeLog) error {
+	owner, err := captureInstallOwner(installDir)
+	if err != nil {
+		return err
+	}
 	for _, rel := range append(changes.Added, changes.Modified...) {
 		src := filepath.Join(extractDir, rel)
 		dst := filepath.Join(installDir, rel)
-
 		if rel == filepath.Base(os.Args[0]) || rel == defaultChangesFile {
 			continue
 		}
-
-		if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(dst), installDirMode); err != nil {
 			return err
 		}
-
-		if err := copyFile(src, dst, 0755); err != nil {
+		// Ensure intermediate dirs owned by install owner (not left root-owned).
+		if err := owner.apply(filepath.Dir(dst)); err != nil {
+			return err
+		}
+		if err := doAtomicReplace(d, src, dst, installFileMode); err != nil {
+			return err
+		}
+		if err := owner.apply(dst); err != nil {
 			return err
 		}
 	}
-
 	for _, rel := range changes.Deleted {
-		dst := filepath.Join(installDir, rel)
-		_ = os.Remove(dst)
+		_ = os.Remove(filepath.Join(installDir, rel))
 	}
-
 	return nil
 }
 
-func restartMain(cmdStr string) error {
-	var cmd *exec.Cmd
-	if runtime.GOOS == "windows" {
-		cmd = exec.Command("cmd", "/c", "start", "/b", "cmd", "/c", cmdStr)
-	} else {
-		cmd = exec.Command("sh", "-c", cmdStr+" &")
+// restartMain treats exePath as an opaque executable path (may contain spaces).
+// It does NOT re-split the string as a shell command line.
+func restartMain(exePath string) error {
+	exe, err := resolveRestartExecutable(exePath)
+	if err != nil {
+		return err
 	}
-	return cmd.Start()
+
+	cmd := exec.Command(exe)
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	cmd.Stdin = nil
+	if err := configureDetached(cmd); err != nil {
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	if cmd.Process == nil {
+		return errors.New("replacement process handle is nil after Start")
+	}
+	go func() { _ = cmd.Process.Release() }()
+	return nil
 }
 
-func writeChanges(path string, changes ChangeLog) {
-	data, _ := json.MarshalIndent(changes, "", "  ")
-	_ = os.WriteFile(path, data, 0644)
+// resolveRestartExecutable normalizes an opaque executable path (spaces allowed).
+// No shell splitting is performed.
+func resolveRestartExecutable(exePath string) (string, error) {
+	exePath = strings.TrimSpace(exePath)
+	if exePath == "" {
+		return "", errors.New("empty restart executable path")
+	}
+	if !filepath.IsAbs(exePath) {
+		if abs, err := filepath.Abs(exePath); err == nil {
+			exePath = abs
+		}
+	}
+	if st, err := os.Stat(exePath); err != nil || st.IsDir() {
+		return "", fmt.Errorf("replacement executable not found: %s", exePath)
+	}
+	return exePath, nil
+}
+
+func writeChanges(path string, changes ChangeLog) error {
+	data, err := json.MarshalIndent(changes, "", "  ")
+	if err != nil {
+		return err
+	}
+	return atomicWriteFile(path, data, 0o644)
 }
 
 func safeJoin(baseDir, name string) (string, error) {
-	// 清理路径，移除多余的斜杠和点
 	cleanName := filepath.Clean(name)
-
-	// 转换为统一的路径分隔符进行验证
 	cleanNameSlash := filepath.ToSlash(cleanName)
-
-	// 检查路径是否以 ".." 开头，防止路径遍历
 	if strings.HasPrefix(cleanNameSlash, "..") {
 		return "", errors.New("非法路径：路径遍历攻击")
 	}
-
-	// 检查是否包含 "../"
 	if strings.Contains(cleanNameSlash, "../") {
 		return "", errors.New("非法路径：包含路径遍历")
 	}
-
-	// 构建最终路径
 	joined := filepath.Join(baseDir, cleanName)
-
-	// 使用 filepath.Rel 进行二次验证，确保结果在 baseDir 内
 	rel, err := filepath.Rel(baseDir, joined)
 	if err != nil {
 		return "", fmt.Errorf("路径解析失败: %w", err)
 	}
-
-	// 规范化相对路径，统一使用正斜杠进行比较
-	relSlash := filepath.ToSlash(rel)
-
-	// 如果相对路径以 ".." 开头，说明路径在 baseDir 之外
-	if strings.HasPrefix(relSlash, "..") {
+	if strings.HasPrefix(filepath.ToSlash(rel), "..") {
 		return "", errors.New("非法路径：路径超出目标目录")
 	}
-
 	return joined, nil
 }
 
-func copyFile(src, dst string, mode os.FileMode) error {
+func doSyncDir(d deps, dir string) error {
+	if d.syncDirHook != nil {
+		return d.syncDirHook(dir)
+	}
+	return syncDir(dir)
+}
+
+func doAtomicReplace(d deps, src, dst string, mode os.FileMode) error {
+	if d.atomicReplaceHook != nil {
+		return d.atomicReplaceHook(src, dst, mode)
+	}
+	return atomicReplaceFile(d, src, dst, mode)
+}
+
+// atomicReplaceFile copies src to a same-directory temp file, fsyncs, sets mode
+// (fail-closed), atomically replaces dst, then syncs the parent directory
+// (fail-closed). Never removes/truncates destination first.
+func atomicReplaceFile(d deps, src, dst string, mode os.FileMode) error {
 	in, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
 
-	_ = os.Remove(dst)
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, mode)
+	dir := filepath.Dir(dst)
+	if err := os.MkdirAll(dir, installDirMode); err != nil {
+		return err
+	}
+
+	tmp, err := os.CreateTemp(dir, ".mwu-update-*")
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	tmpName := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = tmp.Close()
+			_ = os.Remove(tmpName)
+		}
+	}()
 
-	if _, err := io.Copy(out, in); err != nil {
+	if _, err := io.Copy(tmp, in); err != nil {
 		return err
 	}
-	return out.Chmod(mode)
+	if err := tmp.Chmod(mode); err != nil {
+		if runtime.GOOS != "windows" {
+			return fmt.Errorf("chmod temp: %w", err)
+		}
+	}
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("fsync temp: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+
+	if err := replaceFile(tmpName, dst); err != nil {
+		return err
+	}
+	cleanup = false
+	if err := doSyncDir(d, dir); err != nil {
+		return err
+	}
+	return nil
+}
+
+// atomicWriteFile writes data via same-dir temp + fsync + chmod (fail-closed) + replace + dirsync.
+func atomicWriteFile(path string, data []byte, mode os.FileMode) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, installDirMode); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".mwu-write-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	cleanup := true
+	defer func() {
+		if cleanup {
+			_ = tmp.Close()
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		return err
+	}
+	if err := tmp.Chmod(mode); err != nil {
+		if runtime.GOOS != "windows" {
+			return fmt.Errorf("chmod write temp: %w", err)
+		}
+	}
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("fsync write temp: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := replaceFile(tmpName, path); err != nil {
+		return err
+	}
+	cleanup = false
+	if err := syncDir(dir); err != nil {
+		return err
+	}
+	return nil
+}
+
+func copyFile(src, dst string, mode os.FileMode) error {
+	return atomicReplaceFile(defaultDeps(), src, dst, mode)
 }
 
 func hashFile(path string) (string, error) {
@@ -574,9 +945,13 @@ func outputJSON(v any) {
 	fmt.Println(string(data))
 }
 
-func fail(format string, v ...any) {
+func failResult(d deps, format string, v ...any) int {
 	msg := fmt.Sprintf(format, v...)
 	log.Printf("错误：%s", msg)
-	outputJSON(UpdateResult{Status: "failed", Message: msg})
-	os.Exit(exitCodeError)
+	if d.output != nil {
+		d.output(UpdateResult{Status: "failed", Message: msg})
+	} else {
+		outputJSON(UpdateResult{Status: "failed", Message: msg})
+	}
+	return exitCodeError
 }

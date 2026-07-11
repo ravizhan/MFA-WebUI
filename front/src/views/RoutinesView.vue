@@ -7,10 +7,16 @@
             <Icon icon="mdi:clock-outline" class="text-primary text-2xl" />
             {{ t("settings.scheduler.title") }}
           </h2>
-          <button class="btn btn-primary btn-sm" @click="openCreateTaskDialog">
-            <Icon icon="mdi:plus" class="text-base" />
-            {{ t("settings.scheduler.create") }}
-          </button>
+          <div class="flex gap-2">
+            <button class="btn btn-ghost btn-sm" @click="handleRepairAll">
+              <Icon icon="mdi:wrench" class="text-base" />
+              {{ t("settings.scheduler.repairAll") }}
+            </button>
+            <button class="btn btn-primary btn-sm" @click="openCreateTaskDialog">
+              <Icon icon="mdi:plus" class="text-base" />
+              {{ t("settings.scheduler.create") }}
+            </button>
+          </div>
         </div>
 
         <div class="tabs tabs-boxed mb-4">
@@ -71,7 +77,13 @@ const editingTask = ref<ScheduledTask | null>(null)
 onMounted(() => {
   void schedulerStore.fetchTasks()
   void schedulerStore.fetchExecutions()
+  void schedulerStore.fetchAllSystemStatuses()
+  void schedulerStore.fetchSystemCapabilities()
 })
+
+async function handleRepairAll() {
+  await schedulerStore.repairSystemTasksAll()
+}
 
 function openCreateTaskDialog() {
   editingTask.value = null
