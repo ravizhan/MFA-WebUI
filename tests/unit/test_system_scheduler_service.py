@@ -14,6 +14,8 @@ from models.scheduler import (
 )
 from services.system_scheduler import SystemTaskService, _SystemTaskState
 
+TID = "550e8400-e29b-41d4-a716-446655440000"
+
 
 @pytest.fixture
 def temp_config_dir(tmp_path: Path) -> Path:
@@ -356,3 +358,276 @@ class TestGetStatus:
         service._backend = mock_backend
         status = await service.get_status("550e8400-e29b-41d4-a716-446655440000")
         assert status.registered is False
+
+
+# ---------------------------------------------------------------------------
+# Service transactions
+# ---------------------------------------------------------------------------
+
+
+class TestServiceTransactions:
+    @pytest.mark.asyncio
+    async def test_native_absent_registered_false(self, service, mock_backend):
+        service._backend = mock_backend
+        mock_backend.is_registered = AsyncMock(return_value=False)
+        with _enable_caps(), _valid_trigger():
+            await service.register(
+                TID, "t", CronTriggerConfig(cron="0 9 * * *"), SystemTaskScope.USER
+            )
+        mock_backend.is_registered.return_value = False
+        status = await service.get_status(TID)
+        assert status.registered is False
+        assert status.verified is False
+
+    @pytest.mark.asyncio
+    async def test_same_scope_rollback_restores_prior(self, service, mock_backend):
+        service._backend = mock_backend
+        mock_backend.is_registered = AsyncMock(return_value=False)
+        with _enable_caps(), _valid_trigger():
+            await service.register(
+                TID, "t1", CronTriggerConfig(cron="0 9 * * *"), SystemTaskScope.USER
+            )
+        # Now native is present for second update
+        mock_backend.is_registered = AsyncMock(return_value=True)
+        mock_backend.export_native_definition = AsyncMock(return_value=b"<Task prior/>")
+        # second register fails verify then restore verifies
+        mock_backend.verify_registration = AsyncMock(
+            side_effect=[(False, "bad"), (True, "restored")]
+        )
+        mock_backend.register = AsyncMock()
+        with _enable_caps(), _valid_trigger():
+            with pytest.raises(RuntimeError, match="verification failed"):
+                await service.register(
+                    TID,
+                    "t2",
+                    CronTriggerConfig(cron="0 10 * * *"),
+                    SystemTaskScope.USER,
+                )
+        mock_backend.restore_native_definition.assert_called()
+        state = service._load_state()
+        reg = state.registrations[0]
+        assert reg.state in ("active", "error")
+        assert reg.observed
+
+    @pytest.mark.asyncio
+    async def test_scope_migration_shared_id_no_double_delete(
+        self, service, mock_backend
+    ):
+        service._backend = mock_backend
+        mock_backend.same_native_identifier_across_scopes.return_value = True
+        mock_backend.is_registered = AsyncMock(return_value=False)
+        mock_backend.export_native_definition = AsyncMock(return_value=None)
+        with _enable_caps(), _valid_trigger():
+            await service.register(
+                TID, "t", CronTriggerConfig(cron="0 9 * * *"), SystemTaskScope.USER
+            )
+        # migrate: native present, export required
+        mock_backend.is_registered = AsyncMock(return_value=True)
+        mock_backend.export_native_definition = AsyncMock(return_value=b"<Task/>")
+        mock_backend.unregister.reset_mock()
+        with _enable_caps(), _valid_trigger():
+            with patch(
+                "services.system_scheduler.is_capability_enabled",
+                return_value=(True, "enabled", []),
+            ):
+                await service.register(
+                    TID,
+                    "t",
+                    CronTriggerConfig(cron="0 9 * * *"),
+                    SystemTaskScope.SYSTEM,
+                )
+        mock_backend.unregister.assert_not_called()
+        reg = service._load_state().registrations[0]
+        assert reg.desired_scope == SystemTaskScope.SYSTEM
+        assert reg.state == "active"
+        assert len([o for o in reg.observed if o.present]) == 1
+
+    @pytest.mark.asyncio
+    async def test_compensation_failure_preserves_observed(self, service, mock_backend):
+        service._backend = mock_backend
+        calls = {"n": 0}
+
+        async def is_reg_side(*a, **k):
+            calls["n"] += 1
+            return calls["n"] > 1
+
+        mock_backend.is_registered = AsyncMock(side_effect=is_reg_side)
+        mock_backend.export_native_definition = AsyncMock(return_value=None)
+        mock_backend.register = AsyncMock(side_effect=RuntimeError("native boom"))
+        mock_backend.unregister = AsyncMock(side_effect=RuntimeError("comp boom"))
+        with _enable_caps(), _valid_trigger():
+            with pytest.raises(RuntimeError, match="native boom"):
+                await service.register(
+                    TID, "t", CronTriggerConfig(cron="0 9 * * *"), SystemTaskScope.USER
+                )
+        reg = service._load_state().registrations[0]
+        assert reg.state == "error"
+        assert reg.pending_operation == "register"
+        assert reg.observed
+        assert any(o.present for o in reg.observed)
+
+    @pytest.mark.asyncio
+    async def test_corrupt_orphan_delete_fails_closed(self, service):
+        service._state_file.parent.mkdir(parents=True, exist_ok=True)
+        service._state_file.write_text("{bad", encoding="utf-8")
+        with pytest.raises(RuntimeError, match="corrupt"):
+            await service.begin_orphan_before_delete(TID)
+
+    @pytest.mark.asyncio
+    async def test_export_none_refuses_mutation(self, service, mock_backend):
+        service._backend = mock_backend
+        mock_backend.is_registered = AsyncMock(return_value=True)
+        mock_backend.export_native_definition = AsyncMock(return_value=None)
+        with _enable_caps(), _valid_trigger():
+            with pytest.raises(RuntimeError, match="export/snapshot"):
+                await service.register(
+                    TID, "t", CronTriggerConfig(cron="0 9 * * *"), SystemTaskScope.USER
+                )
+        mock_backend.register.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_orphan_restore_exact_prior_not_unconditional(
+        self, service, mock_backend
+    ):
+        service._backend = mock_backend
+        with _enable_caps(), _valid_trigger():
+            # first register: is_registered False so no export required
+            mock_backend.is_registered = AsyncMock(return_value=False)
+            mock_backend.export_native_definition = AsyncMock(return_value=None)
+            await service.register(
+                TID, "t", CronTriggerConfig(cron="0 9 * * *"), SystemTaskScope.USER
+            )
+        # Force state to error (not active)
+        state = service._load_state()
+        reg = state.registrations[0]
+        reg.state = "error"
+        reg.orphaned = False
+        reg.last_error = "prior error"
+        service._save_state(state)
+
+        assert await service.begin_orphan_before_delete(TID) is True
+        await service.restore_active_after_failed_delete(TID)
+        reg2 = service._load_state().registrations[0]
+        # Must restore exact prior (error), NOT force active
+        assert reg2.state == "error"
+        assert reg2.orphaned is False
+        assert reg2.last_error == "prior error"
+
+    @pytest.mark.asyncio
+    async def test_query_exception_not_confirmed_absent(self, service, mock_backend):
+        service._backend = mock_backend
+        mock_backend.is_registered = AsyncMock(return_value=False)
+        mock_backend.export_native_definition = AsyncMock(return_value=None)
+        with _enable_caps(), _valid_trigger():
+            await service.register(
+                TID, "t", CronTriggerConfig(cron="0 9 * * *"), SystemTaskScope.USER
+            )
+        mock_backend.is_registered = AsyncMock(
+            side_effect=RuntimeError("schtasks boom")
+        )
+        status = await service.get_status(TID)
+        # Should not claim confirmed native absence in observed details
+        assert status.observed
+        assert any("unknown" in (o.details or "").lower() for o in status.observed)
+        assert not any((o.details or "") == "native absent" for o in status.observed)
+
+    @pytest.mark.asyncio
+    async def test_repair_export_none_refuses_overwrite(self, service, mock_backend):
+        """P0-3: native exists but export returns None → refuse to overwrite."""
+        service._backend = mock_backend
+        with _enable_caps(), _valid_trigger():
+            await service.register(
+                TID, "t", CronTriggerConfig(cron="0 9 * * *"), SystemTaskScope.USER
+            )
+        # Force path change so repair triggers, AND export returns None
+        state = service._load_state()
+        state.registrations[0].desired_exe_path = "/different/exe"
+        service._save_state(state)
+        mock_backend.is_registered = AsyncMock(return_value=True)
+        mock_backend.export_native_definition = AsyncMock(return_value=None)
+        service.set_job_probes(exists=lambda _id: True)
+        result = await service.repair_all()
+        assert result["failed"] >= 1
+        assert any("导出" in d or "export" in d.lower() for d in result["details"])
+        reg = service._load_state().registrations[0]
+        assert reg.state == "error"
+        assert "refusing" in (reg.last_error or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_repair_export_exception_refuses_overwrite(
+        self, service, mock_backend
+    ):
+        """P0-3: native exists but export raises → refuse to overwrite."""
+        service._backend = mock_backend
+        with _enable_caps(), _valid_trigger():
+            await service.register(
+                TID, "t", CronTriggerConfig(cron="0 9 * * *"), SystemTaskScope.USER
+            )
+        state = service._load_state()
+        state.registrations[0].desired_exe_path = "/different/exe"
+        service._save_state(state)
+        mock_backend.is_registered = AsyncMock(return_value=True)
+        mock_backend.export_native_definition = AsyncMock(
+            side_effect=RuntimeError("schtasks gone")
+        )
+        service.set_job_probes(exists=lambda _id: True)
+        result = await service.repair_all()
+        assert result["failed"] >= 1
+        assert any("export" in d.lower() for d in result["details"])
+        reg = service._load_state().registrations[0]
+        assert reg.state == "error"
+        assert "refusing" in (reg.last_error or "").lower()
+
+    @pytest.mark.asyncio
+    async def test_distinct_id_migrate_verify_fail_cleans_new_target(self, service):
+        """P0-4: distinct-ID migration verify failure must unregister new target."""
+        b = MagicMock()
+        b.platform_name = "linux"
+        b.register = AsyncMock()
+        b.unregister = AsyncMock()
+        b.is_registered = AsyncMock(return_value=True)
+        b.export_native_definition = AsyncMock(return_value=b"old cron line")
+        b.restore_native_definition = AsyncMock()
+        b.same_native_identifier_across_scopes = MagicMock(return_value=False)
+        b.build_identifier = MagicMock(
+            side_effect=lambda tid, s: f"mwu-{tid}-{s.value}"
+        )
+        service._backend = b
+
+        # First register with USER – must succeed (verify ok)
+        b.verify_registration = AsyncMock(return_value=(True, "ok"))
+        with _enable_caps(), _valid_trigger():
+            await service.register(
+                TID, "t", CronTriggerConfig(cron="0 9 * * *"), SystemTaskScope.USER
+            )
+        # Now migrate to SYSTEM – verify fails on new target
+        b.verify_registration = AsyncMock(
+            side_effect=[
+                (False, "verify bad"),
+                (True, "restored"),
+            ]
+        )
+        b.register.reset_mock()
+        b.unregister.reset_mock()
+        with (
+            _enable_caps(),
+            _valid_trigger(),
+            patch(
+                "services.system_scheduler.is_capability_enabled",
+                return_value=(True, "enabled", []),
+            ),
+        ):
+            with pytest.raises(RuntimeError, match="migrate verify"):
+                await service.register(
+                    TID,
+                    "t",
+                    CronTriggerConfig(cron="0 9 * * *"),
+                    SystemTaskScope.SYSTEM,
+                )
+        new_unreg_calls = [
+            c for c in b.unregister.call_args_list if c[0][1] == SystemTaskScope.SYSTEM
+        ]
+        assert len(new_unreg_calls) >= 1, (
+            "distinct-ID migration must unregister new target on verify failure"
+        )
+        b.restore_native_definition.assert_called()

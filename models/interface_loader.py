@@ -201,7 +201,7 @@ def _resolve_import_path(import_path: str, base_dir: Path) -> Path:
         import_path,
         field_name="import",
     )
-    resolved_path = (base_dir / normalized_import_path).resolve()
+    resolved_path = (base_dir / normalized_import_path)
     try:
         resolved_path.relative_to(base_dir)
     except ValueError as exc:
@@ -519,7 +519,7 @@ def _merge_imports_into_target(
 
 def load_interface_model(base_dir: str | Path) -> InterfaceModel:
     resolved_base_dir = Path(base_dir).resolve()
-    root_path = (resolved_base_dir / "interface.json").resolve()
+    root_path = resolved_base_dir / "interface.json"
     if not _is_within_base_dir(root_path, resolved_base_dir):
         raise InterfaceLoadError("interface.json 不在软件根目录内")
 

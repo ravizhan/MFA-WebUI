@@ -1,3 +1,5 @@
+import builtins
+import importlib
 import sys
 from pathlib import Path
 
@@ -59,3 +61,36 @@ def sample_interface() -> dict:
             },
         },
     }
+
+
+@pytest.fixture
+def main_module(monkeypatch, sample_interface: dict):
+    """Import ``main`` without requiring user-provided integration files."""
+    import fastapi.staticfiles
+    import models.interface_loader
+    from models.interface import InterfaceModel
+
+    interface_model = InterfaceModel.model_validate(sample_interface)
+    original_static_files = fastapi.staticfiles.StaticFiles
+
+    class StaticFilesWithoutDirectoryCheck(original_static_files):
+        def __init__(self, *args, **kwargs):
+            kwargs["check_dir"] = False
+            super().__init__(*args, **kwargs)
+
+    def fail_on_input(*_args, **_kwargs):
+        raise AssertionError("main import unexpectedly requested interactive input")
+
+    monkeypatch.setattr(
+        models.interface_loader, "load_interface_model", lambda _root: interface_model
+    )
+    monkeypatch.setattr(
+        fastapi.staticfiles, "StaticFiles", StaticFilesWithoutDirectoryCheck
+    )
+    monkeypatch.setattr(builtins, "input", fail_on_input)
+
+    sys.modules.pop("main", None)
+    try:
+        yield importlib.import_module("main")
+    finally:
+        sys.modules.pop("main", None)
