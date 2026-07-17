@@ -43,15 +43,10 @@ def backend():
     )
 
 
-def _caps():
-    return (
-        patch(
-            "services.system_scheduler.is_capability_enabled",
-            return_value=(True, "enabled", []),
-        ),
-        patch(
-            "services.system_scheduler.validate_trigger_for_platform", return_value=[]
-        ),
+def _trig():
+    """Patch platform trigger validation only (capability layer removed)."""
+    return patch(
+        "services.system_scheduler.validate_trigger_for_platform", return_value=[]
     )
 
 
@@ -138,8 +133,7 @@ async def test_reconcile_noop_when_converged(service, backend):
     backend.is_registered = AsyncMock(return_value=True)
     backend.verify_registration = AsyncMock(return_value=(True, "ok"))
     t = _aps_task()
-    caps, trig = _caps()
-    with caps, trig:
+    with _trig():
         st = service._load_state()
         reg = service._find_registration(st, TID)
         assert reg
@@ -157,11 +151,11 @@ async def test_reconcile_missing_native_registers(service, backend):
     service._backend = backend
     _seed(service)
     backend.is_registered = AsyncMock(return_value=False)
-    caps, trig = _caps()
-    with caps, trig:
+    with _trig():
         result = await service.reconcile_task(_mgr(), TID)
     assert result.action in ("registered", "updated", "materialized")
     backend.register.assert_awaited()
+    assert backend.register.await_args.args[0].scope == SystemTaskScope.USER
 
 
 @pytest.mark.asyncio
@@ -169,8 +163,7 @@ async def test_reconcile_stale_path_reregisters(service, backend):
     service._backend = backend
     _seed(service, exe="/stale/path")
     backend.is_registered = AsyncMock(return_value=True)
-    caps, trig = _caps()
-    with caps, trig:
+    with _trig():
         result = await service.reconcile_task(_mgr(), TID)
     assert result.action == "updated"
     assert "路径" in result.detail or "path" in result.detail.lower() or result.detail
@@ -178,12 +171,33 @@ async def test_reconcile_stale_path_reregisters(service, backend):
 
 
 @pytest.mark.asyncio
-async def test_reconcile_scope_user_to_system_old_cleanup_order(service, backend):
+async def test_reconcile_legacy_system_aps_registers_user(service, backend):
+    """APS system_scope=system is user wakeup → register USER only."""
     service._backend = backend
     _seed(service, scope=SystemTaskScope.USER)
+    backend.is_registered = AsyncMock(return_value=False)
+    with _trig():
+        result = await service.reconcile_task(
+            _mgr(_aps_task(scope="system", cron="0 8 * * *", name="sys")),
+            TID,
+        )
+    assert result.action != "error", result
+    backend.register.assert_awaited()
+    assert backend.register.await_args.args[0].scope == SystemTaskScope.USER
+    reg_row = service._find_registration(service._load_state(), TID)
+    assert reg_row is not None
+    assert reg_row.last_known_scope == SystemTaskScope.USER
+
+
+@pytest.mark.asyncio
+async def test_reconcile_historical_system_cleanup_before_user_register(
+    service, backend
+):
+    """Historical SYSTEM last_known cleaned (best-effort) then USER registered."""
+    service._backend = backend
+    _seed(service, scope=SystemTaskScope.SYSTEM)
     order: list[str] = []
-    # USER starts present so cleanup must unregister; SYSTEM absent until reg.
-    present = {SystemTaskScope.USER: True, SystemTaskScope.SYSTEM: False}
+    present = {SystemTaskScope.USER: False, SystemTaskScope.SYSTEM: True}
 
     async def unreg(_tid, scope):
         order.append(f"unreg:{scope.value}")
@@ -200,18 +214,19 @@ async def test_reconcile_scope_user_to_system_old_cleanup_order(service, backend
     backend.unregister = AsyncMock(side_effect=unreg)
     backend.is_registered = AsyncMock(side_effect=is_reg)
     backend.register = AsyncMock(side_effect=reg)
-    caps, trig = _caps()
-    with caps, trig:
+    with _trig():
         result = await service.reconcile_task(
-            _mgr(_aps_task(scope="system", cron="0 8 * * *", name="sys")),
+            _mgr(_aps_task(scope="user", cron="0 8 * * *", name="user")),
             TID,
         )
     assert result.action != "error", result
-    assert order.index("unreg:user") < order.index("reg:system")
+    assert order.index("unreg:system") < order.index("reg:user")
     reg_row = service._find_registration(service._load_state(), TID)
     assert reg_row is not None
-    assert reg_row.last_known_scope == SystemTaskScope.SYSTEM
-    assert SystemTaskScope.USER in reg_row.cleanup_scopes
+    assert reg_row.last_known_scope == SystemTaskScope.USER
+    assert SystemTaskScope.SYSTEM in reg_row.cleanup_scopes or (
+        SystemTaskScope.USER in reg_row.cleanup_scopes
+    )
 
 
 @pytest.mark.asyncio
@@ -219,8 +234,7 @@ async def test_reconcile_unknown_query_no_register(service, backend):
     service._backend = backend
     _seed(service)
     backend.is_registered = AsyncMock(side_effect=RuntimeError("schtasks boom"))
-    caps, trig = _caps()
-    with caps, trig:
+    with _trig():
         result = await service.reconcile_task(_mgr(), TID)
     assert result.action == "error"
     assert "unknown" in (result.native_error or "").lower()
@@ -233,8 +247,7 @@ async def test_reconcile_failed_register_persists_error(service, backend):
     _seed(service)
     backend.is_registered = AsyncMock(return_value=False)
     backend.register = AsyncMock(side_effect=RuntimeError("reg boom"))
-    caps, trig = _caps()
-    with caps, trig:
+    with _trig():
         result = await service.reconcile_task(_mgr(), TID)
     assert result.action == "error"
     reg = service._find_registration(service._load_state(), TID)
@@ -276,8 +289,7 @@ async def test_reconcile_aps_scoped_no_json_materializes(service, backend):
     service._backend = backend
     # no seed — APS only
     backend.is_registered = AsyncMock(return_value=False)
-    caps, trig = _caps()
-    with caps, trig:
+    with _trig():
         result = await service.reconcile_task(_mgr(_aps_task()), TID)
     assert result.action == "materialized"
     reg = service._find_registration(service._load_state(), TID)
@@ -293,8 +305,7 @@ async def test_reconcile_pending_and_error_processed(service, backend):
         backend.is_registered = AsyncMock(return_value=False)
         backend.register = AsyncMock()
         backend.verify_registration = AsyncMock(return_value=(True, "ok"))
-        caps, trig = _caps()
-        with caps, trig:
+        with _trig():
             result = await service.reconcile_task(_mgr(), TID)
         assert result.action in ("registered", "updated", "materialized")
         reg = service._find_registration(service._load_state(), TID)
@@ -319,8 +330,7 @@ async def test_second_reconcile_noop(service, backend):
     _seed(service, exe=exe)
     backend.is_registered = AsyncMock(return_value=False)
     backend.verify_registration = AsyncMock(return_value=(True, "ok"))
-    caps, trig = _caps()
-    with caps, trig:
+    with _trig():
         r1 = await service.reconcile_task(_mgr(), TID)
         assert r1.action != "error"
         backend.register.reset_mock()
@@ -348,8 +358,7 @@ async def test_create_rollback_certainty(service, backend, tmp_path):
     mgr.delete_task = AsyncMock(return_value=True)
     mgr.delete_task_classified = AsyncMock(return_value="success")
     mgr.scheduler = MagicMock(get_jobs=MagicMock(return_value=[]))
-    caps, trig = _caps()
-    with caps, trig, pytest.raises(RuntimeError, match="native"):
+    with _trig(), pytest.raises(RuntimeError, match="native"):
         await service.create_task_synced(
             mgr,
             ScheduledTaskCreate(
@@ -372,8 +381,7 @@ async def test_update_partial_result_shape(service, backend):
     t = _aps_task()
     mgr = _mgr(t)
     mgr.update_task = AsyncMock(return_value=t)
-    caps, trig = _caps()
-    with caps, trig:
+    with _trig():
         result = await service.update_task_synced(
             mgr, TID, ScheduledTaskUpdate(name="n")
         )
@@ -528,8 +536,7 @@ async def test_real_paused_sqlite_materialize_and_second_noop(tmp_path, backend)
     )
     mgr.scheduler.pause_job(TID)
 
-    caps, trig = _caps()
-    with caps, trig:
+    with _trig():
         r1 = await svc.reconcile_task(mgr, TID)
         assert r1.action == "materialized"
         backend.is_registered = AsyncMock(return_value=True)

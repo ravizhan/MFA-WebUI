@@ -3,8 +3,10 @@ WakeupCoordinator (SystemTaskService): APS-owned tasks + OS native wakeup adapte
 
 - asyncio.Lock serializes native mutations
 - on-disk state is operational-only (no desired schedule mirrors)
-- APS is source of truth for name/trigger/scope; SystemSchedulerBackend is the
-  WakeupAdapter (platform native register/verify/query)
+- APS is source of truth for name/trigger/wakeup; SystemSchedulerBackend is the
+  WakeupAdapter (user-level native register/verify)
+- system_scope user|legacy system both mean user wakeup; new registrations are
+  USER only; historical SYSTEM artifacts remain cleanable
 - Standalone /system-register mutation API removed; use create/update/delete
   synced + reconcile/repair
 """
@@ -28,7 +30,6 @@ from models.scheduler import (
     ScheduledTask,
     ScheduledTaskCreate,
     ScheduledTaskUpdate,
-    SystemCapabilitiesResponse,
     SystemTaskOperationalRecord,
     SystemTaskRegistration,
     SystemTaskScope,
@@ -41,10 +42,8 @@ from scheduler_job_codec import SchedulerJobDecodeError
 from scheduler_manager import SchedulerManager
 from services.system_scheduler_backend import (
     SystemSchedulerBackend,
-    build_capabilities,
     build_native_command,
     get_backend,
-    is_capability_enabled,
     map_trigger_to_os_spec,
     validate_trigger_for_platform,
 )
@@ -66,7 +65,7 @@ class _SystemTaskState:
 
 
 class SystemTaskService:
-    """WakeupCoordinator: reconcile APS system_scope with native OS wakeups."""
+    """WakeupCoordinator: reconcile APS wakeup flag with native OS user wakeups."""
 
     def __init__(self, app_root_dir: Path):
         self._app_root_dir = Path(app_root_dir)
@@ -92,10 +91,17 @@ class SystemTaskService:
     def build_command_for_task(self, task_id: str) -> tuple[str, list[str]]:
         return build_native_command(self._app_root_dir, task_id)
 
-    def get_capabilities(self) -> SystemCapabilitiesResponse:
-        return build_capabilities(
-            self.backend.platform_name, app_root=self._app_root_dir
-        )
+    @staticmethod
+    def _wakeup_enabled(scope_val: Optional[str]) -> bool:
+        """True when APS/legacy system_scope means user wakeup is on."""
+        return scope_val in ("user", "system")
+
+    @staticmethod
+    def _to_user_scope(scope_val: Optional[str]) -> Optional[SystemTaskScope]:
+        """Map user|system → USER; else None. New registration is always USER."""
+        if scope_val in ("user", "system"):
+            return SystemTaskScope.USER
+        return None
 
     # ------------------------------------------------------------------
     # persistence (operational state)
@@ -332,16 +338,17 @@ class SystemTaskService:
         """Resolve status scope under APS authority.
 
         Returns (scope_for_status, reason_hint).
-        - APS task present + system_scope user/system → that scope
+        - APS task present + system_scope user/system → USER (wakeup on)
         - APS task present + system_scope None → authoritative disabled (None)
         - APS task absent → diagnostic last_known_scope only (with reason)
         """
         if task is not None:
-            if task.system_scope in ("user", "system"):
-                return SystemTaskScope(task.system_scope), ""
+            if self._wakeup_enabled(task.system_scope):
+                return SystemTaskScope.USER, ""
             # Explicit None or invalid: do not fall back to last_known for status.
             return None, "APS system_scope is None (disabled)"
         if aps_missing:
+            # Historical last_known may still be SYSTEM for cleanup diagnostics.
             return rec.last_known_scope, "APS job missing"
         return rec.last_known_scope, "APS schedule unknown"
 
@@ -366,13 +373,14 @@ class SystemTaskService:
         name = ""
         exe = ""
         args: list[str] = []
-        if task is not None and task.system_scope in ("user", "system"):
-            name = task.name
+        wakeup_on = task is not None and self._wakeup_enabled(task.system_scope)
+        if wakeup_on:
+            name = task.name  # type: ignore[union-attr]
             try:
-                trigger = map_trigger_to_os_spec(task.trigger_config)
+                trigger = map_trigger_to_os_spec(task.trigger_config)  # type: ignore[union-attr]
             except Exception:
                 trigger = None
-            exe, args = self.build_command_for_task(task.id)
+            exe, args = self.build_command_for_task(task.id)  # type: ignore[union-attr]
             if path_valid is None:
                 # Empty diagnostic path never counts as valid.
                 path_valid = bool(
@@ -410,11 +418,7 @@ class SystemTaskService:
             desired_trigger=trigger,
             desired_exe_path=exe,
             desired_cli_args=list(args),
-            desired_working_dir=(
-                str(self._app_root_dir)
-                if task is not None and task.system_scope in ("user", "system")
-                else ""
-            ),
+            desired_working_dir=(str(self._app_root_dir) if wakeup_on else ""),
             state=cast(
                 Literal[
                     "pending_register",
@@ -473,22 +477,29 @@ class SystemTaskService:
         )
 
         enabled: Optional[bool] = None
-        cap_reason = ""
-        cap_warnings: list[str] = []
-        # Capability only when APS provides an active user/system scope.
-        if task is not None and task.system_scope in ("user", "system"):
-            caps = self.get_capabilities()
-            enabled, cap_reason, cap_warnings = is_capability_enabled(
-                caps, SystemTaskScope(task.system_scope), task.trigger_type
-            )
-        warnings = list(rec.warnings) + list(cap_warnings)
+        enable_reason = ""
+        trigger_warnings: list[str] = []
+        # enabled = wakeup requested and platform accepts the APS trigger.
+        if task is not None and self._wakeup_enabled(task.system_scope):
+            try:
+                os_trigger = map_trigger_to_os_spec(task.trigger_config)
+                trigger_warnings = list(
+                    validate_trigger_for_platform(
+                        self.backend.platform_name, os_trigger
+                    )
+                )
+                enabled = True
+            except Exception as e:
+                enabled = False
+                enable_reason = str(e)
+        warnings = list(rec.warnings) + list(trigger_warnings)
 
         if verified is None:
             verified = False
         if path_valid is None:
             if (
                 task is not None
-                and task.system_scope in ("user", "system")
+                and self._wakeup_enabled(task.system_scope)
                 and registered
                 and verified
                 and rec.registered_exe_path
@@ -500,8 +511,8 @@ class SystemTaskService:
                 path_valid = False
 
         out_reason = reason or scope_reason or ""
-        if enabled is False and cap_reason:
-            out_reason = out_reason or cap_reason
+        if enabled is False and enable_reason:
+            out_reason = out_reason or enable_reason
 
         return SystemTaskStatusResponse(
             task_id=task_id,
@@ -510,7 +521,7 @@ class SystemTaskService:
             platform=rec.platform,
             next_run_time=(
                 getattr(task, "next_run_time", None)
-                if task is not None and task.system_scope in ("user", "system")
+                if task is not None and self._wakeup_enabled(task.system_scope)
                 else None
             ),
             last_error=rec.last_error,
@@ -583,14 +594,10 @@ class SystemTaskService:
     def _compute_registration_warnings(
         self, scope: SystemTaskScope, trigger_spec
     ) -> list[str]:
-        warnings = list(
+        del scope  # registration is always USER; kept for call-site stability
+        return list(
             validate_trigger_for_platform(self.backend.platform_name, trigger_spec)
         )
-        caps = self.get_capabilities()
-        _, _, cap_warnings = is_capability_enabled(
-            caps, scope, trigger_spec.trigger_type
-        )
-        return warnings + list(cap_warnings)
 
     async def _ensure_scope_absent(
         self, task_id: str, scope: SystemTaskScope
@@ -696,7 +703,8 @@ class SystemTaskService:
             task = await manager.create_task(task_create)
             if task_create.system_scope is None:
                 return task
-            scope = SystemTaskScope(task_create.system_scope)
+            # New registration is always USER (legacy "system" coerced).
+            scope = SystemTaskScope.USER
             result = await self._reconcile_task_locked(
                 manager, task.id, prior_scope=None
             )
@@ -774,7 +782,8 @@ class SystemTaskService:
                 and existing_scope is not None
             ):
                 injected = task_update.model_dump(exclude_unset=True)
-                injected["system_scope"] = existing_scope.value
+                # Re-enable as user wakeup even if last_known was historical SYSTEM.
+                injected["system_scope"] = SystemTaskScope.USER.value
                 effective_update = ScheduledTaskUpdate(**injected)
 
             try:
@@ -1046,7 +1055,7 @@ class SystemTaskService:
             and not state.corrupt
             and rec.state != "error"
             and task is not None
-            and task.system_scope in ("user", "system")
+            and self._wakeup_enabled(task.system_scope)
         ):
             live = self._find_record(state, rec.task_id)
             if live is not None:
@@ -1063,7 +1072,7 @@ class SystemTaskService:
         path_valid = False
         if (
             task is not None
-            and task.system_scope in ("user", "system")
+            and self._wakeup_enabled(task.system_scope)
             and os_registered is True
             and verified
             and rec.registered_exe_path
@@ -1154,7 +1163,7 @@ class SystemTaskService:
     # ------------------------------------------------------------------
 
     async def import_scopes_into_aps(self, manager: SchedulerManager) -> dict:
-        """Import USER/SYSTEM scope from operational/legacy records into matching APS jobs.
+        """Import legacy user/system scopes into APS as user wakeup.
 
         Completing this method allows the first operational disk flush after a legacy load.
         """
@@ -1178,9 +1187,8 @@ class SystemTaskService:
                     SystemTaskScope.USER,
                     SystemTaskScope.SYSTEM,
                 ):
-                    scope_by_task_id[rec.task_id] = cast(
-                        Literal["user", "system"], rec.last_known_scope.value
-                    )
+                    # Both map to user wakeup on import (manager normalizes to "user").
+                    scope_by_task_id[rec.task_id] = "user"
             stats = manager.import_system_scopes(scope_by_task_id)
             # Allow first operational write after import has consumed legacy scopes.
             state.pending_operational_flush = False
@@ -1312,7 +1320,7 @@ class SystemTaskService:
                 return await self._reconcile_explicit_none_locked(
                     task_id, reg, prior_scope
                 )
-            if scope_val not in ("user", "system"):
+            if not self._wakeup_enabled(scope_val):
                 msg = f"invalid system_scope on APS job: {scope_val!r}"
                 if reg is not None:
                     self._persist_reg_error(task_id, msg)
@@ -1407,8 +1415,9 @@ class SystemTaskService:
         *,
         prior_scope: Optional[SystemTaskScope],
     ) -> ReconcileTaskResult:
-        assert task.system_scope in ("user", "system")
-        aps_scope = SystemTaskScope(task.system_scope)
+        assert self._wakeup_enabled(task.system_scope)
+        # Always register/verify as USER; legacy system_scope is user wakeup.
+        aps_scope = SystemTaskScope.USER
         task_id = task.id
         try:
             aps_os_trigger = map_trigger_to_os_spec(task.trigger_config)
@@ -1430,7 +1439,7 @@ class SystemTaskService:
         old_scopes: set[SystemTaskScope] = set()
         if prior_scope is not None and prior_scope != aps_scope:
             old_scopes.add(prior_scope)
-        # Only clean historical scopes when last_known drifts away from APS scope.
+        # Clean historical scopes (including SYSTEM) when last_known drifts.
         if reg is not None and reg.last_known_scope not in (None, aps_scope):
             for sc in self._union_cleanup_scopes(reg):
                 if sc != aps_scope:

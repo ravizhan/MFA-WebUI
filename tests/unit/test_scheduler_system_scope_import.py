@@ -43,7 +43,9 @@ def _identity_normalize(task_list, task_options, pre_tasks):
 
 
 def test_encode_decode_system_scope_round_trip():
-    for scope in (None, "user", "system"):
+    # None stays None; user and legacy system both normalize to user wakeup.
+    cases = [(None, None), ("user", "user"), ("system", "user")]
+    for input_scope, expected in cases:
         kwargs = encode_execution_kwargs(
             task_id="t",
             task_name="n",
@@ -54,10 +56,10 @@ def test_encode_decode_system_scope_round_trip():
             controller_name=None,
             device=None,
             resource_name=None,
-            system_scope=scope,  # type: ignore[arg-type]
+            system_scope=input_scope,  # type: ignore[arg-type]
         )
         assert "system_scope" in kwargs
-        assert kwargs["system_scope"] is scope
+        assert kwargs["system_scope"] is expected
         job = SimpleNamespace(
             id="t",
             kwargs=kwargs,
@@ -65,7 +67,26 @@ def test_encode_decode_system_scope_round_trip():
             next_run_time=None,
         )
         task = decode_job_to_scheduled_task(job, normalize=_identity_normalize)
-        assert task.system_scope is scope
+        assert task.system_scope is expected
+
+
+def test_decode_legacy_system_scope_string_as_user():
+    """Persisted kwargs system_scope='system' decode as user wakeup."""
+    job = SimpleNamespace(
+        id="legacy-sys",
+        kwargs={
+            "task_name": "n",
+            "task_description": "",
+            "task_list": ["Main"],
+            "task_options": {},
+            "pre_tasks": [],
+            "system_scope": "system",
+        },
+        trigger=build_trigger(CronTriggerConfig(cron="0 9 * * *")),
+        next_run_time=None,
+    )
+    task = decode_job_to_scheduled_task(job, normalize=_identity_normalize)
+    assert task.system_scope == "user"
 
 
 def test_decode_invalid_system_scope_raises():
@@ -151,13 +172,16 @@ async def test_create_writes_system_scope(manager: SchedulerManager):
 
 @pytest.mark.asyncio
 async def test_update_preserves_and_clears_system_scope(manager: SchedulerManager):
+    # Legacy create with system_scope="system" is normalized to user on write.
     task = await manager.create_task(_create(system_scope="system"))
-    # omit system_scope → preserve
+    assert task.system_scope == "user"
+    assert manager.scheduler is not None
+    assert manager.scheduler.get_job(task.id).kwargs["system_scope"] == "user"
+    # omit system_scope → preserve user wakeup
     updated = await manager.update_task(task.id, ScheduledTaskUpdate(name="renamed"))
     assert updated is not None
-    assert updated.system_scope == "system"
-    assert manager.scheduler is not None
-    assert manager.scheduler.get_job(task.id).kwargs["system_scope"] == "system"
+    assert updated.system_scope == "user"
+    assert manager.scheduler.get_job(task.id).kwargs["system_scope"] == "user"
 
     # explicit None → clear
     cleared = await manager.update_task(
@@ -268,8 +292,9 @@ async def test_import_scopes_user_system_idempotent_preserves_kwargs(
     user_job = mgr.scheduler.get_job(TID_USER)
     sys_job = mgr.scheduler.get_job(TID_SYS)
     assert user_job is not None and sys_job is not None
+    # Both USER and legacy SYSTEM operational scopes import as user wakeup.
     assert user_job.kwargs["system_scope"] == "user"
-    assert sys_job.kwargs["system_scope"] == "system"
+    assert sys_job.kwargs["system_scope"] == "user"
     # legacy keys preserved
     assert user_job.kwargs.get("preTasks") == LEGACY_PRE
     assert "pre_tasks" not in user_job.kwargs or user_job.kwargs.get("preTasks")
@@ -297,7 +322,7 @@ async def test_import_scopes_user_system_idempotent_preserves_kwargs(
     u2 = mgr2.scheduler.get_job(TID_USER)
     s2 = mgr2.scheduler.get_job(TID_SYS)
     assert u2 is not None and u2.kwargs.get("system_scope") == "user"
-    assert s2 is not None and s2.kwargs.get("system_scope") == "system"
+    assert s2 is not None and s2.kwargs.get("system_scope") == "user"
     assert u2.kwargs.get("preTasks") == LEGACY_PRE
     assert u2.func_ref == "scheduler_manager:execute_scheduled_task"
     assert u2.next_run_time is None  # still paused/disabled

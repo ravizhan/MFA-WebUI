@@ -9,7 +9,6 @@ import {
   pauseSchedulerTask,
   resumeSchedulerTask,
   getSchedulerExecutions,
-  getSystemCapabilities,
 } from "@/services/api/modules/scheduler"
 import type { ScheduledTaskCreate, ScheduledTaskUpdate } from "@/types/schedulerModel"
 
@@ -127,50 +126,6 @@ describe("scheduler API module", () => {
       const response = await getSchedulerExecutions(10)
       expect(response.status).toBe("success")
       expect(response.executions).toHaveLength(1)
-    })
-  })
-
-  describe("getSystemCapabilities", () => {
-    it("GET /api/scheduler/system-capabilities and parses capability matrix", async () => {
-      const mockCapabilities = {
-        platform: "windows",
-        cells: [
-          {
-            platform: "windows",
-            scope: "user",
-            trigger_type: "cron",
-            implemented: true,
-            verified: true,
-            enabled: true,
-            reason: "Smoke-verified",
-            warnings: [],
-          },
-        ],
-        system_scope_enabled: false,
-        warnings: [],
-      }
-      server.use(
-        http.get("/api/scheduler/system-capabilities", () =>
-          HttpResponse.json({ status: "success", data: mockCapabilities }),
-        ),
-      )
-      const response = await getSystemCapabilities()
-      expect(response.status).toBe("success")
-      expect(response.data).toEqual(mockCapabilities)
-      expect(response.data?.cells).toHaveLength(1)
-      expect(response.data?.cells[0].platform).toBe("windows")
-    })
-
-    it("normalizes failure responses", async () => {
-      server.use(
-        http.get("/api/scheduler/system-capabilities", () =>
-          HttpResponse.json({ status: "failed", message: "Not available" }),
-        ),
-      )
-      const response = await getSystemCapabilities()
-      expect(response.status).toBe("failed")
-      expect(response.message).toBe("Not available")
-      expect(response.data).toBeUndefined()
     })
   })
 })

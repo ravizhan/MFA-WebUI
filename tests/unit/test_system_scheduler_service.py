@@ -1,4 +1,7 @@
-"""SystemTaskService unit tests — core native repair/status only."""
+"""SystemTaskService unit tests — status/persistence + USER-only APS contracts.
+
+External reconcile/repair matrix lives in test_scheduler_reconcile.py.
+"""
 
 from datetime import datetime
 from pathlib import Path
@@ -34,23 +37,15 @@ def mock_backend():
     b.register = AsyncMock()
     b.unregister = AsyncMock()
     b.is_registered = AsyncMock(return_value=False)
-    b.get_next_run_time = AsyncMock(return_value=None)
-    b.list_registered = AsyncMock(return_value=[])
     b.verify_registration = AsyncMock(return_value=(True, "ok"))
     b.build_identifier = MagicMock(side_effect=lambda tid, _s: f"\\MWU\\{tid}")
     return b
 
 
-def _caps(ok: bool = True, reason: str = "enabled"):
+def _trig(warnings: list[str] | None = None):
     return patch(
-        "services.system_scheduler.is_capability_enabled",
-        return_value=(ok, reason if ok else reason, []),
-    )
-
-
-def _trig():
-    return patch(
-        "services.system_scheduler.validate_trigger_for_platform", return_value=[]
+        "services.system_scheduler.validate_trigger_for_platform",
+        return_value=list(warnings or []),
     )
 
 
@@ -60,8 +55,14 @@ def _seed(
     state: RegState = "active",
     orphaned: bool = False,
     exe: str = "/usr/bin/mwu",
+    last_known: SystemTaskScope = SystemTaskScope.USER,
 ) -> None:
-    op_state = "error" if state in ("error", "orphaned", "pending_register", "pending_cleanup") or orphaned else "active"
+    op_state = (
+        "error"
+        if state in ("error", "orphaned", "pending_register", "pending_cleanup")
+        or orphaned
+        else "active"
+    )
     st = _SystemTaskState(version=3)
     st.pending_operational_flush = False
     st.records.append(
@@ -69,8 +70,8 @@ def _seed(
             task_id=TID,
             platform="windows",
             state=op_state,  # type: ignore[arg-type]
-            last_known_scope=SystemTaskScope.USER,
-            cleanup_scopes=[SystemTaskScope.USER],
+            last_known_scope=last_known,
+            cleanup_scopes=[last_known],
             system_task_identifier=f"\\MWU\\{TID}",
             registered_exe_path=exe,
             last_registered_at=datetime(2026, 7, 6, 12, 0, 0),
@@ -110,8 +111,7 @@ class TestGetStatus:
         service._backend = mock_backend
         _seed(service)
         mock_backend.is_registered = AsyncMock(side_effect=RuntimeError("schtasks boom"))
-        from models.scheduler import CronTriggerConfig, ScheduledTask
-        from unittest.mock import AsyncMock as AM
+        from models.scheduler import ScheduledTask
 
         task = ScheduledTask(
             id=TID,
@@ -123,7 +123,7 @@ class TestGetStatus:
             system_scope="user",
         )
         mgr = MagicMock()
-        mgr.get_task = AM(return_value=task)
+        mgr.get_task = AsyncMock(return_value=task)
         status = await service.get_status(TID, manager=mgr)
         assert status.observed
         assert any("unknown" in (o.details or "").lower() for o in status.observed)
@@ -133,6 +133,33 @@ class TestGetStatus:
         service._backend = mock_backend
         status = await service.get_status(TID)
         assert status.registered is False
+
+    @pytest.mark.asyncio
+    async def test_get_status_legacy_system_scope_reads_as_user_wakeup(
+        self, service, mock_backend
+    ):
+        """APS system_scope=system is user wakeup; status scope is USER."""
+        service._backend = mock_backend
+        _seed(service)
+        mock_backend.is_registered = AsyncMock(return_value=True)
+        from models.scheduler import ScheduledTask
+
+        task = ScheduledTask(
+            id=TID,
+            name="task",
+            enabled=True,
+            trigger_type="cron",
+            trigger_config=CronTriggerConfig(cron="0 9 * * *"),
+            task_list=["Main"],
+            system_scope="system",  # legacy
+        )
+        mgr = MagicMock()
+        mgr.get_task = AsyncMock(return_value=task)
+        with _trig():
+            status = await service.get_status(TID, manager=mgr)
+        assert status.scope == SystemTaskScope.USER
+        assert status.desired_scope == SystemTaskScope.USER
+        assert status.enabled is True
 
 
 def _mgr_for_repair(
@@ -171,7 +198,9 @@ def _mgr_for_repair(
     return mgr
 
 
-class TestRepair:
+class TestRepairServiceContracts:
+    """Service-layer contracts not covered by reconcile matrix."""
+
     @pytest.mark.asyncio
     async def test_repair_requires_manager(self, service, mock_backend):
         service._backend = mock_backend
@@ -179,92 +208,32 @@ class TestRepair:
             await service.repair_all()
 
     @pytest.mark.asyncio
-    async def test_repair_success_missing_native(self, service, mock_backend):
+    async def test_repair_aps_system_scope_registers_user_only(
+        self, service, mock_backend
+    ):
+        """Legacy APS system_scope=system still registers USER native wakeup."""
         service._backend = mock_backend
         _seed(service)
         mock_backend.is_registered = AsyncMock(return_value=False)
-        with _caps(), _trig():
-            result = await service.repair_all(_mgr_for_repair())
-        assert result["repaired"] == 1
-        reg = service._find_registration(service._load_state(), TID)
-        assert reg is not None and reg.state == "active"
-        mock_backend.register.assert_awaited()
-        spec = mock_backend.register.await_args.args[0]
-        assert spec.task_name == "task"
-        assert spec.scope == SystemTaskScope.USER
-        assert spec.trigger.cron_expression == "0 9 * * *"
-
-    @pytest.mark.asyncio
-    async def test_repair_uses_aps_name_trigger_scope(self, service, mock_backend):
-        service._backend = mock_backend
-        _seed(service)
-        mock_backend.is_registered = AsyncMock(return_value=False)
-        with _caps(), _trig():
+        with _trig():
             await service.repair_all(
                 _mgr_for_repair(name="from-aps", cron="0 8 * * *", scope="system")
             )
+        mock_backend.register.assert_awaited()
         spec = mock_backend.register.await_args.args[0]
         assert spec.task_name == "from-aps"
-        assert spec.scope == SystemTaskScope.SYSTEM
+        assert spec.scope == SystemTaskScope.USER
         assert spec.trigger.cron_expression == "0 8 * * *"
 
     @pytest.mark.asyncio
-    async def test_repair_missing_aps_orphan_cleanup(self, service, mock_backend):
-        """Missing APS cleans native and removes operational record."""
-        service._backend = mock_backend
-        _seed(service)
-        mock_backend.is_registered = AsyncMock(return_value=False)
-        result = await service.repair_all(_mgr_for_repair(missing=True))
-        assert result["repaired"] == 1
-        mock_backend.register.assert_not_awaited()
-        reg = service._find_registration(service._load_state(), TID)
-        assert reg is None
-
-    @pytest.mark.asyncio
-    async def test_repair_corrupt_aps_no_register(self, service, mock_backend):
-        service._backend = mock_backend
-        _seed(service)
-        result = await service.repair_all(_mgr_for_repair(decode_error=True))
-        assert result["failed"] == 1
-        mock_backend.register.assert_not_awaited()
-        reg = service._find_registration(service._load_state(), TID)
-        assert reg is not None and reg.state == "error"
-        assert "decode" in (reg.last_error or "").lower()
-
-    @pytest.mark.asyncio
-    async def test_repair_failure_persists_error(self, service, mock_backend):
-        service._backend = mock_backend
-        _seed(service)
-        mock_backend.is_registered = AsyncMock(return_value=False)
-        mock_backend.register = AsyncMock(side_effect=RuntimeError("repair boom"))
-        with _caps(), _trig():
-            result = await service.repair_all(_mgr_for_repair())
-        assert result["failed"] == 1
-        reg = service._find_registration(service._load_state(), TID)
-        assert reg is not None and reg.state == "error"
-        assert reg.last_error
-        mock_backend.unregister.assert_awaited()
-
-    @pytest.mark.asyncio
-    async def test_orphan_state_is_reconciled(self, service, mock_backend):
-        """Orphaned records are cleaned, not skipped."""
-        service._backend = mock_backend
-        _seed(service, state="orphaned", orphaned=True)
-        mock_backend.is_registered = AsyncMock(return_value=False)
-        with _caps(), _trig():
-            result = await service.repair_all(_mgr_for_repair())
-        assert result["repaired"] >= 1
-        mock_backend.register.assert_awaited()
-
-    @pytest.mark.asyncio
-    async def test_repair_scope_drift_unregisters_old_before_new(
+    async def test_repair_historical_system_cleanup_then_user_register(
         self, service, mock_backend
     ):
-        """USER→SYSTEM: old unregister + absence check before register; mirrors sync."""
+        """last_known SYSTEM cleaned (no elevation) before USER register."""
         service._backend = mock_backend
-        _seed(service)  # desired_scope USER
+        _seed(service, last_known=SystemTaskScope.SYSTEM)
         order: list[str] = []
-        present = {SystemTaskScope.USER: True, SystemTaskScope.SYSTEM: False}
+        present = {SystemTaskScope.USER: False, SystemTaskScope.SYSTEM: True}
 
         async def unreg(tid, scope):
             order.append(f"unreg:{scope.value}")
@@ -283,82 +252,21 @@ class TestRepair:
         mock_backend.register = AsyncMock(side_effect=reg)
         mock_backend.verify_registration = AsyncMock(return_value=(True, "ok"))
 
-        with _caps(), _trig():
+        with _trig():
             result = await service.repair_all(
-                _mgr_for_repair(name="aps-name", cron="0 8 * * *", scope="system")
+                _mgr_for_repair(name="aps-name", cron="0 8 * * *", scope="user")
             )
         assert result["repaired"] == 1
-        assert order.index("unreg:user") < order.index("reg:system")
-        assert "is_reg:user" in order
-        assert order.index("is_reg:user") < order.index("reg:system")
-
+        assert order.index("unreg:system") < order.index("reg:user")
         st = service._find_registration(service._load_state(), TID)
         assert st is not None
         assert st.state == "active"
-        assert st.last_known_scope == SystemTaskScope.SYSTEM
-        assert SystemTaskScope.SYSTEM in st.cleanup_scopes
-        assert SystemTaskScope.USER in st.cleanup_scopes  # retained for cleanup history
-        assert st.last_error is None
-        assert st.observed and st.observed[0].scope == SystemTaskScope.SYSTEM
-
-        mock_backend.register.reset_mock()
-        mock_backend.unregister.reset_mock()
-        mock_backend.is_registered = AsyncMock(return_value=True)
-        with _caps(), _trig():
-            result2 = await service.repair_all(
-                _mgr_for_repair(name="aps-name", cron="0 8 * * *", scope="system")
-            )
-        assert result2["repaired"] == 0
-        mock_backend.register.assert_not_awaited()
-        mock_backend.unregister.assert_not_awaited()
-
-    @pytest.mark.asyncio
-    async def test_repair_scope_drift_old_still_present_no_new_register(
-        self, service, mock_backend
-    ):
-        service._backend = mock_backend
-        _seed(service)
-        mock_backend.unregister = AsyncMock()
-        # USER always present (old still present after unreg)
-        mock_backend.is_registered = AsyncMock(return_value=True)
-        with _caps(), _trig():
-            result = await service.repair_all(_mgr_for_repair(scope="system"))
-        assert result["failed"] == 1
-        mock_backend.register.assert_not_awaited()
-        reg = service._find_registration(service._load_state(), TID)
-        assert reg is not None and reg.state == "error"
-        assert "still present" in (reg.last_error or "")
-
-    @pytest.mark.asyncio
-    async def test_repair_scope_drift_old_query_unknown_no_new_register(
-        self, service, mock_backend
-    ):
-        service._backend = mock_backend
-        _seed(service)
-        mock_backend.unregister = AsyncMock()
-        # First is for SYSTEM (new) may be False; then USER cleanup query unknown
-        calls = {"n": 0}
-
-        async def is_reg(tid, scope):
-            calls["n"] += 1
-            if scope == SystemTaskScope.USER:
-                if calls["n"] == 1:
-                    return True  # present → will unreg
-                raise RuntimeError("schtasks unknown")
-            return False  # SYSTEM absent
-
-        mock_backend.is_registered = AsyncMock(side_effect=is_reg)
-        with _caps(), _trig():
-            result = await service.repair_all(_mgr_for_repair(scope="system"))
-        assert result["failed"] == 1
-        mock_backend.register.assert_not_awaited()
-        reg = service._find_registration(service._load_state(), TID)
-        assert reg is not None and reg.state == "error"
-        assert "unknown" in (reg.last_error or "").lower()
+        assert st.last_known_scope == SystemTaskScope.USER
+        assert st.observed and st.observed[0].scope == SystemTaskScope.USER
 
     @pytest.mark.asyncio
     async def test_repair_converges_stale_warnings(self, service, mock_backend):
-        """Successful repair replaces stale warnings with APS-derived caps/validation."""
+        """Successful repair replaces stale warnings with trigger validation warnings."""
         service._backend = mock_backend
         _seed(service)
         st = service._load_state()
@@ -371,17 +279,8 @@ class TestRepair:
         mock_backend.register = AsyncMock()
         mock_backend.verify_registration = AsyncMock(return_value=(True, "ok"))
 
-        expected = ["fresh-cap-warning"]
-        with (
-            patch(
-                "services.system_scheduler.validate_trigger_for_platform",
-                return_value=[],
-            ),
-            patch(
-                "services.system_scheduler.is_capability_enabled",
-                return_value=(True, "enabled", expected),
-            ),
-        ):
+        expected = ["fresh-trigger-warning"]
+        with _trig(expected):
             result = await service.repair_all(
                 _mgr_for_repair(name="n", cron="0 9 * * *", scope="user")
             )
@@ -391,19 +290,9 @@ class TestRepair:
         assert reg2.warnings == expected
         assert "stale warning from prior registration" not in reg2.warnings
 
-        # Second repair: already healthy — no register; warnings stay converged
         mock_backend.register.reset_mock()
         mock_backend.is_registered = AsyncMock(return_value=True)
-        with (
-            patch(
-                "services.system_scheduler.validate_trigger_for_platform",
-                return_value=[],
-            ),
-            patch(
-                "services.system_scheduler.is_capability_enabled",
-                return_value=(True, "enabled", expected),
-            ),
-        ):
+        with _trig(expected):
             result2 = await service.repair_all(
                 _mgr_for_repair(name="n", cron="0 9 * * *", scope="user")
             )

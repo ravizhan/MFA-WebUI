@@ -78,7 +78,6 @@ onMounted(() => {
   void schedulerStore.fetchTasks()
   void schedulerStore.fetchExecutions()
   void schedulerStore.fetchAllSystemStatuses()
-  void schedulerStore.fetchSystemCapabilities()
 })
 
 async function handleRepairAll() {

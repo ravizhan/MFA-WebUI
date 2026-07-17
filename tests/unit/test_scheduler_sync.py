@@ -42,15 +42,9 @@ def backend():
     )
 
 
-def _patch_caps():
-    return (
-        patch(
-            "services.system_scheduler.is_capability_enabled",
-            return_value=(True, "enabled", []),
-        ),
-        patch(
-            "services.system_scheduler.validate_trigger_for_platform", return_value=[]
-        ),
+def _patch_trig():
+    return patch(
+        "services.system_scheduler.validate_trigger_for_platform", return_value=[]
     )
 
 
@@ -178,8 +172,7 @@ async def test_create_native_failure_aps_cleanup(service, backend, cleanup_ok, m
     mgr.delete_task_classified = AsyncMock(
         return_value="success" if cleanup_ok else "indeterminate"
     )
-    caps, trig = _patch_caps()
-    with caps, trig, pytest.raises(RuntimeError, match=match):
+    with _patch_trig(), pytest.raises(RuntimeError, match=match):
         await service.create_task_synced(mgr, _create())
     mgr.delete_task.assert_awaited_once_with(TID)
     if cleanup_ok:
@@ -221,8 +214,7 @@ async def test_update_omitted_resyncs_new_trigger(service, backend):
     update = ScheduledTaskUpdate(
         trigger_type="cron", trigger_config=CronTriggerConfig(cron="0 10 * * *")
     )
-    caps, trig = _patch_caps()
-    with caps, trig:
+    with _patch_trig():
         result = await service.update_task_synced(mgr, TID, update)
     assert result.aps_outcome == "success"
     assert result.task is not None
@@ -243,8 +235,7 @@ async def test_update_omitted_aps_present_none_does_not_reregister_from_json(
     backend.is_registered = AsyncMock(return_value=True)
     task = _task(system_scope=None)
     mgr = _mgr(task, has_scope_key=True)
-    caps, trig = _patch_caps()
-    with caps, trig:
+    with _patch_trig():
         result = await service.update_task_synced(mgr, TID, ScheduledTaskUpdate(name="x"))
     assert result.aps_outcome == "success"
     backend.register.assert_not_awaited()
@@ -257,8 +248,7 @@ async def test_update_omitted_aps_present_user_registers_aps_scope(service, back
     _seed(service)
     task = _task("0 12 * * *", system_scope="user")
     mgr = _mgr(task, has_scope_key=True)
-    caps, trig = _patch_caps()
-    with caps, trig:
+    with _patch_trig():
         result = await service.update_task_synced(
             mgr,
             TID,
@@ -312,8 +302,7 @@ async def test_real_legacy_update_injects_json_scope_into_aps(tmp_path, backend)
     mgr.scheduler.pause_job(TID)
     assert "system_scope" not in (mgr.scheduler.get_job(TID).kwargs or {})
 
-    caps, trig = _patch_caps()
-    with caps, trig:
+    with _patch_trig():
         result = await svc.update_task_synced(
             mgr,
             TID,
@@ -384,8 +373,7 @@ async def test_real_aps_present_none_update_no_json_reregister(tmp_path, backend
     )
     mgr.scheduler.pause_job(TID)
 
-    caps, trig = _patch_caps()
-    with caps, trig:
+    with _patch_trig():
         result = await svc.update_task_synced(
             mgr, TID, ScheduledTaskUpdate(name="still-disabled")
         )
@@ -406,8 +394,7 @@ async def test_update_native_failure_error_state(service, backend):
     _seed(service)
     backend.register = AsyncMock(side_effect=RuntimeError("native fail"))
     mgr = _mgr(_task("0 11 * * *", system_scope="user"), has_scope_key=True)
-    caps, trig = _patch_caps()
-    with caps, trig:
+    with _patch_trig():
         # APS success + native failure is partial success (no raise).
         result = await service.update_task_synced(
             mgr,
@@ -443,8 +430,7 @@ async def test_update_snapshot_aps_none_disabled_status(service, backend):
 
     task = _task(system_scope=None)
     mgr = _mgr(task, has_scope_key=True)
-    caps, trig = _patch_caps()
-    with caps, trig:
+    with _patch_trig():
         result = await service.update_task_synced(
             mgr, TID, ScheduledTaskUpdate(name="disabled")
         )
@@ -492,8 +478,7 @@ async def test_update_snapshot_aps_missing_not_authoritative_native(service, bac
     mgr.scheduler = MagicMock(get_jobs=MagicMock(return_value=[]))
     mgr.delete_task_classified = AsyncMock(return_value="success")
 
-    caps, trig = _patch_caps()
-    with caps, trig:
+    with _patch_trig():
         result = await service.update_task_synced(
             mgr, TID, ScheduledTaskUpdate(name="x")
         )
@@ -525,8 +510,7 @@ async def test_update_snapshot_native_absent_path_invalid(service, backend):
     backend.register = AsyncMock()  # reconcile may try register
 
     mgr = _mgr(_task(system_scope="user"), has_scope_key=True)
-    caps, trig = _patch_caps()
-    with caps, trig:
+    with _patch_trig():
         result = await service.update_task_synced(
             mgr, TID, ScheduledTaskUpdate(name="n")
         )
@@ -563,8 +547,7 @@ async def test_update_snapshot_empty_exe_path_invalid(service, backend):
 
     # Make reconcile a no-op path by matching scope and present+verify
     # but keep empty registered_exe_path after reconcile by re-clearing
-    caps, trig = _patch_caps()
-    with caps, trig:
+    with _patch_trig():
         await service.update_task_synced(mgr, TID, ScheduledTaskUpdate(name="n"))
     # Re-seed empty path and snapshot
     st = service._load_state()
@@ -602,8 +585,7 @@ async def test_update_explicit_null_vs_scope(
     # Explicit null: start with user scope key present; value: register user
     mgr = _mgr(_task(system_scope="user"), has_scope_key=True)
     update = ScheduledTaskUpdate(system_scope=system_scope)
-    caps, trig = _patch_caps()
-    with caps, trig:
+    with _patch_trig():
         result = await service.update_task_synced(mgr, TID, update)
     assert result.aps_outcome == "success"
     if expect_register:

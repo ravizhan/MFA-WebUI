@@ -1135,25 +1135,14 @@ async def get_scheduler_executions(limit: int = 50):
 
 
 # ---------------------------------------------------------------------------
-# 系统级计划任务注册 API
+# 原生唤醒（用户级）注册 API
+# system_scope user|legacy system 均表示用户级 wakeup；无 capability 诊断层。
 # ---------------------------------------------------------------------------
-
-
-@app.get("/api/scheduler/system-capabilities")
-async def get_system_capabilities():
-    """Authoritative capability matrix for native registration."""
-    if app_state.system_scheduler is None:
-        return {"status": "failed", "message": "系统调度服务未初始化"}
-    try:
-        caps = app_state.system_scheduler.get_capabilities()
-        return {"status": "success", "data": caps.model_dump(mode="json")}
-    except Exception as e:
-        return {"status": "failed", "message": str(e)}
 
 
 @app.get("/api/scheduler/tasks/{task_id}/system-status")
 async def get_system_task_status(task_id: str):
-    """查询任务的系统级注册状态（name/trigger/path from APS when available）"""
+    """查询任务的原生唤醒注册状态（name/trigger/path from APS when available）"""
     if app_state.system_scheduler is None:
         return {"status": "failed", "message": "系统调度服务未初始化"}
 
@@ -1170,7 +1159,7 @@ async def get_system_task_status(task_id: str):
 
 @app.get("/api/scheduler/system-tasks")
 async def list_system_tasks():
-    """列出所有系统级注册的任务（hydrated from APS when available）"""
+    """列出所有原生唤醒注册（hydrated from APS when available）"""
     if app_state.system_scheduler is None:
         return {"status": "failed", "message": "系统调度服务未初始化"}
 
@@ -1190,7 +1179,7 @@ async def list_system_tasks():
 
 @app.post("/api/scheduler/system-tasks/repair")
 async def repair_system_tasks():
-    """手动触发修复所有系统级注册（路径变化后使用）"""
+    """手动触发修复所有原生唤醒注册（路径变化后使用）"""
     if app_state.system_scheduler is None:
         return {"status": "failed", "message": "系统调度服务未初始化"}
     if app_state.scheduler_manager is None:

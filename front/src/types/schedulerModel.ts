@@ -110,7 +110,7 @@ export interface SchedulerApiResponse {
 // 系统级计划任务注册
 // ---------------------------------------------------------------------------
 
-export type SystemTaskScope = "user" | "system"
+export type SystemTaskScope = "user"
 
 export type SystemTaskPlatform = "windows" | "macos" | "linux"
 
@@ -186,24 +186,6 @@ export interface SystemTaskRegistration {
   path_valid?: boolean
   reason?: string
   enabled?: boolean
-}
-
-export interface SystemTaskCapabilityCell {
-  platform: SystemTaskPlatform
-  scope: SystemTaskScope
-  trigger_type: TriggerType
-  implemented: boolean
-  verified: boolean
-  enabled: boolean
-  reason: string
-  warnings: string[]
-}
-
-export interface SystemTaskCapabilities {
-  platform: string
-  cells: SystemTaskCapabilityCell[]
-  system_scope_enabled: boolean
-  warnings: string[]
 }
 
 export interface SystemTaskRepairResult {

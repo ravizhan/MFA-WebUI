@@ -12,7 +12,6 @@ vi.mock("@/services/api", () => ({
   getSystemTaskStatus: vi.fn<() => void>(),
   getSystemTasks: vi.fn<() => void>(),
   repairSystemTasks: vi.fn<() => void>(),
-  getSystemCapabilities: vi.fn<() => void>(),
 }))
 
 import { useSchedulerStore } from "@/stores/scheduler/scheduler"
@@ -190,7 +189,7 @@ describe("useSchedulerStore", () => {
         registered: true,
         path_valid: true,
         state: "active",
-        last_known_scope: "system",
+        last_known_scope: "user",
       }
       const store = useSchedulerStore()
       store.tasks = [original]
@@ -201,7 +200,7 @@ describe("useSchedulerStore", () => {
       })
       const result = await store.updateTask("1", { name: "updated" })
       expect(result).toBe(true)
-      expect(store.systemTaskStatuses["1"].scope).toBe("system")
+      expect(store.systemTaskStatuses["1"].scope).toBe("user")
     })
 
     it("stores synthetic error status on native_error without failing", async () => {
@@ -443,7 +442,7 @@ describe("useSchedulerStore", () => {
           registrations: [
             mockRegistration({
               task_id: "t1",
-              scope: "system",
+              scope: "user",
               desired_scope: "user",
               last_known_scope: "user",
             }),
@@ -460,7 +459,7 @@ describe("useSchedulerStore", () => {
           registrations: [
             mockRegistration({
               task_id: "t1",
-              scope: "system",
+              scope: "user",
               desired_scope: "user",
               last_known_scope: undefined,
             }),
@@ -477,117 +476,15 @@ describe("useSchedulerStore", () => {
           registrations: [
             mockRegistration({
               task_id: "t1",
-              scope: "system",
+              scope: "user",
               desired_scope: undefined,
+              last_known_scope: undefined,
             }),
           ],
         })
         const store = useSchedulerStore()
         await store.fetchAllSystemStatuses()
-        expect(store.systemTaskStatuses["t1"].scope).toBe("system")
-      })
-    })
-
-    describe("fetchSystemCapabilities", () => {
-      it("populates systemCapabilities on success", async () => {
-        const caps = {
-          platform: "windows",
-          cells: [
-            {
-              platform: "windows" as const,
-              scope: "user" as const,
-              trigger_type: "cron" as const,
-              implemented: true,
-              verified: true,
-              enabled: true,
-              reason: "ok",
-              warnings: [],
-            },
-          ],
-          system_scope_enabled: false,
-          warnings: [],
-        }
-        vi.mocked(api.getSystemCapabilities).mockResolvedValue({ status: "success", data: caps })
-        const store = useSchedulerStore()
-        await store.fetchSystemCapabilities()
-        expect(store.systemCapabilities).toEqual(caps)
-      })
-
-      it("keeps previous value on failure response", async () => {
-        const prev = {
-          platform: "windows",
-          cells: [],
-          system_scope_enabled: true,
-          warnings: [],
-        }
-        const store = useSchedulerStore()
-        store.systemCapabilities = prev
-        vi.mocked(api.getSystemCapabilities).mockResolvedValue({
-          status: "failed",
-          message: "error",
-        })
-        await store.fetchSystemCapabilities()
-        expect(store.systemCapabilities).toEqual(prev)
-      })
-
-      it("handles network error gracefully", async () => {
-        vi.mocked(api.getSystemCapabilities).mockRejectedValue(new Error("net"))
-        const store = useSchedulerStore()
-        await store.fetchSystemCapabilities()
-        expect(store.systemCapabilities).toBeNull()
-      })
-    })
-
-    describe("getCapabilityCell", () => {
-      it("returns matching cell", () => {
-        const store = useSchedulerStore()
-        store.systemCapabilities = {
-          platform: "windows",
-          cells: [
-            {
-              platform: "windows",
-              scope: "user",
-              trigger_type: "cron",
-              implemented: true,
-              verified: true,
-              enabled: true,
-              reason: "ok",
-              warnings: [],
-            },
-            {
-              platform: "windows",
-              scope: "system",
-              trigger_type: "cron",
-              implemented: true,
-              verified: false,
-              enabled: false,
-              reason: "needs elevation",
-              warnings: ["requires admin"],
-            },
-          ],
-          system_scope_enabled: false,
-          warnings: [],
-        }
-        const cell = store.getCapabilityCell("windows", "user", "cron")
-        expect(cell).toBeDefined()
-        expect(cell!.enabled).toBe(true)
-        expect(cell!.scope).toBe("user")
-      })
-
-      it("returns undefined for unknown cell", () => {
-        const store = useSchedulerStore()
-        store.systemCapabilities = {
-          platform: "windows",
-          cells: [],
-          system_scope_enabled: false,
-          warnings: [],
-        }
-        expect(store.getCapabilityCell("windows", "user", "date")).toBeUndefined()
-      })
-
-      it("returns undefined when capabilities not loaded", () => {
-        const store = useSchedulerStore()
-        expect(store.getCapabilityCell("windows", "user", "cron")).toBeUndefined()
+        expect(store.systemTaskStatuses["t1"].scope).toBe("user")
       })
     })
 

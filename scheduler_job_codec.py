@@ -25,8 +25,10 @@ from models.scheduler import (
 )
 
 TriggerType = Literal["cron", "date", "interval"]
-SystemScopeValue = Literal["user", "system"]
-_VALID_SYSTEM_SCOPES = frozenset({"user", "system"})
+# Stored field remains system_scope for APS/job compatibility.
+# Runtime value is always "user" when wakeup is enabled (legacy "system" → "user").
+SystemScopeValue = Literal["user"]
+_LEGACY_WAKEUP_SCOPES = frozenset({"user", "system"})
 NormalizePayload = Callable[
     [Any, Any, Any],
     tuple[list[str], TaskOptionsByTask, list[Any]],
@@ -49,16 +51,28 @@ class SchedulerJobDecodeError(Exception):
         super().__init__(f"{prefix}{message}")
 
 
-def decode_system_scope(raw: Any, *, job_id: Optional[str] = None) -> Optional[SystemScopeValue]:
-    """Validate persisted system_scope: None / 'user' / 'system' only."""
+def normalize_wakeup_scope(
+    raw: Any, *, job_id: Optional[str] = None
+) -> Optional[SystemScopeValue]:
+    """Normalize wakeup flag: None | 'user' | legacy 'system' → None | 'user'.
+
+    Both historical 'user' and 'system' mean user-level native wakeup enabled.
+    """
     if raw is None:
         return None
-    if isinstance(raw, str) and raw in _VALID_SYSTEM_SCOPES:
-        return raw  # type: ignore[return-value]
+    if isinstance(raw, str) and raw in _LEGACY_WAKEUP_SCOPES:
+        return "user"
     raise SchedulerJobDecodeError(
         f"invalid system_scope: {raw!r}",
         job_id=job_id,
     )
+
+
+def decode_system_scope(
+    raw: Any, *, job_id: Optional[str] = None
+) -> Optional[SystemScopeValue]:
+    """Decode persisted system_scope; legacy 'system' becomes user wakeup."""
+    return normalize_wakeup_scope(raw, job_id=job_id)
 
 
 def build_trigger(trigger_config: TriggerConfig) -> CronTrigger | DateTrigger | IntervalTrigger:
@@ -200,16 +214,20 @@ def encode_execution_kwargs(
     controller_name: Optional[str],
     device: Any,
     resource_name: Optional[str],
-    system_scope: Optional[SystemScopeValue] = None,
+    system_scope: Optional[Literal["user", "system"]] = None,
 ) -> dict[str, Any]:
     """Encode complete APS job kwargs for add_job / modify_job.
 
     Writes canonical ``pre_tasks`` and always includes ``system_scope`` (may be
-    None). Callers must pass the full kwargs dict to modify_job so the store
-    fully replaces the previous kwargs payload.
+    None). Legacy ``system`` is normalized to ``user`` before persist.
+    Callers must pass the full kwargs dict to modify_job so the store fully
+    replaces the previous kwargs payload.
     """
-    if system_scope is not None and system_scope not in _VALID_SYSTEM_SCOPES:
-        raise ValueError(f"invalid system_scope: {system_scope!r}")
+    normalized_scope: Optional[SystemScopeValue] = None
+    if system_scope is not None:
+        if system_scope not in _LEGACY_WAKEUP_SCOPES:
+            raise ValueError(f"invalid system_scope: {system_scope!r}")
+        normalized_scope = "user"
     return {
         "task_id": task_id,
         "task_name": task_name,
@@ -220,7 +238,7 @@ def encode_execution_kwargs(
         "controller_name": controller_name,
         "device": _dump_device(device),
         "resource_name": resource_name,
-        "system_scope": system_scope,
+        "system_scope": normalized_scope,
     }
 
 

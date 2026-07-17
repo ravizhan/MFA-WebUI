@@ -97,9 +97,14 @@ class ScheduledTask(TaskExecutionPayload):
     controller_name: Optional[str] = Field(None, description="控制器名称")
     device: Optional[ScheduledTaskDeviceConfig] = Field(None, description="设备配置")
     resource_name: Optional[str] = Field(None, description="资源包名称")
-    # APS-owned native scope metadata (None = not registered as system task)
+    # APS-owned native wakeup flag (stored as system_scope for compatibility).
+    # "user" | legacy "system" both mean user-level wakeup enabled; None = off.
     system_scope: Optional[Literal["user", "system"]] = Field(
-        None, description="系统级调度范围；None 表示未注册原生唤醒"
+        None,
+        description=(
+            "原生唤醒开关（兼容字段）。user/system 均表示启用用户级唤醒；"
+            "None 表示关闭。新写入仅使用 user。"
+        ),
     )
     next_run_time: Optional[datetime] = Field(None, description="下次执行时间")
     created_at: datetime = Field(default_factory=datetime.now, description="创建时间")
@@ -117,6 +122,7 @@ class ScheduledTaskCreate(TaskExecutionPayload):
     controller_name: Optional[str] = Field(None, description="控制器名称")
     device: Optional[ScheduledTaskDeviceConfig] = Field(None, description="设备配置")
     resource_name: Optional[str] = Field(None, description="资源包名称")
+    # Accepts legacy "system" but runtime normalizes to user wakeup.
     system_scope: Optional[Literal["user", "system"]] = None
 
 
@@ -134,7 +140,7 @@ class ScheduledTaskUpdate(BaseModel):
     task_list: Optional[List[str]] = None
     task_options: Optional[TaskOptionsByTask] = None
     preTasks: Optional[List[PreTaskCommand]] = None
-    # omitted=sync existing; null=unregister; value=register/sync
+    # omitted=sync existing; null=disable wakeup; user|system=enable user wakeup
     system_scope: Optional[Literal["user", "system"]] = None
 
 
@@ -167,10 +173,10 @@ class TaskExecutionCreate(BaseModel):
 
 
 class SystemTaskScope(str, Enum):
-    """系统级任务运行范围
+    """原生唤醒作用域。
 
-    - USER: 用户级，在用户会话中运行，用户登出后不执行
-    - SYSTEM: 系统级，以系统身份运行，用户登出后仍执行（注册需提权）
+    - USER: 当前用户级注册（唯一支持的新注册路径）
+    - SYSTEM: 仅用于读取/清理历史 SYSTEM artifact；禁止新注册
     """
 
     USER = "user"
@@ -316,30 +322,12 @@ class SystemTaskRegistration(BaseModel):
     enabled: Optional[bool] = None
 
 
-class CapabilityCell(BaseModel):
-    """One platform/scope/trigger capability cell."""
-
-    platform: Literal["windows", "macos", "linux"]
-    scope: SystemTaskScope
-    trigger_type: Literal["cron", "date", "interval"]
-    implemented: bool
-    verified: bool
-    enabled: bool
-    reason: str = ""
-    warnings: List[str] = Field(default_factory=list)
-
-
-class SystemCapabilitiesResponse(BaseModel):
-    """Capability matrix for native registration."""
-
-    platform: Literal["windows", "macos", "linux"]
-    cells: List[CapabilityCell]
-    system_scope_enabled: bool
-    warnings: List[str] = Field(default_factory=list)
-
-
 class SystemTaskStatusResponse(BaseModel):
-    """系统级注册状态查询响应（authoritative desired + observed）"""
+    """原生唤醒注册状态（authoritative desired + observed）。
+
+    ``enabled`` / ``scope`` 表示用户级 wakeup 是否开启；
+    历史 system_scope=system 读取时归一为 USER。
+    """
 
     task_id: str
     registered: bool
@@ -355,6 +343,7 @@ class SystemTaskStatusResponse(BaseModel):
     desired_scope: Optional[SystemTaskScope] = None
     observed: List[ObservedNativeState] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
+    # Wakeup enabled for this task (platform trigger accepted when True)
     enabled: Optional[bool] = None
     verified: Optional[bool] = None
     reason: Optional[str] = None

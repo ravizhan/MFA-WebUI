@@ -8,11 +8,7 @@ import type {
   TaskExecution,
   SystemTaskStatus,
   SystemTaskRegistration,
-  SystemTaskScope,
-  SystemTaskCapabilities,
-  SystemTaskCapabilityCell,
   SystemTaskObservation,
-  TriggerType,
 } from "@/types/schedulerModel"
 import {
   getSchedulerTasks,
@@ -25,7 +21,6 @@ import {
   getSystemTaskStatus,
   getSystemTasks,
   repairSystemTasks,
-  getSystemCapabilities,
 } from "@/services/api"
 
 export const useSchedulerStore = defineStore("scheduler", () => {
@@ -36,7 +31,6 @@ export const useSchedulerStore = defineStore("scheduler", () => {
   const error = ref<string | null>(null)
   const systemTaskStatuses = ref<Record<string, SystemTaskStatus>>({})
   const systemRegistrations = ref<SystemTaskRegistration[]>([])
-  const systemCapabilities = ref<SystemTaskCapabilities | null>(null)
 
   function normalizeStatusScope(status: SystemTaskStatus): SystemTaskStatus {
     const resolved = status.last_known_scope ?? status.desired_scope ?? status.scope
@@ -246,27 +240,6 @@ export const useSchedulerStore = defineStore("scheduler", () => {
     return false
   }
 
-  async function fetchSystemCapabilities() {
-    const [response, err] = await tryCatch(() => getSystemCapabilities())
-    if (err) {
-      console.error("Failed to fetch system capabilities:", err)
-      return
-    }
-    if (response.status === "success" && response.data) {
-      systemCapabilities.value = response.data
-    }
-  }
-
-  function getCapabilityCell(
-    platform: string,
-    scope: SystemTaskScope,
-    triggerType: TriggerType,
-  ): SystemTaskCapabilityCell | undefined {
-    return systemCapabilities.value?.cells.find(
-      (c) => c.platform === platform && c.scope === scope && c.trigger_type === triggerType,
-    )
-  }
-
   function getSystemStatus(taskId: string): SystemTaskStatus | undefined {
     return systemTaskStatuses.value[taskId]
   }
@@ -325,7 +298,6 @@ export const useSchedulerStore = defineStore("scheduler", () => {
     error,
     systemTaskStatuses,
     systemRegistrations,
-    systemCapabilities,
     // Computed
     enabledTasks,
     // Actions
@@ -339,8 +311,6 @@ export const useSchedulerStore = defineStore("scheduler", () => {
     fetchSystemRegistrations,
     fetchAllSystemStatuses,
     repairSystemTasksAll,
-    fetchSystemCapabilities,
-    getCapabilityCell,
     getSystemStatus,
     getTaskById,
     clearError,

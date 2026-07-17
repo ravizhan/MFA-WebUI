@@ -691,12 +691,13 @@ class SchedulerManager:
     def import_system_scopes(
         self, scope_by_task_id: dict[str, Literal["user", "system"]]
     ) -> dict[str, Any]:
-        """Idempotently merge system_scope into matching APS jobs.
+        """Idempotently merge wakeup scope into matching APS jobs.
 
         Import only when the ``system_scope`` key is **absent**. If the key is
         already present (including explicit ``None``), APS is authoritative and
-        JSON must not overwrite. Copy-merges complete existing kwargs. Never
-        creates jobs. Verifies each write by re-reading. Preserves pause state.
+        JSON must not overwrite. Legacy ``system`` and ``user`` both import as
+        user wakeup (``"user"``). Never creates jobs. Verifies each write by
+        re-reading. Preserves pause state.
         """
         if not self.scheduler:
             raise RuntimeError("调度器未初始化")
@@ -713,6 +714,8 @@ class SchedulerManager:
                 stats["failed"] += 1
                 stats["details"].append(f"{task_id}: invalid scope {scope!r}")
                 continue
+            # Both historical scopes mean user-level wakeup.
+            normalized_scope: Literal["user"] = "user"
             job = self.scheduler.get_job(task_id)
             if job is None:
                 stats["missing_job"] += 1
@@ -732,7 +735,7 @@ class SchedulerManager:
             was_paused = job.next_run_time is None
             # Full kwargs copy so modify_job does not drop legacy keys.
             new_kwargs = dict(kwargs)
-            new_kwargs["system_scope"] = scope
+            new_kwargs["system_scope"] = normalized_scope
             try:
                 self.scheduler.modify_job(task_id, kwargs=new_kwargs)
             except Exception as e:
@@ -746,11 +749,11 @@ class SchedulerManager:
                 stats["failed"] += 1
                 stats["details"].append(f"{task_id}: job missing after modify")
                 continue
-            if verified.kwargs.get("system_scope") != scope:
+            if verified.kwargs.get("system_scope") != normalized_scope:
                 stats["failed"] += 1
                 stats["details"].append(
                     f"{task_id}: durable re-read scope mismatch "
-                    f"{verified.kwargs.get('system_scope')!r} != {scope!r}"
+                    f"{verified.kwargs.get('system_scope')!r} != {normalized_scope!r}"
                 )
                 continue
             if (verified.next_run_time is None) != was_paused:
@@ -767,7 +770,10 @@ class SchedulerManager:
                     )
                     continue
             stats["imported"] += 1
-            stats["details"].append(f"{task_id}: imported scope={scope}")
+            stats["details"].append(
+                f"{task_id}: imported scope={normalized_scope} "
+                f"(from legacy {scope!r})"
+            )
 
         logger.info(
             "system_scope import: imported=%s skipped=%s missing=%s failed=%s",

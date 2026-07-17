@@ -360,79 +360,23 @@
             </select>
           </fieldset>
 
-          <!-- System Scheduling -->
+          <!-- System Scheduling (user-level OS wakeup) -->
           <fieldset v-if="activeSection === 'system'" class="fieldset p-0">
             <legend class="fieldset-legend flex items-center gap-1.5">
               <Icon icon="mdi:monitor-shimmer" class="text-base opacity-70" aria-hidden="true" />
               {{ t("settings.scheduler.dialog.systemScheduling") }}
             </legend>
 
-            <div v-if="!hasAnyEnabledScope" role="alert" class="alert alert-info mb-3">
-              <Icon icon="mdi:information-outline" class="text-lg" aria-hidden="true" />
-              <span>
-                {{
-                  t("settings.scheduler.dialog.capabilityDisabled", {
-                    reason:
-                      userCapabilityCell?.reason ||
-                      systemCapabilityCell?.reason ||
-                      t("common.unknown"),
-                  })
-                }}
-              </span>
-            </div>
-
             <label class="flex cursor-pointer items-center gap-3">
               <input
                 v-model="systemSchedulingEnabled"
                 type="checkbox"
                 class="toggle toggle-primary"
-                :disabled="!hasAnyEnabledScope"
               />
               <span class="text-sm">{{
                 t("settings.scheduler.dialog.enableSystemScheduling")
               }}</span>
             </label>
-          </fieldset>
-
-          <fieldset
-            v-if="activeSection === 'system' && systemSchedulingEnabled"
-            class="fieldset p-0"
-          >
-            <legend class="fieldset-legend">
-              {{ t("settings.scheduler.dialog.scope.label") }}
-            </legend>
-            <div class="flex flex-wrap gap-2">
-              <label
-                class="border-base-300 hover:border-primary/40 has-[:checked]:border-primary has-[:checked]:bg-primary/5 flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors"
-                :class="{ 'opacity-50': !userCapabilityCell?.enabled }"
-              >
-                <input
-                  v-model="systemScope"
-                  type="radio"
-                  class="radio radio-primary radio-sm"
-                  value="user"
-                  :disabled="!userCapabilityCell?.enabled"
-                />
-                <span class="text-sm">{{ t("settings.scheduler.dialog.scope.user") }}</span>
-              </label>
-              <label
-                class="border-base-300 hover:border-primary/40 has-[:checked]:border-primary has-[:checked]:bg-primary/5 flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors"
-                :class="{ 'opacity-50': !systemCapabilityCell?.enabled }"
-              >
-                <input
-                  v-model="systemScope"
-                  type="radio"
-                  class="radio radio-primary radio-sm"
-                  value="system"
-                  :disabled="!systemCapabilityCell?.enabled"
-                />
-                <span class="text-sm">{{ t("settings.scheduler.dialog.scope.system") }}</span>
-              </label>
-            </div>
-            <div v-if="systemScope === 'system'" role="alert" class="alert alert-warning mt-2">
-              <Icon icon="mdi:alert-outline" class="text-lg" aria-hidden="true" />
-              <span>{{ t("settings.scheduler.dialog.scope.systemWarning") }}</span>
-            </div>
           </fieldset>
 
           <!-- Content: tasks -->
@@ -562,7 +506,6 @@ import type {
   CronTriggerConfig,
   DateTriggerConfig,
   IntervalTriggerConfig,
-  SystemTaskScope,
 } from "@/types/schedulerModel"
 import { showGlobalMessage } from "@/services/feedback/message"
 import { tryCatch } from "@/utils/tryCatch"
@@ -603,7 +546,6 @@ const loadingDevices = ref(false)
 const loadingResources = ref(false)
 
 const systemSchedulingEnabled = ref(false)
-const systemScope = ref<SystemTaskScope>("user")
 
 const sections = computed(() => [
   {
@@ -632,21 +574,6 @@ const sections = computed(() => [
     icon: "mdi:playlist-check",
   },
 ])
-
-const currentPlatform = computed(() => schedulerStore.systemCapabilities?.platform || "")
-
-const userCapabilityCell = computed(() =>
-  schedulerStore.getCapabilityCell(currentPlatform.value, "user", formData.value.trigger_type),
-)
-
-const systemCapabilityCell = computed(() =>
-  schedulerStore.getCapabilityCell(currentPlatform.value, "system", formData.value.trigger_type),
-)
-
-const hasAnyEnabledScope = computed(
-  () =>
-    (userCapabilityCell.value?.enabled ?? false) || (systemCapabilityCell.value?.enabled ?? false),
-)
 
 const triggerOptions = computed(() => [
   {
@@ -828,27 +755,17 @@ watch(
     }
     activeSection.value = "basic"
     systemSchedulingEnabled.value = false
-    systemScope.value = "user"
     if (task) {
-      if (task.system_scope === "user" || task.system_scope === "system") {
+      // Treat legacy "system" and current "user" scopes as enabled (user-only wakeup).
+      // Backend may still return historical "system"; any non-null scope means enabled.
+      if (task.system_scope) {
         systemSchedulingEnabled.value = true
-        systemScope.value = task.system_scope
         return
       }
       const status = schedulerStore.getSystemStatus(task.id)
       if (status && (status.state === "active" || status.state === "pending_register")) {
         systemSchedulingEnabled.value = true
-        systemScope.value = status.scope || "user"
       }
-    }
-  },
-)
-
-watch(
-  () => activeSection.value,
-  (section) => {
-    if (section === "system") {
-      void schedulerStore.fetchSystemCapabilities()
     }
   },
 )
@@ -950,7 +867,6 @@ function resetForm() {
   activeTab.value = "task-list"
   activeSection.value = "basic"
   systemSchedulingEnabled.value = false
-  systemScope.value = "user"
 }
 
 function syncTaskListData(preferredOrder: string[]) {
@@ -1295,7 +1211,7 @@ async function saveTaskPayload(): Promise<{ taskId: string; success: boolean }> 
     ...formData.value,
     ...configStore.buildExecutionPayload(formData.value.task_list, formData.value.task_options),
     preTasks: formData.value.preTasks ?? [],
-    system_scope: systemSchedulingEnabled.value ? systemScope.value : null,
+    system_scope: systemSchedulingEnabled.value ? "user" : null,
   }
 
   if (isEditMode.value && task) {

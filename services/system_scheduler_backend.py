@@ -2,7 +2,10 @@
 OS 级调度器后端 —— 策略模式实现。
 支持 Windows (schtasks)、macOS (launchd)、Linux (crontab)。
 
-Normative capability contract (no silent approximation):
+仅支持当前用户级 (USER) 原生唤醒注册；不再提供 SYSTEM/root 提权路径。
+历史 SYSTEM 标识仍可通过 is_registered/unregister 探测与尽力清理。
+
+Normative trigger contract (no silent approximation):
   Windows date: future timezone-aware TimeTrigger only
   Windows interval: whole minutes 1..44640, no start/end modifiers
   Windows cron: numeric fixed daily M H * * * only
@@ -30,14 +33,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal, Optional, cast
 
-
 from models.scheduler import (
-    CapabilityCell,
     CronTriggerConfig,
     DateTriggerConfig,
     IntervalTriggerConfig,
     OSTriggerSpec,
-    SystemCapabilitiesResponse,
     SystemTaskScope,
     SystemTaskSpec,
     TriggerConfig,
@@ -346,168 +346,13 @@ def validate_trigger_for_platform(
     raise ValueError(f"未知平台: {platform_name}")
 
 
-def load_smoke_evidence(
-    app_root: Optional[Path] = None,
-) -> dict[str, bool]:
-    """Load smoke evidence; only JSON booleans accepted (not string 'false')."""
-    root = Path(app_root) if app_root else Path.cwd()
-    path = root / "config" / "system_scheduler_smoke.json"
-    if not path.exists():
-        return {}
-    try:
-        import json_utils as json
-
-        data = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            return {}
-        out: dict[str, bool] = {}
-        for k, v in data.items():
-            if isinstance(v, bool):
-                out[str(k).lower()] = v
-        return out
-    except Exception:
-        return {}
-
-
-def _smoke_allows(
-    evidence: dict[str, bool],
-    plat: str,
-    scope: SystemTaskScope,
-    trig: str,
-) -> bool:
-    """Platform+scope+trigger specific only; SYSTEM needs elevated proof keys."""
-    cell_key = f"{plat}:{scope.value}:{trig}"
-    if cell_key not in evidence or not evidence[cell_key]:
-        return False
-    if scope == SystemTaskScope.SYSTEM:
-        combined = f"{plat}:system:elevated_post_restart"
-        if evidence.get(combined) is True:
-            return True
-        elev = f"{plat}:system:elevated"
-        restart = f"{plat}:system:post_user_restart"
-        return evidence.get(elev) is True and evidence.get(restart) is True
-    return True
-
-
-def build_capabilities(
-    platform_name: str,
-    *,
-    host_platform: Optional[str] = None,
-    system_scope_verified: bool = False,
-    app_root: Optional[Path] = None,
-    smoke_evidence: Optional[dict[str, bool]] = None,
-) -> SystemCapabilitiesResponse:
-    """Capability matrix: verified/enabled require explicit smoke evidence."""
-    host_raw = host_platform or current_platform_name()
-    if host_raw not in ("windows", "macos", "linux"):
-        host_raw = current_platform_name()
-    host: Literal["windows", "macos", "linux"] = cast(
-        Literal["windows", "macos", "linux"], host_raw
-    )
-    cells: list[CapabilityCell] = []
-    warnings: list[str] = []
-    evidence = (
-        smoke_evidence if smoke_evidence is not None else load_smoke_evidence(app_root)
-    )
-
-    implemented = {
-        ("windows", "date"): True,
-        ("windows", "interval"): True,
-        ("windows", "cron"): True,
-        ("macos", "date"): False,
-        ("macos", "interval"): True,
-        ("macos", "cron"): True,
-        ("linux", "date"): False,
-        ("linux", "interval"): False,
-        ("linux", "cron"): True,
-    }
-
-    for plat in ("windows", "macos", "linux"):
-        for scope in (SystemTaskScope.USER, SystemTaskScope.SYSTEM):
-            for trig in ("date", "interval", "cron"):
-                impl = implemented.get((plat, trig), False)
-                smoke_ok = _smoke_allows(evidence, plat, scope, trig)
-                if (
-                    scope == SystemTaskScope.SYSTEM
-                    and system_scope_verified
-                    and plat == host
-                ):
-                    smoke_ok = True
-                verified = bool(impl and plat == host and smoke_ok)
-                enabled = bool(impl and verified and plat == host)
-                reason = ""
-                cell_warnings: list[str] = []
-                if not impl:
-                    reason = "not implemented / rejected by contract"
-                elif plat != host:
-                    reason = f"disabled on host platform {host}"
-                elif not smoke_ok:
-                    reason = "implemented but no native smoke evidence"
-                else:
-                    reason = "enabled"
-                if plat == "macos" and trig == "interval" and impl:
-                    cell_warnings.append(
-                        "StartInterval may miss firings during sleep/overlap"
-                    )
-                if scope == SystemTaskScope.SYSTEM:
-                    cell_warnings.append("system/root scope requires privilege")
-                    if not smoke_ok:
-                        reason = (
-                            "system scope disabled until elevated native smoke verified"
-                        )
-                cells.append(
-                    CapabilityCell(
-                        platform=plat,  # type: ignore[arg-type]
-                        scope=scope,
-                        trigger_type=trig,  # type: ignore[arg-type]
-                        implemented=impl,
-                        verified=verified,
-                        enabled=enabled,
-                        reason=reason,
-                        warnings=cell_warnings,
-                    )
-                )
-
-    system_scope_enabled = any(
-        c.enabled and c.scope == SystemTaskScope.SYSTEM and c.platform == host
-        for c in cells
-    )
-    if not system_scope_enabled:
-        warnings.append("system scope is disabled unless verified")
-    if not evidence and not system_scope_verified:
-        warnings.append(
-            "no smoke evidence (config/system_scheduler_smoke.json); all cells disabled"
-        )
-    return SystemCapabilitiesResponse(
-        platform=host,  # type: ignore[arg-type]
-        cells=cells,
-        system_scope_enabled=system_scope_enabled,
-        warnings=warnings,
-    )
-
-
-def is_capability_enabled(
-    caps: SystemCapabilitiesResponse,
-    scope: SystemTaskScope,
-    trigger_type: str,
-) -> tuple[bool, str, list[str]]:
-    for cell in caps.cells:
-        if (
-            cell.platform == caps.platform
-            and cell.scope == scope
-            and cell.trigger_type == trigger_type
-        ):
-            return cell.enabled, cell.reason, list(cell.warnings)
-    return False, "capability cell not found", []
-
-
 # ---------------------------------------------------------------------------
-# 抽象基类
+# 抽象基类 —— 六个核心成员
 # ---------------------------------------------------------------------------
 
 
 class SystemSchedulerBackend(ABC):
-    """OS 级调度器后端抽象基类"""
+    """OS 级用户唤醒后端抽象。仅 USER 可注册；SYSTEM 仅用于历史清理探测。"""
 
     @property
     @abstractmethod
@@ -515,33 +360,31 @@ class SystemSchedulerBackend(ABC):
         """返回平台标识: 'windows' | 'macos' | 'linux'"""
 
     @abstractmethod
+    def build_identifier(self, task_id: str, scope: SystemTaskScope) -> str:
+        """构建 OS 侧任务标识（含历史 SYSTEM 路径，供清理使用）。"""
+
+    @abstractmethod
     async def register(self, spec: SystemTaskSpec) -> None:
-        """幂等注册：已存在则更新。若 scope=SYSTEM 需提权，提权失败抛 PermissionError"""
+        """幂等注册：已存在则更新。仅接受 scope=USER。"""
 
     @abstractmethod
     async def unregister(self, task_id: str, scope: SystemTaskScope) -> None:
-        """幂等卸载：不存在则静默成功"""
+        """幂等卸载：不存在则静默成功。SYSTEM 为尽力清理（无提权）。"""
 
     @abstractmethod
     async def is_registered(self, task_id: str, scope: SystemTaskScope) -> bool:
-        """查询注册状态"""
+        """查询注册状态（含历史 SYSTEM artifact）。"""
 
     @abstractmethod
     async def verify_registration(self, spec: SystemTaskSpec) -> tuple[bool, str]:
-        """Backend-specific verification after create. Returns (ok, detail)."""
+        """注册后校验。返回 (ok, detail)。"""
 
-    @abstractmethod
-    async def get_next_run_time(
-        self, task_id: str, scope: SystemTaskScope
-    ) -> Optional[datetime]:
-        """查询 OS 报告的下次运行时间"""
 
-    @abstractmethod
-    async def list_registered(self) -> list[str]:
-        """列出所有 MWU 注册的系统任务 ID"""
-
-    def build_identifier(self, task_id: str, scope: SystemTaskScope) -> str:
-        raise NotImplementedError
+def _require_user_scope(spec: SystemTaskSpec) -> None:
+    if spec.scope != SystemTaskScope.USER:
+        raise ValueError(
+            "仅支持用户级 (USER) 原生唤醒注册；SYSTEM/提权路径已移除"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -550,15 +393,18 @@ class SystemSchedulerBackend(ABC):
 
 
 class WindowsBackend(SystemSchedulerBackend):
-    """Windows Task Scheduler 后端，使用 schtasks /create /xml 方式注册。"""
+    """Windows Task Scheduler 后端，使用 schtasks /create /xml（用户级）。"""
 
     platform_name = "windows"
 
     def build_identifier(self, task_id: str, scope: SystemTaskScope) -> str:
+        # Identifier path is scope-independent under \\MWU\\; scope kept for API symmetry.
+        del scope
         return f"\\MWU\\{task_id}"
 
     async def register(self, spec: SystemTaskSpec) -> None:
         validate_task_id(spec.task_id)
+        _require_user_scope(spec)
         validate_trigger_for_platform(self.platform_name, spec.trigger)
 
         xml_bytes = self._build_task_xml(spec)
@@ -569,20 +415,12 @@ class WindowsBackend(SystemSchedulerBackend):
                 temp_path = f.name
 
             task_path = self.build_identifier(spec.task_id, spec.scope)
-
-            if spec.scope == SystemTaskScope.USER:
-                await asyncio.to_thread(
-                    self._run_schtasks,
-                    ["schtasks", "/create", "/xml", temp_path, "/tn", task_path, "/f"],
-                    check=True,
-                )
-            else:
-                await self._run_as_admin(
-                    f'/create /xml "{temp_path}" /tn "{task_path}" /f'
-                )
-            logger.info(
-                "Windows 任务注册成功: %s (scope=%s)", task_path, spec.scope.value
+            await asyncio.to_thread(
+                self._run_schtasks,
+                ["schtasks", "/create", "/xml", temp_path, "/tn", task_path, "/f"],
+                check=True,
             )
+            logger.info("Windows 任务注册成功: %s (scope=user)", task_path)
         except subprocess.CalledProcessError as e:
             stderr = (
                 (e.stderr or b"").decode("utf-8", errors="replace") if e.stderr else ""
@@ -593,26 +431,21 @@ class WindowsBackend(SystemSchedulerBackend):
                 os.unlink(temp_path)
 
     async def unregister(self, task_id: str, scope: SystemTaskScope) -> None:
+        """Best-effort delete (USER or historical SYSTEM share the same task path)."""
         validate_task_id(task_id)
         task_path = self.build_identifier(task_id, scope)
-
-        if scope == SystemTaskScope.USER:
-            proc = await asyncio.to_thread(
-                subprocess.run,
-                ["schtasks", "/delete", "/tn", task_path, "/f"],
-                capture_output=True,
-            )
-            if proc.returncode != 0:
-                stderr = cast(bytes, proc.stderr or b"").decode(
-                    "utf-8", errors="replace"
-                )
-                if (
-                    "ERROR: The system cannot find the file specified" not in stderr
-                    and "does not exist" not in stderr.lower()
-                ):
-                    logger.warning("schtasks 卸载异常: %s", stderr.strip())
-        else:
-            await self._run_as_admin(f'/delete /tn "{task_path}" /f', check=False)
+        proc = await asyncio.to_thread(
+            subprocess.run,
+            ["schtasks", "/delete", "/tn", task_path, "/f"],
+            capture_output=True,
+        )
+        if proc.returncode != 0:
+            stderr = cast(bytes, proc.stderr or b"").decode("utf-8", errors="replace")
+            if (
+                "ERROR: The system cannot find the file specified" not in stderr
+                and "does not exist" not in stderr.lower()
+            ):
+                logger.warning("schtasks 卸载异常: %s", stderr.strip())
 
     async def is_registered(self, task_id: str, scope: SystemTaskScope) -> bool:
         validate_task_id(task_id)
@@ -682,43 +515,16 @@ class WindowsBackend(SystemSchedulerBackend):
                     return child
         return None
 
-    def _find_by_xpath(self, root: ET.Element, path: str) -> Optional[ET.Element]:
-        """Simple tag-only path, e.g. 'Settings/Enabled'."""
-        parts = path.split("/")
-        cur = root
-        for p in parts:
-            found = None
-            for child in cur:
-                if self._local_tag(child.tag) == p:
-                    found = child
-                    break
-            if found is None:
-                return None
-            cur = found
-        return cur
-
     def _compare_exported_xml(
         self, raw: bytes, spec: SystemTaskSpec
     ) -> tuple[bool, str]:
         root = self._decode_task_xml(raw)
         logon = self._find_desc(root, "LogonType")
-        user_id = self._find_desc(root, "UserId")
-        if spec.scope == SystemTaskScope.SYSTEM:
-            if logon is None or (logon.text or "") != "Password":
-                return False, (
-                    f"SYSTEM LogonType expected Password, got "
-                    f"{getattr(logon, 'text', None)}"
-                )
-            if user_id is None or (user_id.text or "") != "S-1-5-18":
-                return False, "SYSTEM UserId expected S-1-5-18"
-            if logon is not None and logon.text == "ServiceAccount":
-                return False, "invalid ServiceAccount principal"
-        else:
-            if logon is None or (logon.text or "") != "InteractiveToken":
-                return False, (
-                    f"USER LogonType expected InteractiveToken, got "
-                    f"{getattr(logon, 'text', None)}"
-                )
+        if logon is None or (logon.text or "") != "InteractiveToken":
+            return False, (
+                f"USER LogonType expected InteractiveToken, got "
+                f"{getattr(logon, 'text', None)}"
+            )
 
         command = self._find_desc(root, "Command")
         arguments = self._find_desc(root, "Arguments")
@@ -736,7 +542,6 @@ class WindowsBackend(SystemSchedulerBackend):
                 f"WorkingDirectory mismatch: {getattr(working, 'text', None)!r}"
             )
 
-        # Settings-scoped checks (use subtree lookups to avoid trigger collisions)
         for name, expect in (
             ("MultipleInstancesPolicy", "IgnoreNew"),
             ("ExecutionTimeLimit", "PT2H"),
@@ -820,7 +625,6 @@ class WindowsBackend(SystemSchedulerBackend):
                     f"{dt.hour:02d}:{dt.minute:02d}:{dt.second:02d} "
                     f"!= {hour:02d}:{minute:02d}:00"
                 )
-            # CalendarTrigger Enabled
             en = None
             for el in root.iter():
                 if self._local_tag(el.tag) == "CalendarTrigger":
@@ -832,83 +636,14 @@ class WindowsBackend(SystemSchedulerBackend):
                 return False, "cron trigger Enabled must be true"
         return True, "xml verified"
 
-    async def get_next_run_time(
-        self, task_id: str, scope: SystemTaskScope
-    ) -> Optional[datetime]:
-        # Locale-dependent schtasks /v is fragile; do not treat as authoritative.
-        validate_task_id(task_id)
-        return None
-
-    async def list_registered(self) -> list[str]:
-        proc = await asyncio.to_thread(
-            subprocess.run,
-            ["schtasks", "/query", "/fo", "list"],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-        )
-        if proc.returncode != 0:
-            return []
-        task_ids: list[str] = []
-        pattern = re.compile(r"\\MWU\\([a-f0-9-]{36})")
-        for line in cast(str, proc.stdout or "").splitlines():
-            m = pattern.search(line)
-            if m:
-                tid = m.group(1)
-                if tid not in task_ids:
-                    task_ids.append(tid)
-        return task_ids
-
     @staticmethod
     def _run_schtasks(
         args: list[str], check: bool = True
     ) -> subprocess.CompletedProcess:
         return subprocess.run(args, capture_output=True, check=check)
 
-    async def _run_as_admin(self, schtasks_args: str, check: bool = True) -> None:
-        import ctypes
-
-        if ctypes.windll.shell32.IsUserAnAdmin():
-            result = await asyncio.to_thread(
-                subprocess.run,
-                f"schtasks {schtasks_args}",
-                capture_output=True,
-                shell=True,
-            )
-            if check and result.returncode != 0:
-                stderr = cast(bytes, result.stderr or b"").decode(
-                    "utf-8", errors="replace"
-                )
-                raise RuntimeError(f"schtasks 执行失败: {stderr.strip()}")
-            return
-
-        ret = await asyncio.to_thread(
-            ctypes.windll.shell32.ShellExecuteW,
-            None,
-            "runas",
-            "schtasks",
-            schtasks_args,
-            None,
-            1,
-        )
-        if ret <= 32:
-            error_codes = {
-                0: "内存不足",
-                2: "文件未找到",
-                3: "路径未找到",
-                5: "拒绝访问",
-                120: "已取消",
-            }
-            msg = error_codes.get(ret, f"错误码 {ret}")
-            if check:
-                raise PermissionError(
-                    f"系统级注册需要管理员权限，用户取消了授权 ({msg})"
-                )
-            logger.warning("提权操作被取消 (ShellExecuteW 返回值 %d)", ret)
-
     def _build_task_xml(self, spec: SystemTaskSpec) -> bytes:
-        """Build schema-valid Task Scheduler XML."""
+        """Build schema-valid user-level Task Scheduler XML."""
         ET.register_namespace("", _XML_NS)
         root = ET.Element(f"{{{_XML_NS}}}Task", version="1.2")
 
@@ -921,17 +656,8 @@ class WindowsBackend(SystemSchedulerBackend):
         principals = ET.SubElement(root, "Principals")
         principal = ET.SubElement(principals, "Principal")
         principal.set("id", "Author")
-        if spec.scope == SystemTaskScope.SYSTEM:
-            # Schema-valid SYSTEM principal (NOT ServiceAccount)
-            uid = ET.SubElement(principal, "UserId")
-            uid.text = "S-1-5-18"
-            lt = ET.SubElement(principal, "LogonType")
-            lt.text = "Password"
-            rl = ET.SubElement(principal, "RunLevel")
-            rl.text = "HighestAvailable"
-        else:
-            lt = ET.SubElement(principal, "LogonType")
-            lt.text = "InteractiveToken"
+        lt = ET.SubElement(principal, "LogonType")
+        lt.text = "InteractiveToken"
 
         triggers = ET.SubElement(root, "Triggers")
         self._add_triggers(triggers, spec.trigger)
@@ -983,7 +709,6 @@ class WindowsBackend(SystemSchedulerBackend):
             enabled.text = "true"
             rep = ET.SubElement(trigger, "Repetition")
             interval = ET.SubElement(rep, "Interval")
-            # ISO 8601 duration — whole minutes
             if mins % (24 * 60) == 0 and mins >= 24 * 60:
                 days = mins // (24 * 60)
                 interval.text = f"P{days}D"
@@ -992,7 +717,6 @@ class WindowsBackend(SystemSchedulerBackend):
                 interval.text = f"PT{hours}H"
             else:
                 interval.text = f"PT{mins}M"
-            # No end date — indefinite via StopAtDurationEnd false
             stop = ET.SubElement(rep, "StopAtDurationEnd")
             stop.text = "false"
             return
@@ -1003,7 +727,6 @@ class WindowsBackend(SystemSchedulerBackend):
         minute, hour = parse_fixed_daily_cron(trigger_spec.cron_expression)
 
         trigger = ET.SubElement(parent, "CalendarTrigger")
-        # StartBoundary sets first activation time-of-day context
         now = datetime.now().astimezone()
         start = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if start <= now:
@@ -1017,7 +740,6 @@ class WindowsBackend(SystemSchedulerBackend):
         schedule_by_day = ET.SubElement(trigger, "ScheduleByDay")
         days_interval = ET.SubElement(schedule_by_day, "DaysInterval")
         days_interval.text = "1"
-        # Exact daily at M:H — NO one-minute repetition
 
 
 # ---------------------------------------------------------------------------
@@ -1026,7 +748,7 @@ class WindowsBackend(SystemSchedulerBackend):
 
 
 class MacOSBackend(SystemSchedulerBackend):
-    """macOS 14+ launchd 后端，使用 launchctl bootstrap / bootout。"""
+    """macOS 14+ launchd 后端（用户 LaunchAgents；无 admin/osascript）。"""
 
     platform_name = "macos"
 
@@ -1035,6 +757,7 @@ class MacOSBackend(SystemSchedulerBackend):
 
     @staticmethod
     def _plist_label(task_id: str, scope: SystemTaskScope) -> str:
+        # SYSTEM label retained so historical LaunchDaemons can still be cleaned.
         if scope == SystemTaskScope.SYSTEM:
             return f"com.mwu.daemon.{task_id}"
         return f"com.mwu.task.{task_id}"
@@ -1053,55 +776,44 @@ class MacOSBackend(SystemSchedulerBackend):
 
     async def register(self, spec: SystemTaskSpec) -> None:
         validate_task_id(spec.task_id)
+        _require_user_scope(spec)
         validate_trigger_for_platform(self.platform_name, spec.trigger)
         label = self._plist_label(spec.task_id, spec.scope)
         plist_path = self._plist_path(spec.task_id, spec.scope)
         plist_data = self._build_plist(spec)
 
-        if spec.scope == SystemTaskScope.USER:
-            plist_path.parent.mkdir(parents=True, exist_ok=True)
-            await asyncio.to_thread(self._write_plist, plist_path, plist_data)
-            await self._bootstrap_idempotent(label, str(plist_path), spec.scope)
-        else:
-            plist_xml = await asyncio.to_thread(plistlib.dumps, plist_data)
-            plist_xml_str = plist_xml.decode("utf-8")
-            await self._run_osascript_admin(
-                self._admin_register_script(str(plist_path), label, plist_xml_str)
-            )
-        logger.info(
-            "macOS launchd 任务注册成功: %s (scope=%s)", label, spec.scope.value
-        )
+        plist_path.parent.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(self._write_plist, plist_path, plist_data)
+        await self._bootstrap_idempotent(label, str(plist_path), spec.scope)
+        logger.info("macOS launchd 任务注册成功: %s (scope=user)", label)
 
     async def unregister(self, task_id: str, scope: SystemTaskScope) -> None:
+        """Best-effort bootout + plist removal (no elevation for SYSTEM)."""
         validate_task_id(task_id)
         label = self._plist_label(task_id, scope)
         plist_path = self._plist_path(task_id, scope)
-
-        if scope == SystemTaskScope.USER:
-            domain = f"gui/{_get_uid()}"
-            proc = await asyncio.to_thread(
-                subprocess.run,
-                ["launchctl", "bootout", f"{domain}/{label}"],
-                capture_output=True,
-            )
-            if proc.returncode != 0:
-                stderr = cast(bytes, proc.stderr or b"").decode(
-                    "utf-8", errors="replace"
-                )
-                if "Could not find" not in stderr and "No such process" not in stderr:
-                    logger.debug("launchctl bootout: %s", stderr.strip())
-            if await asyncio.to_thread(os.path.exists, str(plist_path)):
+        domain = self._domain(scope)
+        proc = await asyncio.to_thread(
+            subprocess.run,
+            ["launchctl", "bootout", f"{domain}/{label}"],
+            capture_output=True,
+        )
+        if proc.returncode != 0:
+            stderr = cast(bytes, proc.stderr or b"").decode("utf-8", errors="replace")
+            if "Could not find" not in stderr and "No such process" not in stderr:
+                logger.debug("launchctl bootout: %s", stderr.strip())
+        if await asyncio.to_thread(os.path.exists, str(plist_path)):
+            try:
                 await asyncio.to_thread(os.unlink, str(plist_path))
-        else:
-            await self._run_osascript_admin(
-                self._admin_unregister_script(str(plist_path), label)
-            )
+            except PermissionError:
+                logger.warning(
+                    "无法删除历史 SYSTEM plist（无提权）: %s", plist_path
+                )
 
     async def is_registered(self, task_id: str, scope: SystemTaskScope) -> bool:
         validate_task_id(task_id)
         label = self._plist_label(task_id, scope)
         domain = self._domain(scope)
-        # Exact domain/label via launchctl print
         proc = await asyncio.to_thread(
             subprocess.run,
             ["launchctl", "print", f"{domain}/{label}"],
@@ -1118,7 +830,6 @@ class MacOSBackend(SystemSchedulerBackend):
             return False, "plist missing"
         try:
             mode = await asyncio.to_thread(os.stat, str(plist_path))
-            # expect 0600 or 0400
             perms = mode.st_mode & 0o777
             if perms not in (0o600, 0o400):
                 return False, f"plist permissions {oct(perms)} not 0600/0400"
@@ -1143,48 +854,10 @@ class MacOSBackend(SystemSchedulerBackend):
             return False, f"launchctl print {domain}/{label} failed"
         return True, f"verified {domain}/{label}"
 
-    async def get_next_run_time(
-        self, task_id: str, scope: SystemTaskScope
-    ) -> Optional[datetime]:
-        return None
-
-    async def list_registered(self) -> list[str]:
-        result: list[str] = []
-        pattern = re.compile(r"com\.mwu\.(?:task|daemon)\.([a-f0-9-]{36})\.plist$")
-
-        agents_dir = Path("~/Library/LaunchAgents").expanduser()
-        if await asyncio.to_thread(agents_dir.exists):
-            agent_entries: list[Path] = cast(
-                list[Path], await asyncio.to_thread(list, agents_dir.iterdir())
-            )
-            for entry in agent_entries:
-                m = pattern.match(entry.name)
-                if m:
-                    tid = m.group(1)
-                    if tid not in result:
-                        result.append(tid)
-
-        daemons_dir = Path("/Library/LaunchDaemons")
-        try:
-            if await asyncio.to_thread(daemons_dir.exists):
-                daemon_entries: list[Path] = cast(
-                    list[Path], await asyncio.to_thread(list, daemons_dir.iterdir())
-                )
-                for entry in daemon_entries:
-                    m = pattern.match(entry.name)
-                    if m:
-                        tid = m.group(1)
-                        if tid not in result:
-                            result.append(tid)
-        except PermissionError:
-            logger.debug("无法读取 /Library/LaunchDaemons（权限不足）")
-        return result
-
     @staticmethod
     def _write_plist(path: Path, data: dict) -> None:
         with open(path, "wb") as f:
             plistlib.dump(data, f)
-        # Explicit chmod 0600
         os.chmod(path, 0o600)
 
     async def _bootstrap_idempotent(
@@ -1193,7 +866,6 @@ class MacOSBackend(SystemSchedulerBackend):
         domain = self._domain(scope)
         target = f"{domain}/{label}"
 
-        # Modern idempotent lifecycle: bootout then bootstrap
         await asyncio.to_thread(
             subprocess.run,
             ["launchctl", "bootout", target],
@@ -1227,7 +899,6 @@ class MacOSBackend(SystemSchedulerBackend):
             if not trigger_spec.cron_expression:
                 raise ValueError("cron 类型的触发器缺少 cron_expression")
             minute, hour = parse_fixed_daily_cron(trigger_spec.cron_expression)
-            # No Year key
             plist["StartCalendarInterval"] = {
                 "Minute": minute,
                 "Hour": hour,
@@ -1241,57 +912,6 @@ class MacOSBackend(SystemSchedulerBackend):
             plist["StartInterval"] = mins * 60
         return plist
 
-    async def _run_osascript_admin(self, script: str) -> None:
-        # argv form: raw shell never embedded inside a double-quoted AppleScript literal
-        apple_script = (
-            "on run argv\n"
-            "  do shell script (item 1 of argv) with administrator privileges\n"
-            "end run"
-        )
-        proc = await asyncio.to_thread(
-            subprocess.run,
-            ["osascript", "-e", apple_script, script],
-            capture_output=True,
-            text=True,
-        )
-        if proc.returncode != 0:
-            stderr = cast(str, proc.stderr or "").strip()
-            if "User cancelled" in stderr or "(-128)" in stderr:
-                raise PermissionError("系统级注册需要管理员权限，用户取消了授权")
-            raise RuntimeError(f"osascript 执行失败: {stderr}")
-
-    def _admin_register_script(
-        self, plist_path: str, label: str, plist_xml: str
-    ) -> str:
-        # Base64 payload avoids AppleScript/shell quoting breakage
-        import base64
-
-        b64 = base64.b64encode(plist_xml.encode("utf-8")).decode("ascii")
-        path_b64 = base64.b64encode(plist_path.encode("utf-8")).decode("ascii")
-        script = (
-            f"PLIST_PATH=$(printf %s {path_b64} | base64 -D 2>/dev/null || "
-            f"printf %s {path_b64} | base64 -d); "
-            f"mkdir -p /Library/LaunchDaemons && "
-            f"printf %s {b64} | (base64 -D 2>/dev/null || base64 -d) "
-            f'> "$PLIST_PATH" && '
-            f'chmod 600 "$PLIST_PATH" && '
-            f"launchctl bootout system/{label} 2>/dev/null; "
-            f'launchctl bootstrap system "$PLIST_PATH"'
-        )
-        return script
-
-    def _admin_unregister_script(self, plist_path: str, label: str) -> str:
-        import base64
-
-        path_b64 = base64.b64encode(plist_path.encode("utf-8")).decode("ascii")
-        script = (
-            f"PLIST_PATH=$(printf %s {path_b64} | base64 -D 2>/dev/null || "
-            f"printf %s {path_b64} | base64 -d); "
-            f"launchctl bootout system/{label} 2>/dev/null; "
-            f'rm -f "$PLIST_PATH"'
-        )
-        return script
-
 
 # ---------------------------------------------------------------------------
 # Linux 后端
@@ -1299,7 +919,7 @@ class MacOSBackend(SystemSchedulerBackend):
 
 
 class LinuxBackend(SystemSchedulerBackend):
-    """Linux crontab 后端。"""
+    """Linux 用户 crontab 后端（无 /etc/cron.d、无 pkexec）。"""
 
     platform_name = "linux"
     _MWU_MARKER_RE = re.compile(r"^#\s*MWU:([a-f0-9-]{36})\s*$")
@@ -1312,34 +932,26 @@ class LinuxBackend(SystemSchedulerBackend):
 
     async def register(self, spec: SystemTaskSpec) -> None:
         validate_task_id(spec.task_id)
+        _require_user_scope(spec)
         validate_trigger_for_platform(self.platform_name, spec.trigger)
-
-        if spec.scope == SystemTaskScope.USER:
-            await self._register_user_cron(spec)
-        else:
-            await self._register_system_cron(spec)
-        logger.info("Linux 任务注册成功: %s (scope=%s)", spec.task_id, spec.scope.value)
+        await self._register_user_cron(spec)
+        logger.info("Linux 任务注册成功: %s (scope=user)", spec.task_id)
 
     async def unregister(self, task_id: str, scope: SystemTaskScope) -> None:
         validate_task_id(task_id)
         if scope == SystemTaskScope.USER:
             await self._remove_from_user_crontab(task_id)
-        else:
-            file_path = f"/etc/cron.d/mwu-{task_id}"
-            proc = await asyncio.to_thread(
-                subprocess.run,
-                ["pkexec", "rm", "-f", file_path],
-                capture_output=True,
+            return
+        # Historical SYSTEM: best-effort unlink without pkexec.
+        file_path = f"/etc/cron.d/mwu-{task_id}"
+        try:
+            await asyncio.to_thread(os.unlink, file_path)
+        except FileNotFoundError:
+            pass
+        except PermissionError:
+            logger.warning(
+                "无法删除历史 SYSTEM cron.d（无提权）: %s", file_path
             )
-            if proc.returncode != 0:
-                stderr = cast(bytes, proc.stderr or b"").decode(
-                    "utf-8", errors="replace"
-                )
-                if (
-                    "not authorized" not in stderr.lower()
-                    and "user cancelled" not in stderr.lower()
-                ):
-                    logger.debug("pkexec rm 失败: %s", stderr.strip())
 
     async def is_registered(self, task_id: str, scope: SystemTaskScope) -> bool:
         validate_task_id(task_id)
@@ -1353,70 +965,16 @@ class LinuxBackend(SystemSchedulerBackend):
     async def verify_registration(self, spec: SystemTaskSpec) -> tuple[bool, str]:
         expected_line = self._build_cron_line(spec)
         marker = f"# MWU:{spec.task_id}"
-        if spec.scope == SystemTaskScope.USER:
-            text = await self._read_crontab()
-            lines = text.splitlines()
-            for i, line in enumerate(lines):
-                if line.strip() == marker:
-                    if i + 1 < len(lines) and lines[i + 1].strip() == expected_line:
-                        return True, "user crontab marker+line match"
-                    return False, "user crontab line mismatch"
-            return False, "user crontab marker missing"
-        file_path = f"/etc/cron.d/mwu-{spec.task_id}"
-        if not await asyncio.to_thread(os.path.exists, file_path):
-            return False, "cron.d file missing"
-        try:
-            st = await asyncio.to_thread(os.stat, file_path)
-            if getattr(st, "st_uid", 0) != 0:
-                return False, f"cron.d file not root-owned (uid={st.st_uid})"
-            mode = st.st_mode & 0o777
-            if mode & 0o022:
-                return False, f"cron.d file is group/other writable (mode={oct(mode)})"
-            content = await asyncio.to_thread(
-                Path(file_path).read_text, encoding="utf-8"
-            )
-            if expected_line not in content and not any(
-                expected_line.split(" root ", 1)[-1] in content for _ in [0]
-            ):
-                # system line includes user field
-                sys_line = self._build_system_cron_line(spec)
-                if sys_line not in content:
-                    return False, "cron.d content mismatch"
-            return True, "cron.d verified"
-        except Exception as e:
-            return False, f"cron.d verify error: {e}"
-
-    async def get_next_run_time(
-        self, task_id: str, scope: SystemTaskScope
-    ) -> Optional[datetime]:
-        return None
-
-    async def list_registered(self) -> list[str]:
-        result: list[str] = []
-        crontab_text = await self._read_crontab()
-        for line in crontab_text.splitlines():
-            m = self._MWU_MARKER_RE.match(line.strip())
-            if m:
-                tid = m.group(1)
-                if tid not in result:
-                    result.append(tid)
-
-        cron_d_dir = "/etc/cron.d"
-        pattern = re.compile(r"^mwu-([a-f0-9-]{36})$")
-        try:
-            if await asyncio.to_thread(os.path.exists, cron_d_dir):
-                cron_entries: list[str] = cast(
-                    list[str], await asyncio.to_thread(os.listdir, cron_d_dir)
-                )
-                for entry in cron_entries:
-                    m = pattern.match(entry)
-                    if m:
-                        tid = m.group(1)
-                        if tid not in result:
-                            result.append(tid)
-        except PermissionError:
-            logger.debug("无法读取 /etc/cron.d（权限不足）")
-        return result
+        if spec.scope != SystemTaskScope.USER:
+            return False, "only USER scope verification is supported"
+        text = await self._read_crontab()
+        lines = text.splitlines()
+        for i, line in enumerate(lines):
+            if line.strip() == marker:
+                if i + 1 < len(lines) and lines[i + 1].strip() == expected_line:
+                    return True, "user crontab marker+line match"
+                return False, "user crontab line mismatch"
+        return False, "user crontab marker missing"
 
     def _crontab_lock_path(self) -> Path:
         return Path.home() / ".mwu" / self._CRONTAB_LOCK_NAME
@@ -1533,61 +1091,6 @@ class LinuxBackend(SystemSchedulerBackend):
             raise ValueError("Linux 仅支持 cron 触发器")
         cron_timing = validate_linux_cron_expression(trigger_spec.cron_expression)
         return f"{cron_timing} {self._build_command_body(spec)}"
-
-    def _build_system_cron_line(self, spec: SystemTaskSpec) -> str:
-        trigger_spec = spec.trigger
-        if trigger_spec.trigger_type != "cron" or not trigger_spec.cron_expression:
-            raise ValueError("Linux 仅支持 cron 触发器")
-        cron_timing = validate_linux_cron_expression(trigger_spec.cron_expression)
-        return f"{cron_timing} root {self._build_command_body(spec)}"
-
-    async def _register_system_cron(self, spec: SystemTaskSpec) -> None:
-        task_path = f"/etc/cron.d/mwu-{spec.task_id}"
-        content = f"# MWU:{spec.task_name}\n{self._build_system_cron_line(spec)}\n"
-        await self._write_via_pkexec(task_path, content)
-
-    async def _write_via_pkexec(self, file_path: str, content: str) -> None:
-        """Atomic root-owned 0644 write via temp + mv (argv only, no shell)."""
-        import tempfile as _tf
-
-        with _tf.NamedTemporaryFile("w", encoding="utf-8", delete=False) as tf:
-            tf.write(content)
-            local_tmp = tf.name
-        remote_tmp = f"{file_path}.mwu.tmp"
-        try:
-            with open(local_tmp, "r", encoding="utf-8") as src:
-                proc = await asyncio.to_thread(
-                    subprocess.run,
-                    ["pkexec", "tee", remote_tmp],
-                    stdin=src,
-                    capture_output=True,
-                    text=True,
-                )
-            if proc.returncode != 0:
-                stderr = cast(str, proc.stderr or "").strip()
-                if (
-                    "not authorized" in stderr.lower()
-                    or "dismissed" in stderr.lower()
-                    or "cancelled" in stderr.lower()
-                ):
-                    raise PermissionError("系统级注册需要管理员权限，用户取消了授权")
-                raise RuntimeError(f"pkexec 写入失败: {stderr}")
-            for args in (
-                ["pkexec", "chown", "root:root", remote_tmp],
-                ["pkexec", "chmod", "644", remote_tmp],
-                ["pkexec", "mv", "-f", remote_tmp, file_path],
-            ):
-                p = await asyncio.to_thread(
-                    subprocess.run, args, capture_output=True, text=True
-                )
-                if p.returncode != 0:
-                    stderr = cast(str, p.stderr or "").strip()
-                    raise RuntimeError(f"pkexec {' '.join(args[1:])} failed: {stderr}")
-        finally:
-            try:
-                os.unlink(local_tmp)
-            except OSError:
-                pass
 
 
 # ---------------------------------------------------------------------------

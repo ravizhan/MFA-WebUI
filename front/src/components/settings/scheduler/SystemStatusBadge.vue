@@ -1,10 +1,6 @@
 <template>
   <span v-if="badgeType === 'active'" class="badge badge-soft badge-success">
-    {{
-      scope === "system"
-        ? t("settings.scheduler.status.systemSystem")
-        : t("settings.scheduler.status.systemUser")
-    }}
+    {{ t("settings.scheduler.status.systemUser") }}
   </span>
   <span v-else-if="badgeType === 'orphaned'" class="badge badge-dash badge-warning gap-1">
     {{ t("settings.scheduler.dialog.orphaned") }}
@@ -39,6 +35,4 @@ const badgeType = computed(() => {
   if (status.state === "error" || status.state === "pending_cleanup") return "error"
   return null
 })
-
-const scope = computed(() => status?.scope)
 </script>
