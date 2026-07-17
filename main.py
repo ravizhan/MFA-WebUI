@@ -297,25 +297,8 @@ async def lifespan(app: FastAPI):
     app_state.scheduler_manager.set_worker(app_state.worker)
     await app_state.scheduler_manager.initialize()
 
-    # 初始化系统级调度服务并自愈
+    # 初始化系统级调度服务并自愈（native-only repair）
     app_state.system_scheduler = SystemTaskService(APP_ROOT_DIR)
-
-    def _job_exists(task_id: str) -> bool:
-        sm = app_state.scheduler_manager
-        if sm is None or sm.scheduler is None:
-            return False
-        return sm.scheduler.get_job(task_id) is not None
-
-    def _job_enabled(task_id: str):
-        sm = app_state.scheduler_manager
-        if sm is None or sm.scheduler is None:
-            return None
-        job = sm.scheduler.get_job(task_id)
-        if job is None:
-            return None
-        return job.next_run_time is not None
-
-    app_state.system_scheduler.set_job_probes(_job_exists, _job_enabled)
     try:
         repair_result = await app_state.system_scheduler.repair_all()
         if repair_result["repaired"] or repair_result["failed"]:
@@ -971,7 +954,12 @@ async def create_scheduler_task(task_create: ScheduledTaskCreate):
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
     try:
-        task = await app_state.scheduler_manager.create_task(task_create)
+        if app_state.system_scheduler is not None:
+            task = await app_state.system_scheduler.create_task_synced(
+                app_state.scheduler_manager, task_create
+            )
+        else:
+            task = await app_state.scheduler_manager.create_task(task_create)
         return {"status": "success", "task": task.model_dump()}
     except Exception as e:
         msg = str(e)
@@ -987,7 +975,12 @@ async def update_scheduler_task(task_id: str, task_update: ScheduledTaskUpdate):
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
     try:
-        task = await app_state.scheduler_manager.update_task(task_id, task_update)
+        if app_state.system_scheduler is not None:
+            task = await app_state.system_scheduler.update_task_synced(
+                app_state.scheduler_manager, task_id, task_update
+            )
+        else:
+            task = await app_state.scheduler_manager.update_task(task_id, task_update)
         if task is None:
             msg = "任务不存在"
             app_state.send_log(msg)
@@ -1007,37 +1000,18 @@ async def delete_scheduler_task(task_id: str):
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
     try:
-        # Persist orphan intent BEFORE APS deletion (fail closed on corrupt)
-        orphaned_marked = False
         if app_state.system_scheduler is not None:
-            try:
-                orphaned_marked = (
-                    await app_state.system_scheduler.begin_orphan_before_delete(task_id)
-                )
-            except RuntimeError as e:
-                msg = str(e)
-                app_state.send_log(f"删除调度任务失败: {msg}")
-                return {"status": "failed", "message": msg}
-
-        success = await app_state.scheduler_manager.delete_task(task_id)
+            success = await app_state.system_scheduler.delete_task_synced(
+                app_state.scheduler_manager, task_id
+            )
+        else:
+            success = await app_state.scheduler_manager.delete_task(task_id)
         if success:
             return {"status": "success"}
-
-        # APS deletion failed: restore active if we had marked orphan
-        if orphaned_marked and app_state.system_scheduler is not None:
-            await app_state.system_scheduler.restore_active_after_failed_delete(task_id)
         msg = "任务不存在"
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
     except Exception as e:
-        # Best-effort restore if orphan intent was already persisted
-        if app_state.system_scheduler is not None:
-            try:
-                await app_state.system_scheduler.restore_active_after_failed_delete(
-                    task_id
-                )
-            except Exception:
-                pass
         msg = str(e)
         app_state.send_log(f"删除调度任务失败: {msg}")
         return {"status": "failed", "message": msg}

@@ -543,22 +543,6 @@ class SystemSchedulerBackend(ABC):
     def build_identifier(self, task_id: str, scope: SystemTaskScope) -> str:
         raise NotImplementedError
 
-    async def export_native_definition(
-        self, task_id: str, scope: SystemTaskScope
-    ) -> Optional[bytes]:
-        """Export native registration blob for rollback."""
-        return None
-
-    async def restore_native_definition(
-        self, task_id: str, scope: SystemTaskScope, blob: bytes
-    ) -> None:
-        """Restore a previously exported native definition."""
-        raise NotImplementedError("restore not supported on this backend")
-
-    def same_native_identifier_across_scopes(self) -> bool:
-        """True when user/system share one OS identifier (Windows)."""
-        return False
-
 
 # ---------------------------------------------------------------------------
 # Windows 后端
@@ -572,46 +556,6 @@ class WindowsBackend(SystemSchedulerBackend):
 
     def build_identifier(self, task_id: str, scope: SystemTaskScope) -> str:
         return f"\\MWU\\{task_id}"
-
-    def same_native_identifier_across_scopes(self) -> bool:
-        return True
-
-    async def export_native_definition(
-        self, task_id: str, scope: SystemTaskScope
-    ) -> Optional[bytes]:
-        task_path = self.build_identifier(task_id, scope)
-        proc = await asyncio.to_thread(
-            subprocess.run,
-            ["schtasks", "/query", "/tn", task_path, "/xml"],
-            capture_output=True,
-        )
-        if proc.returncode != 0:
-            return None
-        return cast(bytes, proc.stdout or b"")
-
-    async def restore_native_definition(
-        self, task_id: str, scope: SystemTaskScope, blob: bytes
-    ) -> None:
-        validate_task_id(task_id)
-        task_path = self.build_identifier(task_id, scope)
-        temp_path = None
-        try:
-            with tempfile.NamedTemporaryFile(suffix=".xml", delete=False) as f:
-                f.write(blob if isinstance(blob, (bytes, bytearray)) else bytes(blob))
-                temp_path = f.name
-            if scope == SystemTaskScope.USER:
-                await asyncio.to_thread(
-                    self._run_schtasks,
-                    ["schtasks", "/create", "/xml", temp_path, "/tn", task_path, "/f"],
-                    check=True,
-                )
-            else:
-                await self._run_as_admin(
-                    f'/create /xml "{temp_path}" /tn "{task_path}" /f'
-                )
-        finally:
-            if temp_path and os.path.exists(temp_path):
-                os.unlink(temp_path)
 
     async def register(self, spec: SystemTaskSpec) -> None:
         validate_task_id(spec.task_id)

@@ -1285,35 +1285,12 @@ function validateForm(): boolean {
   return validateTaskList()
 }
 
-async function syncSystemRegistration(taskId: string, wasRegistered: boolean) {
-  if (systemSchedulingEnabled.value) {
-    const result = await schedulerStore.registerSystem(taskId, systemScope.value)
-    if (!result) {
-      return {
-        success: false,
-        message: schedulerStore.error || t("settings.scheduler.dialog.systemRegisterFail"),
-      }
-    }
-    return { success: true, message: "" }
-  }
-  if (wasRegistered) {
-    const result = await schedulerStore.unregisterSystem(taskId)
-    if (!result) {
-      return {
-        success: false,
-        message: schedulerStore.error || t("settings.scheduler.dialog.systemUnregisterFail"),
-      }
-    }
-    return { success: true, message: "" }
-  }
-  return { success: true, message: "" }
-}
-
 async function saveTaskPayload(): Promise<{ taskId: string; success: boolean }> {
   const taskPayload = {
     ...formData.value,
     ...configStore.buildExecutionPayload(formData.value.task_list, formData.value.task_options),
     preTasks: formData.value.preTasks ?? [],
+    system_scope: systemSchedulingEnabled.value ? systemScope.value : null,
   }
 
   if (isEditMode.value && task) {
@@ -1337,31 +1314,11 @@ async function handleSave() {
   }
 
   loading.value = true
-  const { taskId, success } = await saveTaskPayload()
-
-  if (!success) {
-    loading.value = false
-    showGlobalMessage("error", schedulerStore.error || t("settings.scheduler.dialog.saveFail"))
-    return
-  }
-
-  const previousStatus = schedulerStore.getSystemStatus(taskId)
-  const wasRegistered =
-    !!previousStatus &&
-    (previousStatus.state === "active" || previousStatus.state === "pending_register")
-
-  const systemResult = await syncSystemRegistration(taskId, wasRegistered)
+  const { success } = await saveTaskPayload()
   loading.value = false
 
-  if (!systemResult.success) {
-    showGlobalMessage(
-      "error",
-      t("settings.scheduler.dialog.partialFailure", { message: systemResult.message }),
-    )
-    closingFromUi.value = true
-    showDialog.value = false
-    emit("saved")
-    resetForm()
+  if (!success) {
+    showGlobalMessage("error", schedulerStore.error || t("settings.scheduler.dialog.saveFail"))
     return
   }
 

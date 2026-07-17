@@ -67,6 +67,7 @@ export interface ScheduledTaskCreate extends TaskExecutionPayload {
   controller_name?: string | null
   device?: ScheduledTaskDeviceConfig | null
   resource_name?: string | null
+  system_scope?: SystemTaskScope | null
 }
 
 export interface ScheduledTaskUpdate {
@@ -81,6 +82,7 @@ export interface ScheduledTaskUpdate {
   task_list?: string[]
   task_options?: TaskOptionsByTask
   preTasks?: PreTaskCommand[]
+  system_scope?: SystemTaskScope | null
 }
 
 export interface TaskExecution {

@@ -113,6 +113,7 @@ class ScheduledTaskCreate(TaskExecutionPayload):
     controller_name: Optional[str] = Field(None, description="控制器名称")
     device: Optional[ScheduledTaskDeviceConfig] = Field(None, description="设备配置")
     resource_name: Optional[str] = Field(None, description="资源包名称")
+    system_scope: Optional[Literal["user", "system"]] = None
 
 
 class ScheduledTaskUpdate(BaseModel):
@@ -129,6 +130,8 @@ class ScheduledTaskUpdate(BaseModel):
     task_list: Optional[List[str]] = None
     task_options: Optional[TaskOptionsByTask] = None
     preTasks: Optional[List[PreTaskCommand]] = None
+    # omitted=sync existing; null=unregister; value=register/sync
+    system_scope: Optional[Literal["user", "system"]] = None
 
 
 class TaskExecution(BaseModel):
