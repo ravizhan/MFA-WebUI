@@ -830,6 +830,11 @@ watch(
     systemSchedulingEnabled.value = false
     systemScope.value = "user"
     if (task) {
+      if (task.system_scope === "user" || task.system_scope === "system") {
+        systemSchedulingEnabled.value = true
+        systemScope.value = task.system_scope
+        return
+      }
       const status = schedulerStore.getSystemStatus(task.id)
       if (status && (status.state === "active" || status.state === "pending_register")) {
         systemSchedulingEnabled.value = true

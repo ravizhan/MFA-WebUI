@@ -9,8 +9,6 @@ vi.mock("@/services/api", () => ({
   pauseSchedulerTask: vi.fn<() => void>(),
   resumeSchedulerTask: vi.fn<() => void>(),
   getSchedulerExecutions: vi.fn<() => void>(),
-  registerSystemTask: vi.fn<() => void>(),
-  unregisterSystemTask: vi.fn<() => void>(),
   getSystemTaskStatus: vi.fn<() => void>(),
   getSystemTasks: vi.fn<() => void>(),
   repairSystemTasks: vi.fn<() => void>(),
@@ -19,7 +17,7 @@ vi.mock("@/services/api", () => ({
 
 import { useSchedulerStore } from "@/stores/scheduler/scheduler"
 import * as api from "@/services/api"
-import type { ScheduledTask, TaskExecution, SystemTaskRegistration } from "@/types/schedulerModel"
+import type { ScheduledTask, TaskExecution, SystemTaskRegistration, SystemTaskStatus } from "@/types/schedulerModel"
 
 const mockTask = (id: string, enabled: boolean): ScheduledTask => ({
   id,
@@ -162,6 +160,89 @@ describe("useSchedulerStore", () => {
       expect(store.tasks[0].name).toBe("updated")
     })
 
+    it("syncs native_status into systemTaskStatuses on success", async () => {
+      const original = mockTask("1", true)
+      const updated = { ...original, name: "updated" }
+      const nativeStatus: SystemTaskStatus = {
+        task_id: "1",
+        registered: true,
+        path_valid: true,
+        state: "active",
+        scope: "user",
+      }
+      const store = useSchedulerStore()
+      store.tasks = [original]
+      vi.mocked(api.updateSchedulerTask).mockResolvedValue({
+        status: "success",
+        task: updated,
+        native_status: nativeStatus,
+      })
+      const result = await store.updateTask("1", { name: "updated" })
+      expect(result).toBe(true)
+      expect(store.systemTaskStatuses["1"]).toEqual(nativeStatus)
+    })
+
+    it("normalizes last_known_scope in native_status", async () => {
+      const original = mockTask("1", true)
+      const updated = { ...original, name: "updated" }
+      const nativeStatus: SystemTaskStatus = {
+        task_id: "1",
+        registered: true,
+        path_valid: true,
+        state: "active",
+        last_known_scope: "system",
+      }
+      const store = useSchedulerStore()
+      store.tasks = [original]
+      vi.mocked(api.updateSchedulerTask).mockResolvedValue({
+        status: "success",
+        task: updated,
+        native_status: nativeStatus,
+      })
+      const result = await store.updateTask("1", { name: "updated" })
+      expect(result).toBe(true)
+      expect(store.systemTaskStatuses["1"].scope).toBe("system")
+    })
+
+    it("stores synthetic error status on native_error without failing", async () => {
+      const original = mockTask("1", true)
+      const updated = { ...original, name: "updated" }
+      const store = useSchedulerStore()
+      store.tasks = [original]
+      vi.mocked(api.updateSchedulerTask).mockResolvedValue({
+        status: "success",
+        task: updated,
+        native_error: "native failure",
+      })
+      const result = await store.updateTask("1", { name: "updated" })
+      expect(result).toBe(true)
+      expect(store.tasks[0].name).toBe("updated")
+      expect(store.systemTaskStatuses["1"]).toEqual({
+        task_id: "1",
+        registered: false,
+        path_valid: false,
+        state: "error",
+        last_error: "native failure",
+      })
+    })
+
+    it("preserves existing systemTaskStatuses when native fields absent", async () => {
+      const original = mockTask("1", true)
+      const updated = { ...original, name: "updated" }
+      const store = useSchedulerStore()
+      store.tasks = [original]
+      store.systemTaskStatuses = {
+        "1": { task_id: "1", registered: true, path_valid: true, state: "active" },
+      }
+      vi.mocked(api.updateSchedulerTask).mockResolvedValue({
+        status: "success",
+        task: updated,
+      })
+      const result = await store.updateTask("1", { name: "updated" })
+      expect(result).toBe(true)
+      expect(store.systemTaskStatuses["1"].state).toBe("active")
+    })
+
     it("returns false on failure", async () => {
       vi.mocked(api.updateSchedulerTask).mockResolvedValue({
         status: "failed",
@@ -265,6 +346,9 @@ describe("useSchedulerStore", () => {
               platform: "windows",
               scope: "user",
               desired_scope: "user",
+              registered: true,
+              path_valid: true,
+              verified: true,
               observed: [
                 {
                   scope: "user",
@@ -280,13 +364,24 @@ describe("useSchedulerStore", () => {
               task_id: "t2",
               state: "orphaned",
               orphaned: true,
+              registered: false,
+              path_valid: false,
               last_error: "APScheduler task removed",
+            }),
+            // state=active but authoritative registered=false (APS missing)
+            mockRegistration({
+              task_id: "t3",
+              state: "active",
+              orphaned: false,
+              registered: false,
+              path_valid: false,
+              reason: "APS job missing",
             }),
           ],
         })
         const store = useSchedulerStore()
         await store.fetchAllSystemStatuses()
-        expect(Object.keys(store.systemTaskStatuses)).toHaveLength(2)
+        expect(Object.keys(store.systemTaskStatuses)).toHaveLength(3)
 
         const active = store.systemTaskStatuses["t1"]
         expect(active.registered).toBe(true)
@@ -301,6 +396,11 @@ describe("useSchedulerStore", () => {
         expect(orphaned.orphaned).toBe(true)
         expect(orphaned.state).toBe("orphaned")
         expect(orphaned.path_valid).toBe(false)
+
+        const missing = store.systemTaskStatuses["t3"]
+        expect(missing.registered).toBe(false)
+        expect(missing.path_valid).toBe(false)
+        expect(missing.reason).toBe("APS job missing")
       })
 
       it("does not synthesize success for error state", async () => {
@@ -335,6 +435,56 @@ describe("useSchedulerStore", () => {
         expect(store.systemTaskStatuses).toEqual({
           t1: { task_id: "t1", registered: true, path_valid: true },
         })
+      })
+
+      it("resolves scope from last_known_scope over desired_scope and scope", async () => {
+        vi.mocked(api.getSystemTasks).mockResolvedValue({
+          status: "success",
+          registrations: [
+            mockRegistration({
+              task_id: "t1",
+              scope: "system",
+              desired_scope: "user",
+              last_known_scope: "user",
+            }),
+          ],
+        })
+        const store = useSchedulerStore()
+        await store.fetchAllSystemStatuses()
+        expect(store.systemTaskStatuses["t1"].scope).toBe("user")
+      })
+
+      it("falls back to desired_scope when last_known_scope absent", async () => {
+        vi.mocked(api.getSystemTasks).mockResolvedValue({
+          status: "success",
+          registrations: [
+            mockRegistration({
+              task_id: "t1",
+              scope: "system",
+              desired_scope: "user",
+              last_known_scope: undefined,
+            }),
+          ],
+        })
+        const store = useSchedulerStore()
+        await store.fetchAllSystemStatuses()
+        expect(store.systemTaskStatuses["t1"].scope).toBe("user")
+      })
+
+      it("falls back to scope when last_known_scope and desired_scope absent", async () => {
+        vi.mocked(api.getSystemTasks).mockResolvedValue({
+          status: "success",
+          registrations: [
+            mockRegistration({
+              task_id: "t1",
+              scope: "system",
+              desired_scope: undefined,
+            }),
+          ],
+        })
+        const store = useSchedulerStore()
+        await store.fetchAllSystemStatuses()
+        expect(store.systemTaskStatuses["t1"].scope).toBe("system")
       })
     })
 
@@ -438,38 +588,6 @@ describe("useSchedulerStore", () => {
       it("returns undefined when capabilities not loaded", () => {
         const store = useSchedulerStore()
         expect(store.getCapabilityCell("windows", "user", "cron")).toBeUndefined()
-      })
-    })
-
-    describe("registerSystem / unregisterSystem", () => {
-      it("registerSystem stores extended status on success", async () => {
-        const statusData = {
-          task_id: "t1",
-          registered: true,
-          path_valid: true,
-          state: "active" as const,
-          pending_operation: "none",
-          orphaned: false,
-          enabled: true,
-          verified: true,
-        }
-        vi.mocked(api.registerSystemTask).mockResolvedValue({
-          status: "success",
-          data: statusData,
-        })
-        const store = useSchedulerStore()
-        const result = await store.registerSystem("t1", "user")
-        expect(result).toBe(true)
-        expect(store.systemTaskStatuses["t1"]).toEqual(statusData)
-      })
-
-      it("unregisterSystem removes status on success", async () => {
-        vi.mocked(api.unregisterSystemTask).mockResolvedValue({ status: "success" })
-        const store = useSchedulerStore()
-        store.systemTaskStatuses = { t1: { task_id: "t1", registered: true, path_valid: true } }
-        const result = await store.unregisterSystem("t1")
-        expect(result).toBe(true)
-        expect(store.systemTaskStatuses["t1"]).toBeUndefined()
       })
     })
 

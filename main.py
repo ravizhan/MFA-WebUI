@@ -32,7 +32,6 @@ from models.interface_loader import (
 from models.scheduler import (
     ScheduledTaskCreate,
     ScheduledTaskUpdate,
-    SystemRegisterRequest,
     TaskExecutionPayload,
 )
 from models.settings import SettingsModel
@@ -292,22 +291,61 @@ async def lifespan(app: FastAPI):
             config_data,
             context={"interface": interface},
         )
-    # 初始化调度器
+    # 初始化调度器（paused：先 import/repair，再 resume，避免启动期误派发）
     app_state.scheduler_manager = SchedulerManager()
     app_state.scheduler_manager.set_worker(app_state.worker)
-    await app_state.scheduler_manager.initialize()
+    await app_state.scheduler_manager.initialize(paused=True)
 
-    # 初始化系统级调度服务并自愈（native-only repair）
+    # 初始化系统级调度：将已有 scope 导入 APS，再 repair（均在 paused 下）
     app_state.system_scheduler = SystemTaskService(APP_ROOT_DIR)
     try:
-        repair_result = await app_state.system_scheduler.repair_all()
+        import_stats = await app_state.system_scheduler.import_scopes_into_aps(
+            app_state.scheduler_manager
+        )
+        # Always surface nonzero failed (e.g. corrupt JSON) before resume.
+        if (
+            import_stats.get("imported")
+            or import_stats.get("failed")
+            or import_stats.get("missing_job")
+        ):
+            detail_tail = ""
+            if import_stats.get("failed"):
+                details = import_stats.get("details") or []
+                detail_tail = f"; details={details}"
+            app_state.send_log(
+                "系统任务 scope 导入: "
+                f"imported={import_stats.get('imported', 0)} "
+                f"skipped={import_stats.get('skipped', 0)} "
+                f"missing={import_stats.get('missing_job', 0)} "
+                f"failed={import_stats.get('failed', 0)}"
+                f"{detail_tail}"
+            )
+    except Exception as e:
+        # Log and continue: do not lock out the app; still no pre-resume dispatch.
+        app_state.send_log(f"系统任务 scope 导入失败: {e}")
+
+    try:
+        repair_result = await app_state.system_scheduler.repair_all(
+            app_state.scheduler_manager
+        )
         if repair_result["repaired"] or repair_result["failed"]:
+            detail_tail = ""
+            if repair_result.get("failed"):
+                details = repair_result.get("details") or []
+                detail_tail = f"; details={details}"
             app_state.send_log(
                 f"系统任务修复完成: 修复 {repair_result['repaired']} 个, "
                 f"失败 {repair_result['failed']} 个"
+                f"{detail_tail}"
             )
     except Exception as e:
         app_state.send_log(f"系统任务修复失败: {e}")
+
+    # Resume APS dispatch only after import+repair attempts complete.
+    # Failures above are logged; resume still runs to avoid permanent paused lockout.
+    if app_state.scheduler_manager.scheduler is not None:
+        app_state.scheduler_manager.scheduler.resume()
+        app_state.send_log("调度器已恢复派发（paused import/repair 完成）")
 
     monitor_task = asyncio.create_task(log_monitor())
     webbrowser.open_new("http://127.0.0.1:5566")
@@ -969,18 +1007,38 @@ async def create_scheduler_task(task_create: ScheduledTaskCreate):
 
 @app.put("/api/scheduler/tasks/{task_id}")
 async def update_scheduler_task(task_id: str, task_update: ScheduledTaskUpdate):
-    """更新定时任务"""
+    """更新定时任务.
+
+    APS success + native failure returns status=success with additive
+    native_status / native_error fields (partial success).
+    """
     if app_state.scheduler_manager is None:
         msg = "调度器未初始化"
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
     try:
         if app_state.system_scheduler is not None:
-            task = await app_state.system_scheduler.update_task_synced(
+            result = await app_state.system_scheduler.update_task_synced(
                 app_state.scheduler_manager, task_id, task_update
             )
-        else:
-            task = await app_state.scheduler_manager.update_task(task_id, task_update)
+            if result.aps_outcome == "not_found" or result.task is None:
+                msg = result.aps_error or "任务不存在"
+                app_state.send_log(msg)
+                return {"status": "failed", "message": msg}
+            if result.aps_outcome == "error":
+                msg = result.aps_error or "APS 更新失败"
+                app_state.send_log(msg)
+                return {"status": "failed", "message": msg}
+            payload = {
+                "status": "success",
+                "task": result.task.model_dump(),
+            }
+            if result.native_status is not None:
+                payload["native_status"] = result.native_status.model_dump(mode="json")
+            if result.native_error:
+                payload["native_error"] = result.native_error
+            return payload
+        task = await app_state.scheduler_manager.update_task(task_id, task_update)
         if task is None:
             msg = "任务不存在"
             app_state.send_log(msg)
@@ -1093,65 +1151,16 @@ async def get_system_capabilities():
         return {"status": "failed", "message": str(e)}
 
 
-@app.post("/api/scheduler/tasks/{task_id}/system-register")
-async def register_system_task(task_id: str, request: SystemRegisterRequest):
-    """注册定时任务到 OS 级调度器（Windows Task Scheduler / macOS launchd / Linux cron）"""
-    if app_state.system_scheduler is None:
-        return {"status": "failed", "message": "系统调度服务未初始化"}
-    if app_state.scheduler_manager is None:
-        return {"status": "failed", "message": "调度器未初始化"}
-
-    try:
-        # 从 APScheduler 加载任务配置
-        task = await app_state.scheduler_manager.get_task(task_id)
-        if task is None:
-            return {"status": "failed", "message": "任务不存在"}
-
-        # 注册到 OS 调度器
-        status = await app_state.system_scheduler.register(
-            task_id=task_id,
-            task_name=task.name,
-            trigger_config=task.trigger_config,
-            scope=request.scope,
-        )
-        return {"status": "success", "data": status.model_dump(mode="json")}
-    except PermissionError as e:
-        msg = str(e)
-        app_state.send_log(f"系统级注册失败: {msg}")
-        return {"status": "failed", "message": msg}
-    except ValueError as e:
-        msg = str(e)
-        app_state.send_log(f"系统级注册失败: {msg}")
-        return {"status": "failed", "message": msg}
-    except Exception as e:
-        msg = str(e)
-        app_state.send_log(f"系统级注册失败: {msg}")
-        return {"status": "failed", "message": msg}
-
-
-@app.delete("/api/scheduler/tasks/{task_id}/system-register")
-async def unregister_system_task(task_id: str):
-    """从 OS 级调度器卸载定时任务"""
-    if app_state.system_scheduler is None:
-        return {"status": "failed", "message": "系统调度服务未初始化"}
-
-    try:
-        status = await app_state.system_scheduler.unregister(task_id)
-        return {"status": "success", "data": status.model_dump(mode="json")}
-    except Exception as e:
-        msg = str(e)
-        app_state.send_log(f"系统级卸载失败: {msg}")
-        return {"status": "failed", "message": msg}
-
-
 @app.get("/api/scheduler/tasks/{task_id}/system-status")
 async def get_system_task_status(task_id: str):
-    """查询任务的系统级注册状态"""
+    """查询任务的系统级注册状态（name/trigger/path from APS when available）"""
     if app_state.system_scheduler is None:
         return {"status": "failed", "message": "系统调度服务未初始化"}
 
     try:
-        status = await app_state.system_scheduler.get_status(task_id)
+        status = await app_state.system_scheduler.get_status(
+            task_id, manager=app_state.scheduler_manager
+        )
         return {"status": "success", "data": status.model_dump(mode="json")}
     except Exception as e:
         msg = str(e)
@@ -1161,12 +1170,14 @@ async def get_system_task_status(task_id: str):
 
 @app.get("/api/scheduler/system-tasks")
 async def list_system_tasks():
-    """列出所有系统级注册的任务"""
+    """列出所有系统级注册的任务（hydrated from APS when available）"""
     if app_state.system_scheduler is None:
         return {"status": "failed", "message": "系统调度服务未初始化"}
 
     try:
-        registrations = await app_state.system_scheduler.list_registered()
+        registrations = await app_state.system_scheduler.list_registered(
+            manager=app_state.scheduler_manager
+        )
         return {
             "status": "success",
             "registrations": [reg.model_dump(mode="json") for reg in registrations],
@@ -1182,9 +1193,13 @@ async def repair_system_tasks():
     """手动触发修复所有系统级注册（路径变化后使用）"""
     if app_state.system_scheduler is None:
         return {"status": "failed", "message": "系统调度服务未初始化"}
+    if app_state.scheduler_manager is None:
+        return {"status": "failed", "message": "调度器未初始化"}
 
     try:
-        result = await app_state.system_scheduler.repair_all()
+        result = await app_state.system_scheduler.repair_all(
+            app_state.scheduler_manager
+        )
         return {"status": "success", "data": result}
     except Exception as e:
         msg = str(e)

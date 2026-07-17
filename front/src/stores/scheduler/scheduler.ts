@@ -22,8 +22,6 @@ import {
   pauseSchedulerTask,
   resumeSchedulerTask,
   getSchedulerExecutions,
-  registerSystemTask,
-  unregisterSystemTask,
   getSystemTaskStatus,
   getSystemTasks,
   repairSystemTasks,
@@ -39,6 +37,14 @@ export const useSchedulerStore = defineStore("scheduler", () => {
   const systemTaskStatuses = ref<Record<string, SystemTaskStatus>>({})
   const systemRegistrations = ref<SystemTaskRegistration[]>([])
   const systemCapabilities = ref<SystemTaskCapabilities | null>(null)
+
+  function normalizeStatusScope(status: SystemTaskStatus): SystemTaskStatus {
+    const resolved = status.last_known_scope ?? status.desired_scope ?? status.scope
+    if (resolved === status.scope) {
+      return status
+    }
+    return { ...status, scope: resolved }
+  }
 
   // Computed
   const enabledTasks = computed(() => tasks.value.filter((t) => t.enabled))
@@ -97,6 +103,17 @@ export const useSchedulerStore = defineStore("scheduler", () => {
       const index = tasks.value.findIndex((t) => t.id === taskId)
       if (index !== -1) {
         tasks.value[index] = response.task
+      }
+      if (response.native_status) {
+        systemTaskStatuses.value[taskId] = normalizeStatusScope(response.native_status)
+      } else if (response.native_error) {
+        systemTaskStatuses.value[taskId] = {
+          task_id: taskId,
+          registered: false,
+          path_valid: false,
+          state: "error",
+          last_error: response.native_error,
+        }
       }
       loading.value = false
       return true
@@ -178,38 +195,8 @@ export const useSchedulerStore = defineStore("scheduler", () => {
       return
     }
     if (response.status === "success" && response.data) {
-      systemTaskStatuses.value[taskId] = response.data
+      systemTaskStatuses.value[taskId] = normalizeStatusScope(response.data)
     }
-  }
-
-  async function registerSystem(taskId: string, scope: SystemTaskScope) {
-    const [response, err] = await tryCatch(() => registerSystemTask(taskId, { scope }))
-    if (err) {
-      error.value = "网络错误，请稍后重试"
-      console.error("Failed to register system task:", err)
-      return false
-    }
-    if (response.status === "success" && response.data) {
-      systemTaskStatuses.value[taskId] = response.data
-      return true
-    }
-    error.value = response.message || "系统级注册失败"
-    return false
-  }
-
-  async function unregisterSystem(taskId: string) {
-    const [response, err] = await tryCatch(() => unregisterSystemTask(taskId))
-    if (err) {
-      error.value = "网络错误，请稍后重试"
-      console.error("Failed to unregister system task:", err)
-      return false
-    }
-    if (response.status === "success") {
-      delete systemTaskStatuses.value[taskId]
-      return true
-    }
-    error.value = response.message || "卸载系统级注册失败"
-    return false
   }
 
   async function fetchSystemRegistrations() {
@@ -232,29 +219,7 @@ export const useSchedulerStore = defineStore("scheduler", () => {
     if (response.status === "success" && response.registrations) {
       const statuses: Record<string, SystemTaskStatus> = {}
       for (const reg of response.registrations) {
-        const isActive = reg.state === "active" || reg.state === "pending_register"
-        const observed: SystemTaskObservation[] =
-          reg.observed?.map((obs) => ({
-            scope: obs.scope,
-            identifier: obs.identifier,
-            present: obs.present,
-            verified: obs.verified,
-            details: obs.details,
-          })) ?? []
-        statuses[reg.task_id] = {
-          task_id: reg.task_id,
-          registered: isActive && !reg.orphaned,
-          scope: reg.scope ?? undefined,
-          platform: reg.platform,
-          path_valid: isActive,
-          last_error: reg.last_error,
-          state: reg.state,
-          pending_operation: reg.pending_operation,
-          orphaned: reg.orphaned,
-          desired_scope: reg.desired_scope,
-          observed,
-          warnings: reg.warnings,
-        }
+        statuses[reg.task_id] = buildSystemTaskStatus(reg)
       }
       systemTaskStatuses.value = statuses
     }
@@ -314,6 +279,44 @@ export const useSchedulerStore = defineStore("scheduler", () => {
     error.value = null
   }
 
+  function mapObservations(reg: SystemTaskRegistration): SystemTaskObservation[] {
+    return (
+      reg.observed?.map((obs) => ({
+        scope: obs.scope,
+        identifier: obs.identifier,
+        present: obs.present,
+        verified: obs.verified,
+        details: obs.details,
+      })) ?? []
+    )
+  }
+
+  function buildSystemTaskStatus(reg: SystemTaskRegistration): SystemTaskStatus {
+    // Prefer authoritative backend fields; never infer active=true when
+    // registered is explicitly false (APS missing / unknown / disabled).
+    const fallbackActive =
+      (reg.state === "active" || reg.state === "pending_register") && !reg.orphaned
+    return {
+      task_id: reg.task_id,
+      registered: reg.registered ?? fallbackActive,
+      // Status scope follows APS authority (desired_scope/scope already hydrated).
+      scope: reg.last_known_scope ?? reg.desired_scope ?? reg.scope ?? undefined,
+      platform: reg.platform,
+      path_valid: reg.path_valid ?? false,
+      last_error: reg.last_error,
+      state: reg.state,
+      pending_operation: reg.pending_operation,
+      orphaned: reg.orphaned,
+      desired_scope: reg.desired_scope ?? undefined,
+      last_known_scope: reg.last_known_scope,
+      observed: mapObservations(reg),
+      warnings: reg.warnings,
+      verified: reg.verified ?? false,
+      reason: reg.reason,
+      enabled: reg.enabled,
+    }
+  }
+
   return {
     // State
     tasks,
@@ -333,8 +336,6 @@ export const useSchedulerStore = defineStore("scheduler", () => {
     toggleTask,
     fetchExecutions,
     fetchSystemTaskStatus,
-    registerSystem,
-    unregisterSystem,
     fetchSystemRegistrations,
     fetchAllSystemStatuses,
     repairSystemTasksAll,

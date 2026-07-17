@@ -2,7 +2,6 @@ import type {
   ScheduledTaskCreate,
   ScheduledTaskUpdate,
   SchedulerApiResponse,
-  SystemRegisterRequest,
   SystemTaskCapabilities,
   SystemTaskRegistration,
   SystemTaskRepairResult,
@@ -67,31 +66,6 @@ export function getSchedulerExecutions(limit: number = 50): Promise<SchedulerApi
   return fetch(`/api/scheduler/executions?limit=${limit}`, { method: "GET" }).then((res) =>
     res.json(),
   )
-}
-
-// ---------------------------------------------------------------------------
-// 系统级计划任务注册
-// ---------------------------------------------------------------------------
-
-export function registerSystemTask(
-  taskId: string,
-  request: SystemRegisterRequest,
-): Promise<{ status: string; data?: SystemTaskStatus; message?: string }> {
-  return fetch(`/api/scheduler/tasks/${taskId}/system-register`, {
-    method: "POST",
-    body: JSON.stringify(request),
-    headers: {
-      "Content-Type": "application/json",
-    },
-  }).then((res) => res.json())
-}
-
-export function unregisterSystemTask(
-  taskId: string,
-): Promise<{ status: string; message?: string }> {
-  return fetch(`/api/scheduler/tasks/${taskId}/system-register`, {
-    method: "DELETE",
-  }).then((res) => res.json())
 }
 
 export function getSystemTaskStatus(

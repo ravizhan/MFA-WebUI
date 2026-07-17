@@ -53,6 +53,7 @@ export interface ScheduledTask extends TaskExecutionPayload {
   controller_name?: string | null
   device?: ScheduledTaskDeviceConfig | null
   resource_name?: string | null
+  system_scope?: SystemTaskScope | null
   next_run_time?: string // ISO 8601 datetime string
   created_at: string // ISO 8601 datetime string
   updated_at: string // ISO 8601 datetime string
@@ -101,6 +102,8 @@ export interface SchedulerApiResponse {
   tasks?: ScheduledTask[]
   task?: ScheduledTask
   executions?: TaskExecution[]
+  native_status?: SystemTaskStatus
+  native_error?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -135,17 +138,18 @@ export interface SystemTaskObservation {
 
 export interface SystemTaskStatus {
   task_id: string
-  registered: boolean
+  registered?: boolean
   scope?: SystemTaskScope
   platform?: SystemTaskPlatform
   next_run_time?: string
   last_error?: string
-  path_valid: boolean
+  path_valid?: boolean
   // Extended authoritative fields
   state?: SystemTaskState
   pending_operation?: string
   orphaned?: boolean
   desired_scope?: SystemTaskScope
+  last_known_scope?: SystemTaskScope
   observed?: SystemTaskObservation[]
   warnings?: string[]
   enabled?: boolean
@@ -155,18 +159,18 @@ export interface SystemTaskStatus {
 
 export interface SystemTaskRegistration {
   task_id: string
-  task_name: string
+  task_name?: string
   platform: SystemTaskPlatform
   scope: SystemTaskScope | null
   system_task_identifier: string
-  trigger_spec: OSTriggerSpec
-  registered_exe_path: string
+  trigger_spec?: OSTriggerSpec
+  registered_exe_path?: string
   last_registered_at: string | null
   orphaned: boolean
   // Extended durable fields
   state: SystemTaskState
   pending_operation?: string
-  desired_scope: SystemTaskScope
+  desired_scope?: SystemTaskScope
   desired_trigger?: OSTriggerSpec
   desired_exe_path?: string
   desired_cli_args?: string[]
@@ -175,6 +179,13 @@ export interface SystemTaskRegistration {
   warnings?: string[]
   last_error?: string
   migration_from_scope?: SystemTaskScope
+  last_known_scope?: SystemTaskScope
+  // Authoritative runtime fields from backend hydration (prefer over state inference)
+  registered?: boolean
+  verified?: boolean
+  path_valid?: boolean
+  reason?: string
+  enabled?: boolean
 }
 
 export interface SystemTaskCapabilityCell {
@@ -193,10 +204,6 @@ export interface SystemTaskCapabilities {
   cells: SystemTaskCapabilityCell[]
   system_scope_enabled: boolean
   warnings: string[]
-}
-
-export interface SystemRegisterRequest {
-  scope: SystemTaskScope
 }
 
 export interface SystemTaskRepairResult {

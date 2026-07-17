@@ -5,28 +5,27 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional, List, Literal
 
-from pydantic import BaseModel
-
 import aiosqlite
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.date import DateTrigger
-from apscheduler.triggers.interval import IntervalTrigger
 
 from maa_worker.event_service import load_settings
 from models.task_config import normalize_task_execution_payload
 from models.scheduler import (
     ScheduledTask,
     ScheduledTaskCreate,
-    ScheduledTaskDeviceConfig,
     ScheduledTaskUpdate,
     TaskExecution,
     TaskOptionsByTask,
-    TriggerConfig,
-    CronTriggerConfig,
-    DateTriggerConfig,
-    IntervalTriggerConfig,
+)
+from scheduler_job_codec import (
+    SchedulerJobDecodeError,
+    build_trigger,
+    decode_job_to_scheduled_task,
+    decode_pre_tasks_from_job_kwargs,
+    decode_trigger,
+    encode_execution_kwargs,
+    resolve_execute_pre_tasks,
 )
 
 logger = logging.getLogger(__name__)
@@ -41,21 +40,32 @@ async def execute_scheduled_task(
     task_list: List[str],
     task_options: TaskOptionsByTask,
     pre_tasks: Optional[List[dict]] = None,
+    preTasks: Optional[List[dict]] = None,
     controller_name: Optional[str] = None,
     device: Optional[dict] = None,
     resource_name: Optional[str] = None,
+    system_scope: Optional[str] = None,
 ):
-    """APScheduler 可持久化执行入口"""
+    """APScheduler 可持久化执行入口.
+
+    Accepts both canonical ``pre_tasks`` and legacy ``preTasks`` kwargs from
+    already-persisted jobs. Prefer ``pre_tasks`` when both are present.
+    ``system_scope`` is accepted for kwargs signature stability but ignored
+    at execution time (native wakeup metadata only).
+    Path must remain ``scheduler_manager:execute_scheduled_task``.
+    """
+    del system_scope  # metadata only; not used during in-process execution
     if _ACTIVE_MANAGER is None:
         logger.error(f"调度器管理器未就绪，跳过定时任务 {task_id}")
         return
+    resolved_pre_tasks = resolve_execute_pre_tasks(pre_tasks, preTasks)
     await _ACTIVE_MANAGER._execute_task(
         task_id=task_id,
         task_name=task_name,
         _task_description=task_description,
         task_list=task_list,
         task_options=task_options,
-        pre_tasks=pre_tasks or [],
+        pre_tasks=resolved_pre_tasks,
         controller_name=controller_name,
         device=device,
         resource_name=resource_name,
@@ -144,36 +154,6 @@ class SchedulerManager:
                 """
             )
             await db.commit()
-
-    def _create_trigger(self, trigger_config: TriggerConfig):
-        """根据配置创建触发器"""
-        if isinstance(trigger_config, CronTriggerConfig):
-            # 解析 cron 表达式
-            parts = trigger_config.cron.split()
-            if len(parts) != 5:
-                raise ValueError(f"无效的 Cron 表达式: {trigger_config.cron}")
-            minute, hour, day, month, day_of_week = parts
-            return CronTrigger(
-                minute=minute,
-                hour=hour,
-                day=day,
-                month=month,
-                day_of_week=day_of_week,
-            )
-        elif isinstance(trigger_config, DateTriggerConfig):
-            return DateTrigger(run_date=trigger_config.run_date)
-        elif isinstance(trigger_config, IntervalTriggerConfig):
-            return IntervalTrigger(
-                weeks=trigger_config.weeks or 0,
-                days=trigger_config.days or 0,
-                hours=trigger_config.hours or 0,
-                minutes=trigger_config.minutes or 0,
-                seconds=trigger_config.seconds or 0,
-                start_date=trigger_config.start_date,
-                end_date=trigger_config.end_date,
-            )
-        else:
-            raise ValueError(f"未知的触发器类型: {type(trigger_config)}")
 
     def _normalize_task_payload(
         self,
@@ -406,52 +386,12 @@ class SchedulerManager:
                 self._worker.events.send_log(f"定时任务 {task_id} 执行异常: {e}")
             await self._update_execution_status(execution_id, "failed", str(e))
 
-    def _build_trigger_config(
-        self, trigger
-    ) -> tuple[Literal["cron", "date", "interval"], TriggerConfig]:
-        """从 APScheduler trigger 重建触发器类型与配置"""
-        if isinstance(trigger, CronTrigger):
-            field_map = {field.name: str(field) for field in trigger.fields}
-            cron = " ".join(
-                [
-                    field_map.get("minute", "*"),
-                    field_map.get("hour", "*"),
-                    field_map.get("day", "*"),
-                    field_map.get("month", "*"),
-                    field_map.get("day_of_week", "*"),
-                ]
-            )
-            return "cron", CronTriggerConfig(cron=cron)
-
-        if isinstance(trigger, DateTrigger):
-            run_date = getattr(trigger, "run_date", None)
-            if run_date is None:
-                raise ValueError("DateTrigger 缺少 run_date")
-            return "date", DateTriggerConfig(run_date=run_date)
-
-        if isinstance(trigger, IntervalTrigger):
-            interval = getattr(trigger, "interval", None)
-            total_seconds = int(interval.total_seconds()) if interval is not None else 0
-
-            week_seconds = 7 * 24 * 60 * 60
-            day_seconds = 24 * 60 * 60
-
-            weeks, remainder = divmod(total_seconds, week_seconds)
-            days, remainder = divmod(remainder, day_seconds)
-            hours, remainder = divmod(remainder, 60 * 60)
-            minutes, seconds = divmod(remainder, 60)
-
-            return "interval", IntervalTriggerConfig(
-                weeks=weeks or None,
-                days=days or None,
-                hours=hours or None,
-                minutes=minutes or None,
-                seconds=seconds or None,
-                start_date=getattr(trigger, "start_date", None),
-                end_date=getattr(trigger, "end_date", None),
-            )
-
-        raise ValueError(f"未知的触发器类型: {type(trigger)}")
+    def _decode_job(self, job) -> ScheduledTask:
+        """Decode one APS job; trigger corruption is visible (no default cron)."""
+        return decode_job_to_scheduled_task(
+            job,
+            normalize=self._normalize_task_payload,
+        )
 
     async def _add_execution(self, execution: TaskExecution):
         """添加执行记录"""
@@ -524,7 +464,7 @@ class SchedulerManager:
             raise RuntimeError("调度器未初始化")
 
         task_id = str(uuid.uuid4())
-        trigger = self._create_trigger(task_create.trigger_config)
+        trigger = build_trigger(task_create.trigger_config)
         normalized_task_list, normalized_task_options, normalized_pre_tasks = (
             self._normalize_task_payload(
                 task_create.task_list,
@@ -535,156 +475,69 @@ class SchedulerManager:
         if not normalized_task_list:
             raise ValueError("任务列表不能为空")
 
-        # 添加任务到调度器，存储完整的任务信息
+        # 添加任务到调度器；kwargs 由 codec 统一编码（canonical pre_tasks）
         self.scheduler.add_job(
             execute_scheduled_task,
             trigger,
             id=task_id,
-            kwargs={
-                "task_id": task_id,
-                "task_name": task_create.name,
-                "task_description": task_create.description or "",
-                "task_list": normalized_task_list,
-                "task_options": normalized_task_options,
-                "pre_tasks": [pt.model_dump() for pt in normalized_pre_tasks],
-                "controller_name": task_create.controller_name,
-                "device": task_create.device.model_dump()
-                if task_create.device
-                else None,
-                "resource_name": task_create.resource_name,
-            },
+            kwargs=encode_execution_kwargs(
+                task_id=task_id,
+                task_name=task_create.name,
+                task_description=task_create.description,
+                task_list=normalized_task_list,
+                task_options=normalized_task_options,
+                pre_tasks=normalized_pre_tasks,
+                controller_name=task_create.controller_name,
+                device=task_create.device,
+                resource_name=task_create.resource_name,
+                system_scope=task_create.system_scope,
+            ),
         )
 
         # 如果任务未启用，则暂停
         if not task_create.enabled:
             self.scheduler.pause_job(task_id)
 
-        # 获取下次执行时间
         job = self.scheduler.get_job(task_id)
-        next_run_time = job.next_run_time if job else None
+        if job is None:
+            raise RuntimeError(f"创建后无法读取任务: {task_id}")
 
-        # 创建任务对象
-        task = ScheduledTask(
-            id=task_id,
-            name=task_create.name,
-            description=task_create.description,
-            enabled=task_create.enabled,
-            trigger_type=task_create.trigger_type,
-            trigger_config=task_create.trigger_config,
-            task_list=normalized_task_list,
-            task_options=normalized_task_options,
-            preTasks=normalized_pre_tasks,
-            next_run_time=next_run_time,
-            controller_name=task_create.controller_name,
-            device=task_create.device,
-            resource_name=task_create.resource_name,
-        )
-
+        task = self._decode_job(job)
         logger.info(f"创建定时任务: {task.name} ({task_id})")
         return task
 
     async def get_task(self, task_id: str) -> Optional[ScheduledTask]:
-        """获取定时任务"""
+        """获取定时任务.
+
+        Raises SchedulerJobDecodeError when the persisted trigger cannot be
+        decoded. Does not invent a default cron and does not mutate the job.
+        """
         if not self.scheduler:
             return None
         job = self.scheduler.get_job(task_id)
         if not job:
             return None
-
-        # 从 kwargs 中获取任务信息
-        task_name = job.kwargs.get("task_name", "")
-        task_description = job.kwargs.get("task_description", "")
-        task_list, task_options, pre_tasks = self._normalize_task_payload(
-            job.kwargs.get("task_list", []),
-            job.kwargs.get("task_options", {}),
-            job.kwargs.get("preTasks", []) or job.kwargs.get("pre_tasks", []),
-        )
-        controller_name = job.kwargs.get("controller_name", None)
-        device_raw = job.kwargs.get("device", None)
-        device = ScheduledTaskDeviceConfig(**device_raw) if device_raw else None
-        resource_name = job.kwargs.get("resource_name", None)
-        trigger_type: Literal["cron", "date", "interval"]
-
-        try:
-            trigger_type, trigger_config = self._build_trigger_config(job.trigger)
-        except Exception as e:
-            if self._worker:
-                self._worker.events.send_log(
-                    f"重建触发器配置失败，使用默认 cron 配置: {e}"
-                )
-            trigger_type = "cron"
-            trigger_config = CronTriggerConfig(cron="* * * * *")
-
-        return ScheduledTask(
-            id=task_id,
-            name=task_name,
-            description=task_description,
-            enabled=job.next_run_time is not None,
-            trigger_type=trigger_type,
-            trigger_config=trigger_config,
-            task_list=task_list,
-            task_options=task_options,
-            preTasks=pre_tasks,
-            next_run_time=job.next_run_time,
-            controller_name=controller_name,
-            device=device,
-            resource_name=resource_name,
-        )
+        return self._decode_job(job)
 
     async def get_all_tasks(self) -> List[ScheduledTask]:
-        """获取所有定时任务"""
+        """获取所有定时任务.
+
+        Raises SchedulerJobDecodeError if any job has a corrupt/unknown trigger.
+        Does not invent default crons or omit corrupt jobs silently.
+        """
         if not self.scheduler:
             return []
-        tasks = []
-        jobs = self.scheduler.get_jobs()
-
-        for job in jobs:
-            task_name = job.kwargs.get("task_name", "")
-            task_description = job.kwargs.get("task_description", "")
-            task_list, task_options, pre_tasks = self._normalize_task_payload(
-                job.kwargs.get("task_list", []),
-                job.kwargs.get("task_options", {}),
-                job.kwargs.get("preTasks", []) or job.kwargs.get("pre_tasks", []),
-            )
-            controller_name = job.kwargs.get("controller_name", None)
-            device_raw = job.kwargs.get("device", None)
-            device = ScheduledTaskDeviceConfig(**device_raw) if device_raw else None
-            resource_name = job.kwargs.get("resource_name", None)
-            trigger_type: Literal["cron", "date", "interval"]
-
-            try:
-                trigger_type, trigger_config = self._build_trigger_config(job.trigger)
-            except Exception as e:
-                if self._worker:
-                    self._worker.events.send_log(
-                        f"重建任务 {job.id} 的触发器配置失败，使用默认 cron 配置: {e}"
-                    )
-                trigger_type = "cron"
-                trigger_config = CronTriggerConfig(cron="* * * * *")
-
-            task = ScheduledTask(
-                id=job.id,
-                name=task_name,
-                description=task_description,
-                enabled=job.next_run_time is not None,
-                trigger_type=trigger_type,
-                trigger_config=trigger_config,
-                task_list=task_list,
-                task_options=task_options,
-                preTasks=pre_tasks,
-                next_run_time=job.next_run_time,
-                controller_name=controller_name,
-                device=device,
-                resource_name=resource_name,
-            )
-            tasks.append(task)
-
-        return tasks
+        return [self._decode_job(job) for job in self.scheduler.get_jobs()]
 
     async def update_task(
         self, task_id: str, task_update: ScheduledTaskUpdate
     ) -> Optional[ScheduledTask]:
-        """更新定时任务"""
+        """更新定时任务.
+
+        ``modify_job(kwargs=...)`` fully replaces kwargs via the shared encoder.
+        Trigger decode failures raise SchedulerJobDecodeError without mutating
+        the persisted job (unless a new trigger_config is supplied).
+        """
         if not self.scheduler:
             if self._worker:
                 _settings = load_settings()
@@ -712,17 +565,19 @@ class SchedulerManager:
             return None
 
         try:
-            # 获取当前任务信息
             current_kwargs = job.kwargs
 
-            try:
-                _, current_trigger_config = self._build_trigger_config(job.trigger)
-            except Exception as e:
-                if self._worker:
-                    self._worker.events.send_log(
-                        f"重建当前触发器配置失败，使用默认 cron 配置: {e}"
-                    )
-                current_trigger_config = CronTriggerConfig(cron="* * * * *")
+            if task_update.trigger_config is not None:
+                new_trigger_config = task_update.trigger_config
+            else:
+                try:
+                    _, new_trigger_config = decode_trigger(job.trigger)
+                except Exception as exc:
+                    raise SchedulerJobDecodeError(
+                        f"trigger decode failed: {exc}",
+                        job_id=task_id,
+                        cause=exc,
+                    ) from exc
 
             # 合并更新数据
             new_name = (
@@ -748,8 +603,7 @@ class SchedulerManager:
             new_pre_tasks = (
                 task_update.preTasks
                 if task_update.preTasks is not None
-                else current_kwargs.get("preTasks", [])
-                or current_kwargs.get("pre_tasks", [])
+                else decode_pre_tasks_from_job_kwargs(current_kwargs)
             )
             # Use model_fields_set to distinguish "field omitted" (keep current)
             # from "field set to None" (explicitly clear).
@@ -760,12 +614,7 @@ class SchedulerManager:
                 else current_kwargs.get("controller_name", None)
             )
             if "device" in updated_fields:
-                new_device_raw = task_update.device
-                new_device = (
-                    new_device_raw.model_dump()
-                    if isinstance(new_device_raw, BaseModel)
-                    else new_device_raw
-                )
+                new_device = task_update.device
             else:
                 new_device = current_kwargs.get("device", None)
             new_resource_name = (
@@ -773,6 +622,11 @@ class SchedulerManager:
                 if "resource_name" in updated_fields
                 else current_kwargs.get("resource_name", None)
             )
+            # omitted system_scope → preserve; explicit None → clear
+            if "system_scope" in updated_fields:
+                new_system_scope = task_update.system_scope
+            else:
+                new_system_scope = current_kwargs.get("system_scope", None)
             normalized_task_list, normalized_task_options, normalized_pre_tasks = (
                 self._normalize_task_payload(
                     new_task_list,
@@ -783,30 +637,24 @@ class SchedulerManager:
             if not normalized_task_list:
                 raise ValueError("任务列表不能为空")
 
-            new_trigger_config = (
-                task_update.trigger_config
-                if task_update.trigger_config is not None
-                else current_trigger_config
-            )
+            trigger = build_trigger(new_trigger_config)
 
-            # 创建新的触发器
-            trigger = self._create_trigger(new_trigger_config)
-
-            # 修改任务
+            # kwargs 全量替换；canonical key 为 pre_tasks
             self.scheduler.modify_job(
                 task_id,
                 trigger=trigger,
-                kwargs={
-                    "task_id": task_id,
-                    "task_name": new_name,
-                    "task_description": new_description,
-                    "task_list": normalized_task_list,
-                    "task_options": normalized_task_options,
-                    "preTasks": [pt.model_dump() for pt in normalized_pre_tasks],
-                    "controller_name": new_controller_name,
-                    "device": new_device,
-                    "resource_name": new_resource_name,
-                },
+                kwargs=encode_execution_kwargs(
+                    task_id=task_id,
+                    task_name=new_name,
+                    task_description=new_description,
+                    task_list=normalized_task_list,
+                    task_options=normalized_task_options,
+                    pre_tasks=normalized_pre_tasks,
+                    controller_name=new_controller_name,
+                    device=new_device,
+                    resource_name=new_resource_name,
+                    system_scope=new_system_scope,
+                ),
             )
 
             # 处理启用/暂停状态
@@ -816,27 +664,167 @@ class SchedulerManager:
                 else:
                     self.scheduler.pause_job(task_id)
 
-            # 获取更新后的任务
             return await self.get_task(task_id)
+        except SchedulerJobDecodeError:
+            raise
         except Exception as e:
             logger.error(f"更新任务失败: {e}")
             if self._worker:
                 self._worker.events.send_log(f"更新任务失败: {e}")
             return None
 
-    async def delete_task(self, task_id: str) -> bool:
-        """删除定时任务"""
+    def job_has_system_scope_key(self, task_id: str) -> Optional[bool]:
+        """Return whether APS job kwargs contain the ``system_scope`` key.
+
+        ``True`` / ``False`` when the job exists; ``None`` when the job is missing
+        or the scheduler is not initialized. Key presence (not value) is the
+        APS authority signal: present ``None`` means intentional disable.
+        """
         if not self.scheduler:
-            return False
+            return None
+        job = self.scheduler.get_job(task_id)
+        if job is None:
+            return None
+        kwargs = job.kwargs or {}
+        return "system_scope" in kwargs
+
+    def import_system_scopes(
+        self, scope_by_task_id: dict[str, Literal["user", "system"]]
+    ) -> dict[str, Any]:
+        """Idempotently merge system_scope into matching APS jobs.
+
+        Import only when the ``system_scope`` key is **absent**. If the key is
+        already present (including explicit ``None``), APS is authoritative and
+        JSON must not overwrite. Copy-merges complete existing kwargs. Never
+        creates jobs. Verifies each write by re-reading. Preserves pause state.
+        """
+        if not self.scheduler:
+            raise RuntimeError("调度器未初始化")
+
+        stats: dict[str, Any] = {
+            "imported": 0,
+            "skipped": 0,
+            "missing_job": 0,
+            "failed": 0,
+            "details": [],
+        }
+        for task_id, scope in scope_by_task_id.items():
+            if scope not in ("user", "system"):
+                stats["failed"] += 1
+                stats["details"].append(f"{task_id}: invalid scope {scope!r}")
+                continue
+            job = self.scheduler.get_job(task_id)
+            if job is None:
+                stats["missing_job"] += 1
+                stats["details"].append(f"{task_id}: no matching APS job")
+                continue
+
+            kwargs = job.kwargs or {}
+            # Key presence is authority: present None/user/system all skip import.
+            if "system_scope" in kwargs:
+                stats["skipped"] += 1
+                stats["details"].append(
+                    f"{task_id}: APS system_scope key present "
+                    f"({kwargs.get('system_scope')!r}); JSON not applied"
+                )
+                continue
+
+            was_paused = job.next_run_time is None
+            # Full kwargs copy so modify_job does not drop legacy keys.
+            new_kwargs = dict(kwargs)
+            new_kwargs["system_scope"] = scope
+            try:
+                self.scheduler.modify_job(task_id, kwargs=new_kwargs)
+            except Exception as e:
+                stats["failed"] += 1
+                stats["details"].append(f"{task_id}: modify failed: {e}")
+                logger.error("import system_scope for %s failed: %s", task_id, e)
+                continue
+
+            verified = self.scheduler.get_job(task_id)
+            if verified is None:
+                stats["failed"] += 1
+                stats["details"].append(f"{task_id}: job missing after modify")
+                continue
+            if verified.kwargs.get("system_scope") != scope:
+                stats["failed"] += 1
+                stats["details"].append(
+                    f"{task_id}: durable re-read scope mismatch "
+                    f"{verified.kwargs.get('system_scope')!r} != {scope!r}"
+                )
+                continue
+            if (verified.next_run_time is None) != was_paused:
+                # Restore pause state if APS altered it.
+                try:
+                    if was_paused:
+                        self.scheduler.pause_job(task_id)
+                    else:
+                        self.scheduler.resume_job(task_id)
+                except Exception as e:
+                    stats["failed"] += 1
+                    stats["details"].append(
+                        f"{task_id}: scope written but pause restore failed: {e}"
+                    )
+                    continue
+            stats["imported"] += 1
+            stats["details"].append(f"{task_id}: imported scope={scope}")
+
+        logger.info(
+            "system_scope import: imported=%s skipped=%s missing=%s failed=%s",
+            stats["imported"],
+            stats["skipped"],
+            stats["missing_job"],
+            stats["failed"],
+        )
+        return stats
+
+    async def delete_task_classified(self, task_id: str) -> str:
+        """Delete APS job with explicit outcome classification.
+
+        Returns one of:
+        - ``success``: job removed and confirmed absent
+        - ``not_found``: job was already absent (JobLookupError / get_job None)
+        - ``pre_failure``: scheduler not initialized (no mutation attempted)
+        - ``indeterminate``: exception or post-check still present; job state unclear
+        """
+        if not self.scheduler:
+            return "pre_failure"
         try:
+            existing = self.scheduler.get_job(task_id)
+            if existing is None:
+                return "not_found"
             self.scheduler.remove_job(task_id)
-            logger.info(f"删除定时任务: {task_id}")
-            return True
         except Exception as e:
+            # JobLookupError and other failures: classify via re-read when possible.
+            name = type(e).__name__
+            if name == "JobLookupError" or "JobLookupError" in name:
+                return "not_found"
             logger.error(f"删除任务失败: {e}")
             if self._worker:
                 self._worker.events.send_log(f"删除任务失败: {e}")
-            return False
+            try:
+                still = self.scheduler.get_job(task_id)
+            except Exception:
+                return "indeterminate"
+            if still is None:
+                # Exception after successful removal — treat as success.
+                logger.info(f"删除定时任务(异常后确认已不存在): {task_id}")
+                return "success"
+            return "indeterminate"
+
+        try:
+            still = self.scheduler.get_job(task_id)
+        except Exception:
+            return "indeterminate"
+        if still is not None:
+            return "indeterminate"
+        logger.info(f"删除定时任务: {task_id}")
+        return "success"
+
+    async def delete_task(self, task_id: str) -> bool:
+        """删除定时任务 (bool compatibility: success/not_found → True)."""
+        outcome = await self.delete_task_classified(task_id)
+        return outcome in ("success", "not_found")
 
     async def pause_task(self, task_id: str) -> bool:
         """暂停定时任务"""

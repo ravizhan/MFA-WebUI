@@ -97,6 +97,10 @@ class ScheduledTask(TaskExecutionPayload):
     controller_name: Optional[str] = Field(None, description="控制器名称")
     device: Optional[ScheduledTaskDeviceConfig] = Field(None, description="设备配置")
     resource_name: Optional[str] = Field(None, description="资源包名称")
+    # APS-owned native scope metadata (None = not registered as system task)
+    system_scope: Optional[Literal["user", "system"]] = Field(
+        None, description="系统级调度范围；None 表示未注册原生唤醒"
+    )
     next_run_time: Optional[datetime] = Field(None, description="下次执行时间")
     created_at: datetime = Field(default_factory=datetime.now, description="创建时间")
     updated_at: datetime = Field(default_factory=datetime.now, description="更新时间")
@@ -229,50 +233,87 @@ class ObservedNativeState(BaseModel):
     details: Optional[str] = None
 
 
-class SystemTaskRegistration(BaseModel):
-    """持久化的系统级任务注册记录（transactional durable state）"""
+# On-disk operational state only (active | error).
+OperationalState = Literal["active", "error"]
+
+# Exact allowlist of keys written to system_tasks.json operational format.
+OPERATIONAL_STATE_KEYS = frozenset(
+    {
+        "task_id",
+        "platform",
+        "state",
+        "last_known_scope",
+        "cleanup_scopes",
+        "system_task_identifier",
+        "registered_exe_path",
+        "last_registered_at",
+        "last_error",
+        "observed",
+        "warnings",
+    }
+)
+
+
+class SystemTaskOperationalRecord(BaseModel):
+    """Persisted operational native-registration record (disk allowlist only)."""
 
     task_id: str
-    task_name: str
     platform: Literal["windows", "macos", "linux"]
-    # Desired state
-    desired_scope: SystemTaskScope
-    desired_trigger: OSTriggerSpec
-    desired_exe_path: str = Field(..., description="期望注册的可执行命令路径")
-    desired_cli_args: List[str] = Field(default_factory=list)
-    desired_working_dir: str = ""
-    # Durable lifecycle
-    state: RegistrationState = "pending_register"
-    pending_operation: PendingOperation = "none"
-    # Observed
-    observed: List[ObservedNativeState] = Field(default_factory=list)
-    system_task_identifier: str = Field(
-        "", description="Primary native identifier for desired scope"
-    )
-    # Diagnostics
+    state: OperationalState = "active"
+    last_known_scope: Optional[SystemTaskScope] = None
+    cleanup_scopes: List[SystemTaskScope] = Field(default_factory=list)
+    system_task_identifier: str = ""
     registered_exe_path: str = Field(
-        "", description="最后成功注册的 exe/command 路径（兼容旧字段）"
+        "", description="Diagnostic last-known registered exe path"
     )
     last_registered_at: Optional[datetime] = None
     last_error: Optional[str] = None
+    observed: List[ObservedNativeState] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
-    # Migration helper
+
+    def to_operational_dict(self) -> dict:
+        """Serialize only operational allowlisted keys."""
+        raw = self.model_dump(mode="json")
+        return {k: raw[k] for k in OPERATIONAL_STATE_KEYS if k in raw}
+
+
+class SystemTaskRegistration(BaseModel):
+    """API/list DTO for system-task registration (hydrated; not the on-disk model).
+
+    Desired/schedule fields are optional and filled from APS when available.
+    """
+
+    task_id: str
+    task_name: str = ""
+    platform: Literal["windows", "macos", "linux"]
+    # Hydrated from APS when available (not persisted operationally)
+    desired_scope: Optional[SystemTaskScope] = None
+    desired_trigger: Optional[OSTriggerSpec] = None
+    desired_exe_path: str = ""
+    desired_cli_args: List[str] = Field(default_factory=list)
+    desired_working_dir: str = ""
+    # Operational
+    state: RegistrationState = "active"
+    pending_operation: PendingOperation = "none"
+    observed: List[ObservedNativeState] = Field(default_factory=list)
+    system_task_identifier: str = ""
+    registered_exe_path: str = ""
+    last_registered_at: Optional[datetime] = None
+    last_error: Optional[str] = None
+    warnings: List[str] = Field(default_factory=list)
     migration_from_scope: Optional[SystemTaskScope] = None
-    # Compatibility: orphaned flag mirrors state==orphaned
-    orphaned: bool = Field(False, description="APScheduler 任务已删除但 OS 注册仍存在")
-    # Legacy mirrors
+    orphaned: bool = False
     scope: Optional[SystemTaskScope] = None
     trigger_spec: Optional[OSTriggerSpec] = None
-
-    def model_post_init(self, __context) -> None:
-        if self.scope is None:
-            object.__setattr__(self, "scope", self.desired_scope)
-        if self.trigger_spec is None:
-            object.__setattr__(self, "trigger_spec", self.desired_trigger)
-        if self.orphaned and self.state == "active":
-            object.__setattr__(self, "state", "orphaned")
-        if self.state == "orphaned":
-            object.__setattr__(self, "orphaned", True)
+    # Operational mirrors (optional on API)
+    last_known_scope: Optional[SystemTaskScope] = None
+    cleanup_scopes: List[SystemTaskScope] = Field(default_factory=list)
+    # Authoritative runtime fields (list/status hydration; not on disk)
+    registered: Optional[bool] = None
+    verified: Optional[bool] = None
+    path_valid: Optional[bool] = None
+    reason: Optional[str] = None
+    enabled: Optional[bool] = None
 
 
 class CapabilityCell(BaseModel):
@@ -319,9 +360,33 @@ class SystemTaskStatusResponse(BaseModel):
     reason: Optional[str] = None
 
 
-class SystemRegisterRequest(BaseModel):
-    """系统级注册请求"""
+class TaskUpdateSyncedResult(BaseModel):
+    """APS update + native reconcile partial-success result.
 
-    scope: SystemTaskScope = Field(
-        SystemTaskScope.USER, description="运行范围：用户级或系统级"
-    )
+    APS success with native failure still carries ``task`` and surfaces
+    ``native_error`` / ``native_status`` without treating the request as failed.
+    """
+
+    task: Optional["ScheduledTask"] = None
+    # APS path: success | not_found | error (indeterminate / raised)
+    aps_outcome: Literal["success", "not_found", "error"] = "success"
+    aps_error: Optional[str] = None
+    native_status: Optional[SystemTaskStatusResponse] = None
+    native_error: Optional[str] = None
+
+
+class ReconcileTaskResult(BaseModel):
+    """Single-task reconcile outcome for repair/reconcile_all aggregation."""
+
+    task_id: str
+    action: Literal[
+        "noop",
+        "registered",
+        "updated",
+        "cleaned",
+        "materialized",
+        "error",
+        "skipped",
+    ] = "noop"
+    detail: str = ""
+    native_error: Optional[str] = None
