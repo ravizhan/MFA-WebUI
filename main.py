@@ -291,39 +291,13 @@ async def lifespan(app: FastAPI):
             config_data,
             context={"interface": interface},
         )
-    # 初始化调度器（paused：先 import/repair，再 resume，避免启动期误派发）
+    # 初始化调度器（paused：先 repair，再 resume，避免启动期误派发）
     app_state.scheduler_manager = SchedulerManager()
     app_state.scheduler_manager.set_worker(app_state.worker)
     await app_state.scheduler_manager.initialize(paused=True)
 
-    # 初始化系统级调度：将已有 scope 导入 APS，再 repair（均在 paused 下）
+    # 初始化用户级原生唤醒：load operational state + repair（均在 paused 下）
     app_state.system_scheduler = SystemTaskService(APP_ROOT_DIR)
-    try:
-        import_stats = await app_state.system_scheduler.import_scopes_into_aps(
-            app_state.scheduler_manager
-        )
-        # Always surface nonzero failed (e.g. corrupt JSON) before resume.
-        if (
-            import_stats.get("imported")
-            or import_stats.get("failed")
-            or import_stats.get("missing_job")
-        ):
-            detail_tail = ""
-            if import_stats.get("failed"):
-                details = import_stats.get("details") or []
-                detail_tail = f"; details={details}"
-            app_state.send_log(
-                "系统任务 scope 导入: "
-                f"imported={import_stats.get('imported', 0)} "
-                f"skipped={import_stats.get('skipped', 0)} "
-                f"missing={import_stats.get('missing_job', 0)} "
-                f"failed={import_stats.get('failed', 0)}"
-                f"{detail_tail}"
-            )
-    except Exception as e:
-        # Log and continue: do not lock out the app; still no pre-resume dispatch.
-        app_state.send_log(f"系统任务 scope 导入失败: {e}")
-
     try:
         repair_result = await app_state.system_scheduler.repair_all(
             app_state.scheduler_manager
@@ -1136,7 +1110,7 @@ async def get_scheduler_executions(limit: int = 50):
 
 # ---------------------------------------------------------------------------
 # 原生唤醒（用户级）注册 API
-# system_scope user|legacy system 均表示用户级 wakeup；无 capability 诊断层。
+# 用户级原生唤醒（wakeup_enabled）；无 capability/scope 兼容层。
 # ---------------------------------------------------------------------------
 
 

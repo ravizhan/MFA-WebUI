@@ -28,11 +28,9 @@ from scheduler_job_codec import (
     decode_pre_tasks_from_job_kwargs,
     decode_trigger,
     encode_execution_kwargs,
-    resolve_execute_pre_tasks,
 )
 from scheduler_manager import SchedulerManager
 
-LEGACY_PRE = [{"id": "legacy-1", "command": "echo legacy", "enabled": True, "timeout": 30}]
 CANONICAL_PRE = [
     {"id": "canon-1", "command": "echo canonical", "enabled": True, "timeout": 30}
 ]
@@ -134,27 +132,19 @@ def test_decode_cron_multiple_missing_fields_listed():
 # ---------------------------------------------------------------------------
 
 
-def test_decode_pre_tasks_prefers_canonical_including_empty():
+def test_decode_pre_tasks_reads_only_pre_tasks_key():
     assert decode_pre_tasks_from_job_kwargs({"pre_tasks": []}) == []
-    assert decode_pre_tasks_from_job_kwargs({"pre_tasks": [], "preTasks": LEGACY_PRE}) == []
-    assert decode_pre_tasks_from_job_kwargs({"preTasks": LEGACY_PRE}) == LEGACY_PRE
+    assert decode_pre_tasks_from_job_kwargs({"pre_tasks": CANONICAL_PRE}) == CANONICAL_PRE
+    assert decode_pre_tasks_from_job_kwargs({}) == []
     assert (
         decode_pre_tasks_from_job_kwargs(
-            {"pre_tasks": CANONICAL_PRE, "preTasks": LEGACY_PRE}
+            {"preTasks": [{"id": "x", "command": "echo x", "enabled": True, "timeout": 1}]}
         )
-        == CANONICAL_PRE
+        == []
     )
-    assert decode_pre_tasks_from_job_kwargs({}) == []
 
 
-def test_resolve_execute_pre_tasks_preference():
-    assert resolve_execute_pre_tasks([], LEGACY_PRE) == []
-    assert resolve_execute_pre_tasks(None, LEGACY_PRE) == LEGACY_PRE
-    assert resolve_execute_pre_tasks(CANONICAL_PRE, LEGACY_PRE) == CANONICAL_PRE
-    assert resolve_execute_pre_tasks(None, None) == []
-
-
-def test_encode_execution_kwargs_canonical_schema_and_fields():
+def test_encode_execution_kwargs_schema_and_fields():
     device = ScheduledTaskDeviceConfig(
         controller_name="ADB",
         device_type="Adb",
@@ -182,14 +172,14 @@ def test_encode_execution_kwargs_canonical_schema_and_fields():
         "controller_name",
         "device",
         "resource_name",
-        "system_scope",
+        "wakeup_enabled",
     }
     assert "preTasks" not in kwargs
     assert kwargs["pre_tasks"][0]["command"] == "echo hi"
     assert kwargs["device"]["device_address"] == "127.0.0.1:5555"
     assert kwargs["resource_name"] == "Official"
     assert kwargs["task_options"] == {"Main": {"opt": "v"}}
-    assert kwargs["system_scope"] is None
+    assert kwargs["wakeup_enabled"] is False
 
 
 def test_decode_job_to_scheduled_task_full_payload():
@@ -230,39 +220,21 @@ def test_decode_job_to_scheduled_task_full_payload():
     assert task.enabled is True
 
 
-def test_decode_job_legacy_preTasks_and_canonical_empty_wins():
-    job_legacy = SimpleNamespace(
-        id="legacy",
+def test_decode_job_missing_pre_tasks_defaults_empty():
+    job = SimpleNamespace(
+        id="no-pre",
         kwargs={
             "task_name": "L",
             "task_description": "",
             "task_list": ["Main"],
             "task_options": {},
-            "preTasks": LEGACY_PRE,
         },
         trigger=build_trigger(CronTriggerConfig(cron="0 1 * * *")),
         next_run_time=None,
     )
-    task = decode_job_to_scheduled_task(job_legacy, normalize=_identity_normalize)
-    assert len(task.preTasks) == 1
-    assert task.preTasks[0].command == "echo legacy"
+    task = decode_job_to_scheduled_task(job, normalize=_identity_normalize)
+    assert task.preTasks == []
     assert task.enabled is False
-
-    job_both = SimpleNamespace(
-        id="both",
-        kwargs={
-            "task_name": "B",
-            "task_description": "",
-            "task_list": ["Main"],
-            "task_options": {},
-            "pre_tasks": [],
-            "preTasks": LEGACY_PRE,
-        },
-        trigger=build_trigger(CronTriggerConfig(cron="0 1 * * *")),
-        next_run_time=None,
-    )
-    task_both = decode_job_to_scheduled_task(job_both, normalize=_identity_normalize)
-    assert task_both.preTasks == []
 
 
 def test_decode_job_corrupt_trigger_raises_without_default_cron():

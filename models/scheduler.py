@@ -1,5 +1,4 @@
 import uuid
-from enum import Enum
 
 from pydantic import BaseModel, Field, field_validator
 from typing import List, Dict, Optional, Literal
@@ -97,14 +96,9 @@ class ScheduledTask(TaskExecutionPayload):
     controller_name: Optional[str] = Field(None, description="控制器名称")
     device: Optional[ScheduledTaskDeviceConfig] = Field(None, description="设备配置")
     resource_name: Optional[str] = Field(None, description="资源包名称")
-    # APS-owned native wakeup flag (stored as system_scope for compatibility).
-    # "user" | legacy "system" both mean user-level wakeup enabled; None = off.
-    system_scope: Optional[Literal["user", "system"]] = Field(
-        None,
-        description=(
-            "原生唤醒开关（兼容字段）。user/system 均表示启用用户级唤醒；"
-            "None 表示关闭。新写入仅使用 user。"
-        ),
+    # APS-owned native user-level wakeup flag (False = no OS registration)
+    wakeup_enabled: bool = Field(
+        False, description="是否注册用户级 OS 原生唤醒（False 表示关闭）"
     )
     next_run_time: Optional[datetime] = Field(None, description="下次执行时间")
     created_at: datetime = Field(default_factory=datetime.now, description="创建时间")
@@ -122,8 +116,7 @@ class ScheduledTaskCreate(TaskExecutionPayload):
     controller_name: Optional[str] = Field(None, description="控制器名称")
     device: Optional[ScheduledTaskDeviceConfig] = Field(None, description="设备配置")
     resource_name: Optional[str] = Field(None, description="资源包名称")
-    # Accepts legacy "system" but runtime normalizes to user wakeup.
-    system_scope: Optional[Literal["user", "system"]] = None
+    wakeup_enabled: bool = False
 
 
 class ScheduledTaskUpdate(BaseModel):
@@ -140,8 +133,8 @@ class ScheduledTaskUpdate(BaseModel):
     task_list: Optional[List[str]] = None
     task_options: Optional[TaskOptionsByTask] = None
     preTasks: Optional[List[PreTaskCommand]] = None
-    # omitted=sync existing; null=disable wakeup; user|system=enable user wakeup
-    system_scope: Optional[Literal["user", "system"]] = None
+    # omitted=keep; true/false via model_fields_set (explicit false disables wakeup)
+    wakeup_enabled: Optional[bool] = None
 
 
 class TaskExecution(BaseModel):
@@ -168,36 +161,25 @@ class TaskExecutionCreate(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# 系统级计划任务注册模型
+# 用户级原生唤醒注册模型
 # ---------------------------------------------------------------------------
 
 
-class SystemTaskScope(str, Enum):
-    """原生唤醒作用域。
+OperationalState = Literal["active", "error"]
 
-    - USER: 当前用户级注册（唯一支持的新注册路径）
-    - SYSTEM: 仅用于读取/清理历史 SYSTEM artifact；禁止新注册
-    """
+# Exact allowlist of keys written to system_tasks.json.
+OPERATIONAL_STATE_KEYS = frozenset(
+    {
+        "task_id",
+        "platform",
+        "state",
+        "registered_exe_path",
+        "last_registered_at",
+        "last_error",
+    }
+)
 
-    USER = "user"
-    SYSTEM = "system"
-
-
-RegistrationState = Literal[
-    "pending_register",
-    "active",
-    "orphaned",
-    "pending_cleanup",
-    "error",
-]
-
-PendingOperation = Literal[
-    "register",
-    "unregister",
-    "migrate",
-    "repair",
-    "none",
-]
+OPERATIONAL_STATE_VERSION = 4
 
 
 class OSTriggerSpec(BaseModel):
@@ -214,7 +196,7 @@ class OSTriggerSpec(BaseModel):
 
 
 class SystemTaskSpec(BaseModel):
-    """注册到 OS 调度器的任务规格"""
+    """注册到 OS 用户级调度器的任务规格"""
 
     task_id: str
     task_name: str
@@ -225,39 +207,7 @@ class SystemTaskSpec(BaseModel):
         ..., description="命令行参数，如 source 下 [main.py, --headless, --task, id]"
     )
     trigger: OSTriggerSpec
-    scope: SystemTaskScope
     working_dir: str
-
-
-class ObservedNativeState(BaseModel):
-    """Observed native registration state for one scope/identifier."""
-
-    scope: SystemTaskScope
-    identifier: str
-    present: bool = False
-    verified: bool = False
-    details: Optional[str] = None
-
-
-# On-disk operational state only (active | error).
-OperationalState = Literal["active", "error"]
-
-# Exact allowlist of keys written to system_tasks.json operational format.
-OPERATIONAL_STATE_KEYS = frozenset(
-    {
-        "task_id",
-        "platform",
-        "state",
-        "last_known_scope",
-        "cleanup_scopes",
-        "system_task_identifier",
-        "registered_exe_path",
-        "last_registered_at",
-        "last_error",
-        "observed",
-        "warnings",
-    }
-)
 
 
 class SystemTaskOperationalRecord(BaseModel):
@@ -266,16 +216,11 @@ class SystemTaskOperationalRecord(BaseModel):
     task_id: str
     platform: Literal["windows", "macos", "linux"]
     state: OperationalState = "active"
-    last_known_scope: Optional[SystemTaskScope] = None
-    cleanup_scopes: List[SystemTaskScope] = Field(default_factory=list)
-    system_task_identifier: str = ""
     registered_exe_path: str = Field(
-        "", description="Diagnostic last-known registered exe path"
+        "", description="Last-known registered exe path (diagnostic)"
     )
     last_registered_at: Optional[datetime] = None
     last_error: Optional[str] = None
-    observed: List[ObservedNativeState] = Field(default_factory=list)
-    warnings: List[str] = Field(default_factory=list)
 
     def to_operational_dict(self) -> dict:
         """Serialize only operational allowlisted keys."""
@@ -284,66 +229,36 @@ class SystemTaskOperationalRecord(BaseModel):
 
 
 class SystemTaskRegistration(BaseModel):
-    """API/list DTO for system-task registration (hydrated; not the on-disk model).
-
-    Desired/schedule fields are optional and filled from APS when available.
-    """
+    """API/list DTO for native wakeup registration (hydrated from APS + disk)."""
 
     task_id: str
     task_name: str = ""
     platform: Literal["windows", "macos", "linux"]
-    # Hydrated from APS when available (not persisted operationally)
-    desired_scope: Optional[SystemTaskScope] = None
-    desired_trigger: Optional[OSTriggerSpec] = None
-    desired_exe_path: str = ""
-    desired_cli_args: List[str] = Field(default_factory=list)
-    desired_working_dir: str = ""
-    # Operational
-    state: RegistrationState = "active"
-    pending_operation: PendingOperation = "none"
-    observed: List[ObservedNativeState] = Field(default_factory=list)
-    system_task_identifier: str = ""
+    state: OperationalState = "active"
     registered_exe_path: str = ""
     last_registered_at: Optional[datetime] = None
     last_error: Optional[str] = None
-    warnings: List[str] = Field(default_factory=list)
-    migration_from_scope: Optional[SystemTaskScope] = None
-    orphaned: bool = False
-    scope: Optional[SystemTaskScope] = None
     trigger_spec: Optional[OSTriggerSpec] = None
-    # Operational mirrors (optional on API)
-    last_known_scope: Optional[SystemTaskScope] = None
-    cleanup_scopes: List[SystemTaskScope] = Field(default_factory=list)
-    # Authoritative runtime fields (list/status hydration; not on disk)
-    registered: Optional[bool] = None
-    verified: Optional[bool] = None
-    path_valid: Optional[bool] = None
+    next_run_time: Optional[datetime] = None
+    registered: bool = False
+    verified: bool = False
+    path_valid: bool = False
     reason: Optional[str] = None
     enabled: Optional[bool] = None
 
 
 class SystemTaskStatusResponse(BaseModel):
-    """原生唤醒注册状态（authoritative desired + observed）。
-
-    ``enabled`` / ``scope`` 表示用户级 wakeup 是否开启；
-    历史 system_scope=system 读取时归一为 USER。
-    """
+    """原生唤醒注册状态（authoritative APS + native observation）。"""
 
     task_id: str
     registered: bool
-    scope: Optional[SystemTaskScope] = None
     platform: Optional[str] = None
+    task_name: str = ""
     next_run_time: Optional[datetime] = None
     last_error: Optional[str] = None
     path_valid: bool = Field(..., description="注册路径是否与当前 command 一致")
-    # Extended authoritative fields
-    state: Optional[RegistrationState] = None
-    pending_operation: Optional[PendingOperation] = None
-    orphaned: bool = False
-    desired_scope: Optional[SystemTaskScope] = None
-    observed: List[ObservedNativeState] = Field(default_factory=list)
-    warnings: List[str] = Field(default_factory=list)
-    # Wakeup enabled for this task (platform trigger accepted when True)
+    state: Optional[OperationalState] = None
+    registered_exe_path: str = ""
     enabled: Optional[bool] = None
     verified: Optional[bool] = None
     reason: Optional[str] = None
@@ -357,7 +272,6 @@ class TaskUpdateSyncedResult(BaseModel):
     """
 
     task: Optional["ScheduledTask"] = None
-    # APS path: success | not_found | error (indeterminate / raised)
     aps_outcome: Literal["success", "not_found", "error"] = "success"
     aps_error: Optional[str] = None
     native_status: Optional[SystemTaskStatusResponse] = None

@@ -754,19 +754,7 @@ watch(
       return
     }
     activeSection.value = "basic"
-    systemSchedulingEnabled.value = false
-    if (task) {
-      // Treat legacy "system" and current "user" scopes as enabled (user-only wakeup).
-      // Backend may still return historical "system"; any non-null scope means enabled.
-      if (task.system_scope) {
-        systemSchedulingEnabled.value = true
-        return
-      }
-      const status = schedulerStore.getSystemStatus(task.id)
-      if (status && (status.state === "active" || status.state === "pending_register")) {
-        systemSchedulingEnabled.value = true
-      }
-    }
+    systemSchedulingEnabled.value = task?.wakeup_enabled === true
   },
 )
 
@@ -1211,7 +1199,7 @@ async function saveTaskPayload(): Promise<{ taskId: string; success: boolean }> 
     ...formData.value,
     ...configStore.buildExecutionPayload(formData.value.task_list, formData.value.task_options),
     preTasks: formData.value.preTasks ?? [],
-    system_scope: systemSchedulingEnabled.value ? "user" : null,
+    wakeup_enabled: systemSchedulingEnabled.value,
   }
 
   if (isEditMode.value && task) {

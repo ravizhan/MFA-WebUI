@@ -1,4 +1,4 @@
-"""Focused tests for scheduler job kwargs pre_tasks / preTasks compatibility."""
+"""Focused tests for scheduler job kwargs pre_tasks encoding/execution."""
 
 from __future__ import annotations
 
@@ -6,7 +6,6 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from apscheduler.triggers.cron import CronTrigger
 from apscheduler.util import obj_to_ref
 
 from models.scheduler import (
@@ -15,13 +14,9 @@ from models.scheduler import (
     ScheduledTaskCreate,
     ScheduledTaskUpdate,
 )
-from scheduler_job_codec import (
-    decode_pre_tasks_from_job_kwargs,
-    resolve_execute_pre_tasks,
-)
+from scheduler_job_codec import decode_pre_tasks_from_job_kwargs
 from scheduler_manager import SchedulerManager, execute_scheduled_task
 
-LEGACY_PRE = [{"id": "legacy-1", "command": "echo legacy", "enabled": True, "timeout": 30}]
 CANONICAL_PRE = [
     {"id": "canon-1", "command": "echo canonical", "enabled": True, "timeout": 30}
 ]
@@ -51,25 +46,21 @@ def _base_create(**overrides: Any) -> ScheduledTaskCreate:
     return ScheduledTaskCreate(**data)
 
 
-def test_decode_prefers_canonical_including_empty_list():
+def test_decode_pre_tasks_reads_only_pre_tasks_key():
     assert decode_pre_tasks_from_job_kwargs({"pre_tasks": []}) == []
-    assert decode_pre_tasks_from_job_kwargs({"pre_tasks": [], "preTasks": LEGACY_PRE}) == []
-    assert decode_pre_tasks_from_job_kwargs({"preTasks": LEGACY_PRE}) == LEGACY_PRE
-    assert decode_pre_tasks_from_job_kwargs(
-        {"pre_tasks": CANONICAL_PRE, "preTasks": LEGACY_PRE}
-    ) == (CANONICAL_PRE)
+    assert decode_pre_tasks_from_job_kwargs({"pre_tasks": CANONICAL_PRE}) == CANONICAL_PRE
     assert decode_pre_tasks_from_job_kwargs({}) == []
-
-
-def test_resolve_execute_pre_tasks_preference():
-    assert resolve_execute_pre_tasks([], LEGACY_PRE) == []
-    assert resolve_execute_pre_tasks(None, LEGACY_PRE) == LEGACY_PRE
-    assert resolve_execute_pre_tasks(CANONICAL_PRE, LEGACY_PRE) == CANONICAL_PRE
-    assert resolve_execute_pre_tasks(None, None) == []
+    # API-key-shaped junk in APS kwargs is ignored (not read)
+    assert (
+        decode_pre_tasks_from_job_kwargs(
+            {"preTasks": [{"id": "x", "command": "echo x", "enabled": True, "timeout": 1}]}
+        )
+        == []
+    )
 
 
 @pytest.mark.asyncio
-async def test_create_job_kwargs_use_canonical_pre_tasks(manager: SchedulerManager):
+async def test_create_job_kwargs_use_pre_tasks(manager: SchedulerManager):
     task = await manager.create_task(_base_create())
     assert manager.scheduler is not None
     job = manager.scheduler.get_job(task.id)
@@ -81,7 +72,7 @@ async def test_create_job_kwargs_use_canonical_pre_tasks(manager: SchedulerManag
 
 
 @pytest.mark.asyncio
-async def test_update_job_kwargs_use_canonical_pre_tasks(manager: SchedulerManager):
+async def test_update_job_kwargs_use_pre_tasks(manager: SchedulerManager):
     task = await manager.create_task(_base_create())
     updated = await manager.update_task(
         task.id,
@@ -98,50 +89,28 @@ async def test_update_job_kwargs_use_canonical_pre_tasks(manager: SchedulerManag
 
 
 @pytest.mark.asyncio
-async def test_update_legacy_job_rewrites_to_canonical_key(manager: SchedulerManager):
-    """A job persisted with legacy preTasks is rewritten to pre_tasks on update."""
-    task_id = "legacy-job-id"
+async def test_create_api_preTasks_encoded_as_aps_pre_tasks(manager: SchedulerManager):
+    """API model field preTasks is encoded into APS kwargs pre_tasks."""
+    pt = PreTaskCommand(id="pt-1", command="echo from-api", enabled=True, timeout=30)
+    with patch.object(
+        manager,
+        "_normalize_task_payload",
+        return_value=(["Main"], {"Main": {}}, [pt]),
+    ):
+        task = await manager.create_task(_base_create(preTasks=[pt]))
     assert manager.scheduler is not None
-    manager.scheduler.add_job(
-        execute_scheduled_task,
-        CronTrigger(minute="0", hour="9", day="*", month="*", day_of_week="*"),
-        id=task_id,
-        kwargs={
-            "task_id": task_id,
-            "task_name": "legacy",
-            "task_description": "",
-            "task_list": ["Main"],
-            "task_options": {"Main": {}},
-            "preTasks": LEGACY_PRE,
-            "controller_name": None,
-            "device": None,
-            "resource_name": None,
-        },
-    )
-    manager.scheduler.pause_job(task_id)
-
-    before = manager.scheduler.get_job(task_id)
-    assert before is not None
-    assert "preTasks" in before.kwargs
-    assert "pre_tasks" not in before.kwargs
-
-    updated = await manager.update_task(
-        task_id,
-        ScheduledTaskUpdate(name="migrated"),
-    )
-    assert updated is not None
-
-    after = manager.scheduler.get_job(task_id)
-    assert after is not None
-    assert "pre_tasks" in after.kwargs
-    assert "preTasks" not in after.kwargs
-    assert after.kwargs["task_name"] == "migrated"
-    assert after.func_ref == "scheduler_manager:execute_scheduled_task"
+    job = manager.scheduler.get_job(task.id)
+    assert job is not None
+    assert "pre_tasks" in job.kwargs
+    assert "preTasks" not in job.kwargs
+    assert job.kwargs["pre_tasks"][0]["command"] == "echo from-api"
 
 
 @pytest.mark.asyncio
-async def test_get_task_prefers_canonical_empty_over_legacy(manager: SchedulerManager):
-    task_id = "both-keys-job"
+async def test_get_task_decodes_pre_tasks_key(manager: SchedulerManager):
+    from apscheduler.triggers.cron import CronTrigger
+
+    task_id = "pre-tasks-job"
     assert manager.scheduler is not None
     manager.scheduler.add_job(
         execute_scheduled_task,
@@ -149,21 +118,19 @@ async def test_get_task_prefers_canonical_empty_over_legacy(manager: SchedulerMa
         id=task_id,
         kwargs={
             "task_id": task_id,
-            "task_name": "both",
+            "task_name": "with-pre",
             "task_description": "",
             "task_list": ["Main"],
             "task_options": {"Main": {}},
-            "pre_tasks": [],
-            "preTasks": LEGACY_PRE,
+            "pre_tasks": CANONICAL_PRE,
             "controller_name": None,
             "device": None,
             "resource_name": None,
+            "wakeup_enabled": False,
         },
     )
     manager.scheduler.pause_job(task_id)
 
-    # Without worker.interface, normalize returns empty pre_tasks; still must not
-    # crash and must have preferred the canonical key during decode.
     with patch.object(
         manager,
         "_normalize_task_payload",
@@ -171,13 +138,11 @@ async def test_get_task_prefers_canonical_empty_over_legacy(manager: SchedulerMa
     ) as normalize:
         task = await manager.get_task(task_id)
         assert task is not None
-        # Third positional arg is the decoded pre-tasks value.
-        assert normalize.call_args.args[2] == []
+        assert normalize.call_args.args[2] == CANONICAL_PRE
 
 
 @pytest.mark.asyncio
-async def test_legacy_execute_invocation_forwards_preTasks():
-    """Legacy persisted kwargs (preTasks=...) still reach the manager."""
+async def test_execute_forwards_pre_tasks():
     captured: dict[str, Any] = {}
 
     async def _execute_task(**kwargs):
@@ -189,19 +154,19 @@ async def test_legacy_execute_invocation_forwards_preTasks():
     with patch("scheduler_manager._ACTIVE_MANAGER", mock_mgr):
         await execute_scheduled_task(
             task_id="t1",
-            task_name="legacy-run",
+            task_name="run",
             task_description="",
             task_list=["Main"],
             task_options={},
-            preTasks=LEGACY_PRE,
+            pre_tasks=CANONICAL_PRE,
         )
 
     mock_mgr._execute_task.assert_awaited_once()
-    assert captured["pre_tasks"] == LEGACY_PRE
+    assert captured["pre_tasks"] == CANONICAL_PRE
 
 
 @pytest.mark.asyncio
-async def test_execute_canonical_empty_wins_over_legacy_nonempty():
+async def test_execute_missing_pre_tasks_becomes_empty_list():
     captured: dict[str, Any] = {}
 
     async def _execute_task(**kwargs):
@@ -213,20 +178,18 @@ async def test_execute_canonical_empty_wins_over_legacy_nonempty():
     with patch("scheduler_manager._ACTIVE_MANAGER", mock_mgr):
         await execute_scheduled_task(
             task_id="t2",
-            task_name="empty-wins",
+            task_name="empty",
             task_description="",
             task_list=["Main"],
             task_options={},
-            pre_tasks=[],
-            preTasks=LEGACY_PRE,
         )
 
     assert captured["pre_tasks"] == []
 
 
 @pytest.mark.asyncio
-async def test_update_preserves_pre_tasks_content_when_rewriting(manager: SchedulerManager):
-    """When worker normalizes pre-tasks, update still writes the canonical key."""
+async def test_update_api_preTasks_writes_aps_pre_tasks(manager: SchedulerManager):
+    """API model ScheduledTaskUpdate.preTasks → APS kwargs pre_tasks."""
     pt = PreTaskCommand(id="pt-1", command="echo hi", enabled=True, timeout=30)
     task = await manager.create_task(_base_create())
 

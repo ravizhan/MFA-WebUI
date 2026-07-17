@@ -8,7 +8,6 @@ import type {
   TaskExecution,
   SystemTaskStatus,
   SystemTaskRegistration,
-  SystemTaskObservation,
 } from "@/types/schedulerModel"
 import {
   getSchedulerTasks,
@@ -31,14 +30,6 @@ export const useSchedulerStore = defineStore("scheduler", () => {
   const error = ref<string | null>(null)
   const systemTaskStatuses = ref<Record<string, SystemTaskStatus>>({})
   const systemRegistrations = ref<SystemTaskRegistration[]>([])
-
-  function normalizeStatusScope(status: SystemTaskStatus): SystemTaskStatus {
-    const resolved = status.last_known_scope ?? status.desired_scope ?? status.scope
-    if (resolved === status.scope) {
-      return status
-    }
-    return { ...status, scope: resolved }
-  }
 
   // Computed
   const enabledTasks = computed(() => tasks.value.filter((t) => t.enabled))
@@ -99,7 +90,7 @@ export const useSchedulerStore = defineStore("scheduler", () => {
         tasks.value[index] = response.task
       }
       if (response.native_status) {
-        systemTaskStatuses.value[taskId] = normalizeStatusScope(response.native_status)
+        systemTaskStatuses.value[taskId] = response.native_status
       } else if (response.native_error) {
         systemTaskStatuses.value[taskId] = {
           task_id: taskId,
@@ -189,7 +180,7 @@ export const useSchedulerStore = defineStore("scheduler", () => {
       return
     }
     if (response.status === "success" && response.data) {
-      systemTaskStatuses.value[taskId] = normalizeStatusScope(response.data)
+      systemTaskStatuses.value[taskId] = response.data
     }
   }
 
@@ -213,7 +204,7 @@ export const useSchedulerStore = defineStore("scheduler", () => {
     if (response.status === "success" && response.registrations) {
       const statuses: Record<string, SystemTaskStatus> = {}
       for (const reg of response.registrations) {
-        statuses[reg.task_id] = buildSystemTaskStatus(reg)
+        statuses[reg.task_id] = toSystemTaskStatus(reg)
       }
       systemTaskStatuses.value = statuses
     }
@@ -252,41 +243,21 @@ export const useSchedulerStore = defineStore("scheduler", () => {
     error.value = null
   }
 
-  function mapObservations(reg: SystemTaskRegistration): SystemTaskObservation[] {
-    return (
-      reg.observed?.map((obs) => ({
-        scope: obs.scope,
-        identifier: obs.identifier,
-        present: obs.present,
-        verified: obs.verified,
-        details: obs.details,
-      })) ?? []
-    )
-  }
-
-  function buildSystemTaskStatus(reg: SystemTaskRegistration): SystemTaskStatus {
-    // Prefer authoritative backend fields; never infer active=true when
-    // registered is explicitly false (APS missing / unknown / disabled).
-    const fallbackActive =
-      (reg.state === "active" || reg.state === "pending_register") && !reg.orphaned
+  function toSystemTaskStatus(reg: SystemTaskRegistration): SystemTaskStatus {
     return {
       task_id: reg.task_id,
-      registered: reg.registered ?? fallbackActive,
-      // Status scope follows APS authority (desired_scope/scope already hydrated).
-      scope: reg.last_known_scope ?? reg.desired_scope ?? reg.scope ?? undefined,
+      task_name: reg.task_name,
       platform: reg.platform,
-      path_valid: reg.path_valid ?? false,
-      last_error: reg.last_error,
       state: reg.state,
-      pending_operation: reg.pending_operation,
-      orphaned: reg.orphaned,
-      desired_scope: reg.desired_scope ?? undefined,
-      last_known_scope: reg.last_known_scope,
-      observed: mapObservations(reg),
-      warnings: reg.warnings,
-      verified: reg.verified ?? false,
-      reason: reg.reason,
+      registered: reg.registered,
       enabled: reg.enabled,
+      verified: reg.verified,
+      path_valid: reg.path_valid,
+      registered_exe_path: reg.registered_exe_path,
+      next_run_time: reg.next_run_time,
+      last_error: reg.last_error,
+      reason: reg.reason,
+      trigger: reg.trigger,
     }
   }
 

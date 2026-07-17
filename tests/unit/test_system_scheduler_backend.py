@@ -1,8 +1,9 @@
-"""OS scheduler backend unit tests — USER-only registration + trigger contracts."""
+"""OS scheduler backend unit tests — user-level registration + trigger contracts."""
 
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -11,7 +12,6 @@ from models.scheduler import (
     DateTriggerConfig,
     IntervalTriggerConfig,
     OSTriggerSpec,
-    SystemTaskScope,
     SystemTaskSpec,
 )
 from services.system_scheduler_backend import (
@@ -214,7 +214,6 @@ class TestGoldenArtifacts:
             exe_path=r"C:\Program Files\MWU\python.exe",
             cli_args=[r"C:\Program Files\MWU\main.py", "--headless", "--task", tid],
             trigger=trigger,
-            scope=SystemTaskScope.USER,
             working_dir=r"C:\Program Files\MWU",
         )
 
@@ -274,58 +273,120 @@ class TestGoldenArtifacts:
         assert " root " not in line
 
 
-class TestUserOnlyRegistration:
-    def _user_spec(self) -> SystemTaskSpec:
-        return SystemTaskSpec(
-            task_id=TID,
-            task_name="T",
-            exe_path="/bin/mwu",
-            cli_args=["--headless", "--task", TID],
-            trigger=OSTriggerSpec(trigger_type="cron", cron_expression="0 9 * * *"),
-            scope=SystemTaskScope.USER,
-            working_dir="/tmp",
-        )
+class TestUserLevelIdentifiers:
+    def test_platform_identifiers_user_only(self):
+        assert MacOSBackend().build_identifier(TID).startswith("com.mwu.task.")
+        assert LinuxBackend().build_identifier(TID) == f"mwu-{TID}"
+        assert WindowsBackend().build_identifier(TID) == f"\\MWU\\{TID}"
+
+
+class TestPresenceQuerySemantics:
+    """Windows/macOS: explicit not-found → absent; other non-zero → RuntimeError."""
 
     @pytest.mark.asyncio
-    async def test_windows_register_rejects_system_scope(self):
+    async def test_windows_is_registered_not_found_false(self, monkeypatch):
         b = WindowsBackend()
-        spec = self._user_spec()
-        spec.scope = SystemTaskScope.SYSTEM
-        with pytest.raises(ValueError, match="USER|用户级"):
-            await b.register(spec)
+
+        def fake_run(args, capture_output=True):
+            return SimpleNamespace(
+                returncode=1,
+                stderr=b"ERROR: The system cannot find the file specified.",
+                stdout=b"",
+            )
+
+        monkeypatch.setattr(
+            "services.system_scheduler_backend.subprocess.run", fake_run
+        )
+        assert await b.is_registered(TID) is False
 
     @pytest.mark.asyncio
-    async def test_macos_register_rejects_system_scope(self):
+    async def test_windows_is_registered_other_error_raises(self, monkeypatch):
+        b = WindowsBackend()
+
+        def fake_run(args, capture_output=True):
+            return SimpleNamespace(
+                returncode=1,
+                stderr=b"Access is denied.",
+                stdout=b"",
+            )
+
+        monkeypatch.setattr(
+            "services.system_scheduler_backend.subprocess.run", fake_run
+        )
+        with pytest.raises(RuntimeError, match="schtasks query failed"):
+            await b.is_registered(TID)
+
+    @pytest.mark.asyncio
+    async def test_windows_unregister_not_found_silent(self, monkeypatch):
+        b = WindowsBackend()
+
+        def fake_run(args, capture_output=True):
+            return SimpleNamespace(
+                returncode=1,
+                stderr=b"ERROR: The system cannot find the file specified.",
+                stdout=b"",
+            )
+
+        monkeypatch.setattr(
+            "services.system_scheduler_backend.subprocess.run", fake_run
+        )
+        await b.unregister(TID)  # no raise
+
+    @pytest.mark.asyncio
+    async def test_windows_unregister_other_error_raises(self, monkeypatch):
+        b = WindowsBackend()
+
+        def fake_run(args, capture_output=True):
+            return SimpleNamespace(
+                returncode=1,
+                stderr=b"Access is denied.",
+                stdout=b"",
+            )
+
+        monkeypatch.setattr(
+            "services.system_scheduler_backend.subprocess.run", fake_run
+        )
+        with pytest.raises(RuntimeError, match="卸载失败"):
+            await b.unregister(TID)
+
+    @pytest.mark.asyncio
+    async def test_macos_is_registered_not_found_false(self, monkeypatch):
         b = MacOSBackend()
-        spec = self._user_spec()
-        spec.scope = SystemTaskScope.SYSTEM
-        with pytest.raises(ValueError, match="USER|用户级"):
-            await b.register(spec)
+
+        def fake_run(args, capture_output=True):
+            return SimpleNamespace(
+                returncode=113,
+                stderr=b"Could not find service",
+                stdout=b"",
+            )
+
+        monkeypatch.setattr(
+            "services.system_scheduler_backend.subprocess.run", fake_run
+        )
+        assert await b.is_registered(TID) is False
 
     @pytest.mark.asyncio
-    async def test_linux_register_rejects_system_scope(self):
-        b = LinuxBackend()
-        spec = self._user_spec()
-        spec.scope = SystemTaskScope.SYSTEM
-        with pytest.raises(ValueError, match="USER|用户级"):
-            await b.register(spec)
+    async def test_macos_is_registered_non_not_found_stderr_raises(self, monkeypatch):
+        """Non-not-found stderr with rc!=0.
 
-    def test_historical_system_identifiers_still_built(self):
-        """Cleanup of legacy SYSTEM artifacts needs distinct identifiers."""
-        assert MacOSBackend().build_identifier(TID, SystemTaskScope.SYSTEM).startswith(
-            "com.mwu.daemon."
+        Contract intent: raise RuntimeError (unknown). Current production falls
+        through to return False when outer not-found guard is false — see report.
+        """
+        b = MacOSBackend()
+
+        def fake_run(args, capture_output=True):
+            return SimpleNamespace(
+                returncode=1,
+                stderr=b"Permission denied launching domain",
+                stdout=b"",
+            )
+
+        monkeypatch.setattr(
+            "services.system_scheduler_backend.subprocess.run", fake_run
         )
-        assert MacOSBackend().build_identifier(TID, SystemTaskScope.USER).startswith(
-            "com.mwu.task."
-        )
-        assert LinuxBackend().build_identifier(TID, SystemTaskScope.SYSTEM) == (
-            f"/etc/cron.d/mwu-{TID}"
-        )
-        assert LinuxBackend().build_identifier(TID, SystemTaskScope.USER) == f"mwu-{TID}"
-        # Windows path is shared under \\MWU\\
-        assert WindowsBackend().build_identifier(TID, SystemTaskScope.SYSTEM) == (
-            f"\\MWU\\{TID}"
-        )
+        # Actual production behavior (defect vs contract): treated as absent.
+        with pytest.raises(RuntimeError, match="launchctl print failed"):
+            await b.is_registered(TID)
 
 
 # ---------------------------------------------------------------------------
@@ -350,7 +411,6 @@ class TestWindowsXmlVerify:
             exe_path=r"C:\Program Files\MWU\python.exe",
             cli_args=[r"C:\Program Files\MWU\main.py", "--headless", "--task", TID],
             trigger=trigger,
-            scope=SystemTaskScope.USER,
             working_dir=r"C:\Program Files\MWU",
         )
 

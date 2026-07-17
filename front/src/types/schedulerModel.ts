@@ -53,7 +53,8 @@ export interface ScheduledTask extends TaskExecutionPayload {
   controller_name?: string | null
   device?: ScheduledTaskDeviceConfig | null
   resource_name?: string | null
-  system_scope?: SystemTaskScope | null
+  /** User-level OS wakeup registration */
+  wakeup_enabled: boolean
   next_run_time?: string // ISO 8601 datetime string
   created_at: string // ISO 8601 datetime string
   updated_at: string // ISO 8601 datetime string
@@ -68,7 +69,7 @@ export interface ScheduledTaskCreate extends TaskExecutionPayload {
   controller_name?: string | null
   device?: ScheduledTaskDeviceConfig | null
   resource_name?: string | null
-  system_scope?: SystemTaskScope | null
+  wakeup_enabled: boolean
 }
 
 export interface ScheduledTaskUpdate {
@@ -83,7 +84,8 @@ export interface ScheduledTaskUpdate {
   task_list?: string[]
   task_options?: TaskOptionsByTask
   preTasks?: PreTaskCommand[]
-  system_scope?: SystemTaskScope | null
+  /** Always send true/false on update when changing wakeup */
+  wakeup_enabled?: boolean
 }
 
 export interface TaskExecution {
@@ -107,19 +109,12 @@ export interface SchedulerApiResponse {
 }
 
 // ---------------------------------------------------------------------------
-// 系统级计划任务注册
+// 系统级计划任务注册（精简 DTO，无 scope/legacy）
 // ---------------------------------------------------------------------------
-
-export type SystemTaskScope = "user"
 
 export type SystemTaskPlatform = "windows" | "macos" | "linux"
 
-export type SystemTaskState =
-  | "pending_register"
-  | "active"
-  | "orphaned"
-  | "pending_cleanup"
-  | "error"
+export type SystemTaskState = "active" | "error"
 
 export interface OSTriggerSpec {
   trigger_type: TriggerType
@@ -128,64 +123,38 @@ export interface OSTriggerSpec {
   interval_minutes?: number
 }
 
-export interface SystemTaskObservation {
-  scope: SystemTaskScope
-  identifier: string
-  present: boolean
-  verified: boolean
-  details?: string
-}
-
+/** Authoritative native wakeup status (status endpoint / native_status). */
 export interface SystemTaskStatus {
   task_id: string
-  registered?: boolean
-  scope?: SystemTaskScope
+  task_name?: string
   platform?: SystemTaskPlatform
-  next_run_time?: string
-  last_error?: string
-  path_valid?: boolean
-  // Extended authoritative fields
   state?: SystemTaskState
-  pending_operation?: string
-  orphaned?: boolean
-  desired_scope?: SystemTaskScope
-  last_known_scope?: SystemTaskScope
-  observed?: SystemTaskObservation[]
-  warnings?: string[]
+  registered?: boolean
   enabled?: boolean
   verified?: boolean
+  path_valid?: boolean
+  registered_exe_path?: string
+  next_run_time?: string
+  last_error?: string
   reason?: string
+  trigger?: OSTriggerSpec
 }
 
+/** List DTO for /api/scheduler/system-tasks registrations. */
 export interface SystemTaskRegistration {
   task_id: string
   task_name?: string
   platform: SystemTaskPlatform
-  scope: SystemTaskScope | null
-  system_task_identifier: string
-  trigger_spec?: OSTriggerSpec
-  registered_exe_path?: string
-  last_registered_at: string | null
-  orphaned: boolean
-  // Extended durable fields
   state: SystemTaskState
-  pending_operation?: string
-  desired_scope?: SystemTaskScope
-  desired_trigger?: OSTriggerSpec
-  desired_exe_path?: string
-  desired_cli_args?: string[]
-  desired_working_dir?: string
-  observed?: SystemTaskObservation[]
-  warnings?: string[]
-  last_error?: string
-  migration_from_scope?: SystemTaskScope
-  last_known_scope?: SystemTaskScope
-  // Authoritative runtime fields from backend hydration (prefer over state inference)
   registered?: boolean
+  enabled?: boolean
   verified?: boolean
   path_valid?: boolean
+  registered_exe_path?: string
+  next_run_time?: string
+  last_error?: string
   reason?: string
-  enabled?: boolean
+  trigger?: OSTriggerSpec
 }
 
 export interface SystemTaskRepairResult {

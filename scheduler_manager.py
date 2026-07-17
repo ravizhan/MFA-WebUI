@@ -25,7 +25,6 @@ from scheduler_job_codec import (
     decode_pre_tasks_from_job_kwargs,
     decode_trigger,
     encode_execution_kwargs,
-    resolve_execute_pre_tasks,
 )
 
 logger = logging.getLogger(__name__)
@@ -40,32 +39,28 @@ async def execute_scheduled_task(
     task_list: List[str],
     task_options: TaskOptionsByTask,
     pre_tasks: Optional[List[dict]] = None,
-    preTasks: Optional[List[dict]] = None,
     controller_name: Optional[str] = None,
     device: Optional[dict] = None,
     resource_name: Optional[str] = None,
-    system_scope: Optional[str] = None,
+    wakeup_enabled: bool = False,
 ):
     """APScheduler 可持久化执行入口.
 
-    Accepts both canonical ``pre_tasks`` and legacy ``preTasks`` kwargs from
-    already-persisted jobs. Prefer ``pre_tasks`` when both are present.
-    ``system_scope`` is accepted for kwargs signature stability but ignored
+    ``wakeup_enabled`` is accepted for kwargs signature stability but ignored
     at execution time (native wakeup metadata only).
     Path must remain ``scheduler_manager:execute_scheduled_task``.
     """
-    del system_scope  # metadata only; not used during in-process execution
+    del wakeup_enabled  # metadata only; not used during in-process execution
     if _ACTIVE_MANAGER is None:
         logger.error(f"调度器管理器未就绪，跳过定时任务 {task_id}")
         return
-    resolved_pre_tasks = resolve_execute_pre_tasks(pre_tasks, preTasks)
     await _ACTIVE_MANAGER._execute_task(
         task_id=task_id,
         task_name=task_name,
         _task_description=task_description,
         task_list=task_list,
         task_options=task_options,
-        pre_tasks=resolved_pre_tasks,
+        pre_tasks=pre_tasks or [],
         controller_name=controller_name,
         device=device,
         resource_name=resource_name,
@@ -475,7 +470,7 @@ class SchedulerManager:
         if not normalized_task_list:
             raise ValueError("任务列表不能为空")
 
-        # 添加任务到调度器；kwargs 由 codec 统一编码（canonical pre_tasks）
+        # 添加任务到调度器；kwargs 由 codec 统一编码（pre_tasks）
         self.scheduler.add_job(
             execute_scheduled_task,
             trigger,
@@ -490,7 +485,7 @@ class SchedulerManager:
                 controller_name=task_create.controller_name,
                 device=task_create.device,
                 resource_name=task_create.resource_name,
-                system_scope=task_create.system_scope,
+                wakeup_enabled=task_create.wakeup_enabled,
             ),
         )
 
@@ -622,11 +617,12 @@ class SchedulerManager:
                 if "resource_name" in updated_fields
                 else current_kwargs.get("resource_name", None)
             )
-            # omitted system_scope → preserve; explicit None → clear
-            if "system_scope" in updated_fields:
-                new_system_scope = task_update.system_scope
+            # omitted wakeup_enabled → preserve; explicit true/false via fields_set
+            if "wakeup_enabled" in updated_fields:
+                new_wakeup = bool(task_update.wakeup_enabled)
             else:
-                new_system_scope = current_kwargs.get("system_scope", None)
+                raw_wakeup = current_kwargs.get("wakeup_enabled", False)
+                new_wakeup = raw_wakeup is True
             normalized_task_list, normalized_task_options, normalized_pre_tasks = (
                 self._normalize_task_payload(
                     new_task_list,
@@ -639,7 +635,7 @@ class SchedulerManager:
 
             trigger = build_trigger(new_trigger_config)
 
-            # kwargs 全量替换；canonical key 为 pre_tasks
+            # kwargs 全量替换；key 为 pre_tasks
             self.scheduler.modify_job(
                 task_id,
                 trigger=trigger,
@@ -653,7 +649,7 @@ class SchedulerManager:
                     controller_name=new_controller_name,
                     device=new_device,
                     resource_name=new_resource_name,
-                    system_scope=new_system_scope,
+                    wakeup_enabled=new_wakeup,
                 ),
             )
 
@@ -672,117 +668,6 @@ class SchedulerManager:
             if self._worker:
                 self._worker.events.send_log(f"更新任务失败: {e}")
             return None
-
-    def job_has_system_scope_key(self, task_id: str) -> Optional[bool]:
-        """Return whether APS job kwargs contain the ``system_scope`` key.
-
-        ``True`` / ``False`` when the job exists; ``None`` when the job is missing
-        or the scheduler is not initialized. Key presence (not value) is the
-        APS authority signal: present ``None`` means intentional disable.
-        """
-        if not self.scheduler:
-            return None
-        job = self.scheduler.get_job(task_id)
-        if job is None:
-            return None
-        kwargs = job.kwargs or {}
-        return "system_scope" in kwargs
-
-    def import_system_scopes(
-        self, scope_by_task_id: dict[str, Literal["user", "system"]]
-    ) -> dict[str, Any]:
-        """Idempotently merge wakeup scope into matching APS jobs.
-
-        Import only when the ``system_scope`` key is **absent**. If the key is
-        already present (including explicit ``None``), APS is authoritative and
-        JSON must not overwrite. Legacy ``system`` and ``user`` both import as
-        user wakeup (``"user"``). Never creates jobs. Verifies each write by
-        re-reading. Preserves pause state.
-        """
-        if not self.scheduler:
-            raise RuntimeError("调度器未初始化")
-
-        stats: dict[str, Any] = {
-            "imported": 0,
-            "skipped": 0,
-            "missing_job": 0,
-            "failed": 0,
-            "details": [],
-        }
-        for task_id, scope in scope_by_task_id.items():
-            if scope not in ("user", "system"):
-                stats["failed"] += 1
-                stats["details"].append(f"{task_id}: invalid scope {scope!r}")
-                continue
-            # Both historical scopes mean user-level wakeup.
-            normalized_scope: Literal["user"] = "user"
-            job = self.scheduler.get_job(task_id)
-            if job is None:
-                stats["missing_job"] += 1
-                stats["details"].append(f"{task_id}: no matching APS job")
-                continue
-
-            kwargs = job.kwargs or {}
-            # Key presence is authority: present None/user/system all skip import.
-            if "system_scope" in kwargs:
-                stats["skipped"] += 1
-                stats["details"].append(
-                    f"{task_id}: APS system_scope key present "
-                    f"({kwargs.get('system_scope')!r}); JSON not applied"
-                )
-                continue
-
-            was_paused = job.next_run_time is None
-            # Full kwargs copy so modify_job does not drop legacy keys.
-            new_kwargs = dict(kwargs)
-            new_kwargs["system_scope"] = normalized_scope
-            try:
-                self.scheduler.modify_job(task_id, kwargs=new_kwargs)
-            except Exception as e:
-                stats["failed"] += 1
-                stats["details"].append(f"{task_id}: modify failed: {e}")
-                logger.error("import system_scope for %s failed: %s", task_id, e)
-                continue
-
-            verified = self.scheduler.get_job(task_id)
-            if verified is None:
-                stats["failed"] += 1
-                stats["details"].append(f"{task_id}: job missing after modify")
-                continue
-            if verified.kwargs.get("system_scope") != normalized_scope:
-                stats["failed"] += 1
-                stats["details"].append(
-                    f"{task_id}: durable re-read scope mismatch "
-                    f"{verified.kwargs.get('system_scope')!r} != {normalized_scope!r}"
-                )
-                continue
-            if (verified.next_run_time is None) != was_paused:
-                # Restore pause state if APS altered it.
-                try:
-                    if was_paused:
-                        self.scheduler.pause_job(task_id)
-                    else:
-                        self.scheduler.resume_job(task_id)
-                except Exception as e:
-                    stats["failed"] += 1
-                    stats["details"].append(
-                        f"{task_id}: scope written but pause restore failed: {e}"
-                    )
-                    continue
-            stats["imported"] += 1
-            stats["details"].append(
-                f"{task_id}: imported scope={normalized_scope} "
-                f"(from legacy {scope!r})"
-            )
-
-        logger.info(
-            "system_scope import: imported=%s skipped=%s missing=%s failed=%s",
-            stats["imported"],
-            stats["skipped"],
-            stats["missing_job"],
-            stats["failed"],
-        )
-        return stats
 
     async def delete_task_classified(self, task_id: str) -> str:
         """Delete APS job with explicit outcome classification.

@@ -25,10 +25,6 @@ from models.scheduler import (
 )
 
 TriggerType = Literal["cron", "date", "interval"]
-# Stored field remains system_scope for APS/job compatibility.
-# Runtime value is always "user" when wakeup is enabled (legacy "system" → "user").
-SystemScopeValue = Literal["user"]
-_LEGACY_WAKEUP_SCOPES = frozenset({"user", "system"})
 NormalizePayload = Callable[
     [Any, Any, Any],
     tuple[list[str], TaskOptionsByTask, list[Any]],
@@ -51,28 +47,16 @@ class SchedulerJobDecodeError(Exception):
         super().__init__(f"{prefix}{message}")
 
 
-def normalize_wakeup_scope(
-    raw: Any, *, job_id: Optional[str] = None
-) -> Optional[SystemScopeValue]:
-    """Normalize wakeup flag: None | 'user' | legacy 'system' → None | 'user'.
-
-    Both historical 'user' and 'system' mean user-level native wakeup enabled.
-    """
+def decode_wakeup_enabled(raw: Any, *, job_id: Optional[str] = None) -> bool:
+    """Decode APS wakeup_enabled: missing/None → False; bool only otherwise."""
     if raw is None:
-        return None
-    if isinstance(raw, str) and raw in _LEGACY_WAKEUP_SCOPES:
-        return "user"
+        return False
+    if isinstance(raw, bool):
+        return raw
     raise SchedulerJobDecodeError(
-        f"invalid system_scope: {raw!r}",
+        f"invalid wakeup_enabled: {raw!r}",
         job_id=job_id,
     )
-
-
-def decode_system_scope(
-    raw: Any, *, job_id: Optional[str] = None
-) -> Optional[SystemScopeValue]:
-    """Decode persisted system_scope; legacy 'system' becomes user wakeup."""
-    return normalize_wakeup_scope(raw, job_id=job_id)
 
 
 def build_trigger(trigger_config: TriggerConfig) -> CronTrigger | DateTrigger | IntervalTrigger:
@@ -154,30 +138,10 @@ def decode_trigger(trigger: Any) -> tuple[TriggerType, TriggerConfig]:
 def decode_pre_tasks_from_job_kwargs(kwargs: Mapping[str, Any]) -> Any:
     """Decode persisted pre-tasks from job kwargs.
 
-    Canonical key is ``pre_tasks``. Legacy jobs may still store ``preTasks``.
-    Prefer canonical when the key is present — including an explicit empty list —
-    and only fall back to legacy when the canonical key is absent.
+    Reads only the ``pre_tasks`` key. Missing key returns ``[]``.
     """
     if "pre_tasks" in kwargs:
         return kwargs["pre_tasks"]
-    if "preTasks" in kwargs:
-        return kwargs["preTasks"]
-    return []
-
-
-def resolve_execute_pre_tasks(
-    pre_tasks: Optional[list[dict]],
-    preTasks: Optional[list[dict]],
-) -> list[dict]:
-    """Resolve pre-tasks for the persisted callable entrypoint.
-
-    Prefer canonical ``pre_tasks`` when provided (including ``[]``). Fall back to
-    legacy ``preTasks`` only when the canonical argument is omitted (``None``).
-    """
-    if pre_tasks is not None:
-        return pre_tasks
-    if preTasks is not None:
-        return preTasks
     return []
 
 
@@ -214,20 +178,16 @@ def encode_execution_kwargs(
     controller_name: Optional[str],
     device: Any,
     resource_name: Optional[str],
-    system_scope: Optional[Literal["user", "system"]] = None,
+    wakeup_enabled: bool = False,
 ) -> dict[str, Any]:
     """Encode complete APS job kwargs for add_job / modify_job.
 
-    Writes canonical ``pre_tasks`` and always includes ``system_scope`` (may be
-    None). Legacy ``system`` is normalized to ``user`` before persist.
+    Writes ``pre_tasks`` and always includes ``wakeup_enabled`` bool.
     Callers must pass the full kwargs dict to modify_job so the store fully
     replaces the previous kwargs payload.
     """
-    normalized_scope: Optional[SystemScopeValue] = None
-    if system_scope is not None:
-        if system_scope not in _LEGACY_WAKEUP_SCOPES:
-            raise ValueError(f"invalid system_scope: {system_scope!r}")
-        normalized_scope = "user"
+    if not isinstance(wakeup_enabled, bool):
+        raise ValueError(f"invalid wakeup_enabled: {wakeup_enabled!r}")
     return {
         "task_id": task_id,
         "task_name": task_name,
@@ -238,7 +198,7 @@ def encode_execution_kwargs(
         "controller_name": controller_name,
         "device": _dump_device(device),
         "resource_name": resource_name,
-        "system_scope": normalized_scope,
+        "wakeup_enabled": wakeup_enabled,
     }
 
 
@@ -283,11 +243,9 @@ def decode_job_to_scheduled_task(
             cause=exc,
         ) from exc
 
-    # Preserve persisted description exactly (empty string stays empty string).
     description = kwargs.get("task_description", "")
-    # Missing key → None (legacy jobs); present invalid → decode error.
-    system_scope = decode_system_scope(
-        kwargs.get("system_scope", None),
+    wakeup_enabled = decode_wakeup_enabled(
+        kwargs.get("wakeup_enabled", None),
         job_id=str(job_id) if job_id is not None else None,
     )
 
@@ -305,5 +263,5 @@ def decode_job_to_scheduled_task(
         controller_name=kwargs.get("controller_name", None),
         device=device,
         resource_name=kwargs.get("resource_name", None),
-        system_scope=system_scope,
+        wakeup_enabled=wakeup_enabled,
     )
