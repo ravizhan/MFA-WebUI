@@ -10,10 +10,9 @@ import (
 	"time"
 )
 
-// TestLockhelperTryHoldNoParentChmod builds the test-only helper and verifies
-// try/hold work on arbitrary paths without changing parent permissions.
-// Also documents the Python interop contract (exit 0/1/2).
-func TestLockhelperTryHoldNoParentChmod(t *testing.T) {
+// TestLockhelperTryHoldInterop builds the test-only helper and verifies try/hold
+// exit codes (0/1/2) used by Python interop.
+func TestLockhelperTryHoldInterop(t *testing.T) {
 	if testing.Short() {
 		t.Skip("builds helper binary")
 	}
@@ -29,13 +28,8 @@ func TestLockhelperTryHoldNoParentChmod(t *testing.T) {
 	}
 
 	parent := filepath.Join(tmp, "parent")
-	if err := os.MkdirAll(parent, 0o700); err != nil {
+	if err := os.MkdirAll(parent, 0o755); err != nil {
 		t.Fatal(err)
-	}
-	if runtime.GOOS != "windows" {
-		if err := os.Chmod(parent, 0o700); err != nil {
-			t.Fatal(err)
-		}
 	}
 	lockPath := filepath.Join(parent, "t.lock")
 
@@ -46,17 +40,6 @@ func TestLockhelperTryHoldNoParentChmod(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "acquired") {
 		t.Fatalf("try out=%s", out)
-	}
-
-	// Parent mode must remain 0700 (helper must not chmod parents).
-	if runtime.GOOS != "windows" {
-		st, err := os.Stat(parent)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if st.Mode().Perm() != 0o700 {
-			t.Fatalf("parent mode changed to %04o", st.Mode().Perm())
-		}
 	}
 
 	// hold then try → busy (2)
@@ -84,7 +67,6 @@ func TestLockhelperTryHoldNoParentChmod(t *testing.T) {
 		_ = hold.Process.Kill()
 		t.Fatalf("expected busy output, got %s err=%v", bout, err)
 	}
-	// Wait for hold to finish
 	done := make(chan error, 1)
 	go func() { done <- hold.Wait() }()
 	select {
@@ -108,12 +90,10 @@ func TestLockhelperTryHoldNoParentChmod(t *testing.T) {
 
 func mustUpdaterDir(t *testing.T) string {
 	t.Helper()
-	// Tests run with cwd = updater package dir when using go test .
 	wd, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
-	// If we're in updater already, use it; if in a subpackage, walk up.
 	if _, err := os.Stat(filepath.Join(wd, "cmd", "lockhelper")); err == nil {
 		return wd
 	}

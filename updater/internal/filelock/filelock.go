@@ -1,17 +1,13 @@
-// Package filelock provides a cross-platform, kernel-backed exclusive advisory
-// lock that is interoperable with MWU's Python runtime locks
-// (services/process_lock.py).
+// Package filelock provides a cross-platform exclusive advisory lock
+// interoperable with MWU's Python runtime locks (services/process_lock.py).
 //
-// Protocol (normative):
-//   - Canonical paths under app root: config/locks/update.lock, config/locks/runtime.lock
-//   - Stable lock files are never deleted on unlock
-//   - Windows: CreateFile GENERIC_READ|WRITE + FILE_SHARE_READ|WRITE|DELETE + OPEN_ALWAYS,
-//     LockFileEx exclusive on offset 0 length 1 with LOCKFILE_FAIL_IMMEDIATELY retries;
-//     handles are non-inheritable by default
-//   - POSIX: open O_RDWR|O_CREAT|O_CLOEXEC, chmod 0666, flock LOCK_EX|LOCK_NB retries
-//   - Lock directory is sticky 01777 (POSIX) managed only by EnsureLockDir
-//   - Open never chmods arbitrary parent directories
-//   - Permission/protocol errors fail closed (EACCES/EPERM are not busy)
+// Canonical paths under app root:
+//
+//	config/locks/update.lock
+//	config/locks/runtime.lock
+//
+// Stable lock files are never deleted on unlock. POSIX uses whole-file flock;
+// Windows uses LockFileEx on offset 0 length 1 with shared open flags.
 package filelock
 
 import (
@@ -30,14 +26,10 @@ const (
 	// RuntimeLockName is the MWU process lifetime lock file name.
 	RuntimeLockName = "runtime.lock"
 
-	// LockDirMode is the POSIX mode for config/locks: sticky + world-writable (01777).
-	// Sticky prevents unprivileged unlinks of others' lock files while still allowing
-	// cross-account create/open of coordination files.
-	LockDirMode = 0o1777
-	// LockFileMode is the POSIX mode for stable non-secret lock files.
-	LockFileMode = 0o666
-	// ConfigDirMode is the mode for config/ (not world-writable).
-	ConfigDirMode = 0o755
+	// lockFileMode is the create mode for stable lock files (POSIX open only).
+	lockFileMode = 0o666
+	// dirMode is used for MkdirAll of missing parents / lock directory.
+	dirMode = 0o755
 
 	// DefaultRetryInterval is the pause between nonblocking lock attempts.
 	DefaultRetryInterval = 100 * time.Millisecond
@@ -51,7 +43,7 @@ var ErrBusy = errors.New("filelock: lock is busy")
 // ErrTimeout is returned when Acquire exhausts its deadline.
 var ErrTimeout = errors.New("filelock: acquire timed out")
 
-// ErrPermission is returned for access/permission failures (fail closed, never retried as busy).
+// ErrPermission is returned for access/permission failures (not retried as busy).
 var ErrPermission = errors.New("filelock: permission denied")
 
 // Lock is an open handle to a stable lock file that may hold an exclusive advisory lock.
@@ -90,11 +82,8 @@ func RuntimeLockPath(appRoot string) string {
 	return filepath.Join(LockDir(appRoot), RuntimeLockName)
 }
 
-// EnsureLockDir creates the canonical lock directory with controlled permissions.
-// On POSIX: config/ is 0755 (fail-closed chmod + verify traversable), config/locks
-// is sticky 01777; chmod failure fails closed.
-// On Windows: directories inherit the app-root/config DACL (no world-writable chmod).
-// This is the ONLY function that manages lock-directory permissions.
+// EnsureLockDir creates config/locks under appRoot with ordinary MkdirAll(0755).
+// No sticky bit, no chmod of existing directories, no mode verification.
 func EnsureLockDir(appRoot string) error {
 	if appRoot == "" {
 		return errors.New("filelock: empty app root")
@@ -103,29 +92,15 @@ func EnsureLockDir(appRoot string) error {
 	if err != nil {
 		return fmt.Errorf("filelock: app root: %w", err)
 	}
-	configDir := filepath.Join(absRoot, "config")
-	if err := os.MkdirAll(configDir, ConfigDirMode); err != nil {
-		return fmt.Errorf("filelock: create config dir: %w", err)
-	}
-	// config/ must remain traversable by the normal install user after elevated runs.
-	if err := applyConfigDirMode(configDir); err != nil {
-		return err
-	}
-
-	dir := filepath.Join(configDir, "locks")
-	if err := os.MkdirAll(dir, LockDirMode); err != nil {
+	dir := filepath.Join(absRoot, RelativeLockDir)
+	if err := os.MkdirAll(dir, dirMode); err != nil {
 		return fmt.Errorf("filelock: create lock dir: %w", err)
-	}
-	if err := applyLockDirMode(dir); err != nil {
-		return err
 	}
 	return nil
 }
 
 // Open creates or opens a stable lock file without truncating and without locking.
-// Parent directories are created with 0755 only when missing; Open NEVER chmods parents.
-// Lock-file mode 0666 is applied to the file itself (fail closed if required and fails).
-// Callers that need the canonical sticky lock directory must call EnsureLockDir first.
+// Missing parent directories are created with 0755; existing parents are never chmod'd.
 func Open(path string) (*Lock, error) {
 	if path == "" {
 		return nil, errors.New("filelock: empty path")
@@ -138,16 +113,7 @@ func Open(path string) (*Lock, error) {
 	if err := ensureParentExists(parent); err != nil {
 		return nil, err
 	}
-
-	l, err := openPlatform(abs)
-	if err != nil {
-		return nil, err
-	}
-	if err := l.applySharedMode(); err != nil {
-		_ = l.Close()
-		return nil, err
-	}
-	return l, nil
+	return openPlatform(abs)
 }
 
 // ensureParentExists creates missing parents with 0755 and never chmods existing dirs.
@@ -162,8 +128,7 @@ func ensureParentExists(parent string) error {
 	if !os.IsNotExist(err) {
 		return fmt.Errorf("filelock: parent stat: %w", err)
 	}
-	// Create missing parents only; do not chmod existing ancestors.
-	if err := os.MkdirAll(parent, ConfigDirMode); err != nil {
+	if err := os.MkdirAll(parent, dirMode); err != nil {
 		return fmt.Errorf("filelock: parent dir: %w", err)
 	}
 	return nil
@@ -171,7 +136,7 @@ func ensureParentExists(parent string) error {
 
 // TryLock attempts a nonblocking exclusive lock.
 // Returns ErrBusy if another process holds the lock.
-// Permission/protocol errors (including ErrPermission) fail closed — never treated as busy.
+// Permission errors fail closed and are never treated as busy.
 func (l *Lock) TryLock() error {
 	if l == nil {
 		return errors.New("filelock: nil lock")
@@ -186,8 +151,7 @@ func (l *Lock) TryLock() error {
 	return nil
 }
 
-// Unlock releases the exclusive lock using the exact same region/mode as lock.
-// The lock file is never deleted.
+// Unlock releases the exclusive lock. The lock file is never deleted.
 func (l *Lock) Unlock() error {
 	if l == nil {
 		return errors.New("filelock: nil lock")
@@ -221,7 +185,7 @@ func (l *Lock) Close() error {
 }
 
 // Acquire opens path and acquires an exclusive lock with bounded nonblocking retries.
-// On failure the handle is closed. Permission errors fail closed immediately (no retry).
+// On failure the handle is closed. Non-busy errors fail immediately (no retry).
 func Acquire(path string, timeout, interval time.Duration) (*Lock, error) {
 	if timeout <= 0 {
 		timeout = DefaultTimeout
@@ -243,7 +207,7 @@ func Acquire(path string, timeout, interval time.Duration) (*Lock, error) {
 		}
 		if !errors.Is(err, ErrBusy) {
 			_ = l.Close()
-			return nil, err // fail closed on permission/protocol errors
+			return nil, err
 		}
 		if !time.Now().Before(deadline) {
 			_ = l.Close()
@@ -253,7 +217,7 @@ func Acquire(path string, timeout, interval time.Duration) (*Lock, error) {
 	}
 }
 
-// AcquireUpdateLock ensures the canonical lock dir then acquires update.lock under appRoot.
+// AcquireUpdateLock ensures the lock dir then acquires update.lock under appRoot.
 func AcquireUpdateLock(appRoot string, timeout, interval time.Duration) (*Lock, error) {
 	if err := EnsureLockDir(appRoot); err != nil {
 		return nil, err
@@ -261,7 +225,7 @@ func AcquireUpdateLock(appRoot string, timeout, interval time.Duration) (*Lock, 
 	return Acquire(UpdateLockPath(appRoot), timeout, interval)
 }
 
-// AcquireRuntimeLock ensures the canonical lock dir then acquires runtime.lock under appRoot.
+// AcquireRuntimeLock ensures the lock dir then acquires runtime.lock under appRoot.
 func AcquireRuntimeLock(appRoot string, timeout, interval time.Duration) (*Lock, error) {
 	if err := EnsureLockDir(appRoot); err != nil {
 		return nil, err

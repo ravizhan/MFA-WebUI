@@ -2,77 +2,28 @@
 // Python (services/process_lock.py) and Go (internal/filelock) see the same
 // kernel advisory locks.
 //
-// It is NOT part of the release updater binary. Build explicitly:
+//	cd updater && go build -o lockhelper ./cmd/lockhelper
 //
-//	cd updater && go build -o lockhelper.exe ./cmd/lockhelper
-//
-// Python tests can invoke the binary (or `go run ./cmd/lockhelper`) without
-// linking it into the production updater.
-//
-// IMPORTANT: try/hold operate on the given -path only. They call filelock.Open
-// which never chmods existing parent directories. Prefer paths under a directory
-// already prepared by EnsureLockDir / Python lock_paths (config/locks).
-//
-// # Invocation contract
+// Commands:
 //
 //	lockhelper try -path <file>
 //	  Nonblocking exclusive try. Exit 0 if acquired (then released),
-//	  exit 2 if busy, exit 1 on permission/protocol error.
-//	  Prints one line: "acquired" | "busy" | "error: ..."
+//	  exit 2 if busy, exit 1 on hard error.
+//	  Prints: "acquired" | "busy" | "error: ..."
 //
 //	lockhelper hold -path <file> [-seconds N]
-//	  Acquire with default 30s retry, print "held", keep lock until:
-//	    - N seconds elapse (if -seconds > 0), or
-//	    - stdin reaches EOF (parent closed the pipe), or
-//	    - process is killed (kernel releases lock).
-//	  Then print "released" and exit 0. Exit 1 on acquire failure, 2 on busy/timeout.
+//	  Acquire with default 30s retry, print "held", keep lock until
+//	  N seconds elapse (if -seconds > 0) or stdin EOF. Then "released".
+//	  Exit 0 on success, 1 on hard error, 2 on busy/timeout.
 //
 //	lockhelper paths -app-root <dir>
 //	  Print absolute update.lock and runtime.lock paths (one per line).
-//	  Uses ResolveInstallRoot(app-root) — same single-root contract as the updater.
-//	  Exit 0.
 //
-// Exit codes are stable for Python assertions:
+// Exit codes (stable for Python interop):
 //
 //	0 success / free-and-acquired
-//	1 hard error (permission/protocol/usage)
+//	1 hard error (permission/usage)
 //	2 busy or acquire timeout
-//
-// # Python interop sketch (tests only)
-//
-//	import subprocess
-//	from pathlib import Path
-//	from services.process_lock import AdvisoryFileLock, lock_paths
-//
-//	helper = Path("updater/lockhelper.exe")  # built artifact
-//	app_root = Path(tmp_path)
-//	runtime, update = lock_paths(app_root)
-//	# Ensure parent exists without world-chmod from helper:
-//	update.parent.mkdir(parents=True, exist_ok=True)
-//
-//	# Go holds update.lock; Python must observe busy.
-//	proc = subprocess.Popen(
-//	    [str(helper), "hold", "-path", str(update), "-seconds", "10"],
-//	    stdout=subprocess.PIPE, text=True,
-//	)
-//	assert proc.stdout.readline().strip() == "held"
-//	py = AdvisoryFileLock(update)
-//	try:
-//	    py.acquire(timeout_seconds=0)  # nonblocking
-//	    raise AssertionError("expected busy")
-//	except Exception as e:
-//	    assert e.__class__.__name__ == "LockBusyError"
-//	proc.wait(timeout=15)
-//
-//	# Python holds; Go try must exit 2.
-//	lk = AdvisoryFileLock(runtime)
-//	lk.acquire(timeout_seconds=1)
-//	try:
-//	    r = subprocess.run([str(helper), "try", "-path", str(runtime)], capture_output=True, text=True)
-//	    assert r.returncode == 2
-//	    assert "busy" in r.stdout
-//	finally:
-//	    lk.release()
 package main
 
 import (
@@ -111,7 +62,7 @@ func run(args []string) int {
 
 func cmdTry(args []string) int {
 	fs := flag.NewFlagSet("try", flag.ContinueOnError)
-	path := fs.String("path", "", "lock file path (no parent chmod)")
+	path := fs.String("path", "", "lock file path")
 	if err := fs.Parse(args); err != nil {
 		return 1
 	}
@@ -119,7 +70,6 @@ func cmdTry(args []string) int {
 		fmt.Fprintln(os.Stderr, "try: -path required")
 		return 1
 	}
-	// Open never chmods existing parents — safe for arbitrary test paths.
 	l, err := filelock.Open(*path)
 	if err != nil {
 		fmt.Printf("error: %v\n", err)
@@ -140,7 +90,7 @@ func cmdTry(args []string) int {
 
 func cmdHold(args []string) int {
 	fs := flag.NewFlagSet("hold", flag.ContinueOnError)
-	path := fs.String("path", "", "lock file path (no parent chmod)")
+	path := fs.String("path", "", "lock file path")
 	seconds := fs.Float64("seconds", 0, "hold duration; 0 = until stdin EOF")
 	timeout := fs.Duration("timeout", filelock.DefaultTimeout, "acquire timeout")
 	if err := fs.Parse(args); err != nil {
@@ -151,7 +101,6 @@ func cmdHold(args []string) int {
 		return 1
 	}
 
-	// Acquire → Open (no parent chmod) + TryLock retries.
 	l, err := filelock.Acquire(*path, *timeout, filelock.DefaultRetryInterval)
 	if err != nil {
 		if errors.Is(err, filelock.ErrTimeout) || errors.Is(err, filelock.ErrBusy) {
@@ -192,7 +141,6 @@ func cmdPaths(args []string) int {
 		fmt.Fprintln(os.Stderr, "paths: -app-root required")
 		return 1
 	}
-	// Single-root contract: ResolveInstallRoot(workingDir) — no MWU_APP_ROOT.
 	root, err := filelock.ResolveInstallRoot(*appRoot, "")
 	if err != nil {
 		fmt.Printf("error: %v\n", err)

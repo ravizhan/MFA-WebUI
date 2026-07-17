@@ -5,7 +5,6 @@ package filelock
 import (
 	"errors"
 	"fmt"
-	"os"
 	"syscall"
 
 	"golang.org/x/sys/windows"
@@ -61,17 +60,6 @@ func openPlatform(path string) (*Lock, error) {
 		path: path,
 		plat: platformState{handle: h},
 	}, nil
-}
-
-func (l *Lock) applySharedMode() error {
-	// Windows: lock files inherit the app-root/config DACL from CreateFile.
-	if l.plat.handle == 0 || l.plat.handle == windows.InvalidHandle {
-		return fmt.Errorf("%w: invalid handle for %s", ErrPermission, l.path)
-	}
-	if _, err := os.Stat(l.path); err != nil {
-		return fmt.Errorf("filelock: lock file missing after open: %w", err)
-	}
-	return nil
 }
 
 func (l *Lock) tryLockPlatform() error {
@@ -133,23 +121,6 @@ func (l *Lock) closePlatform() error {
 	l.plat.handle = 0
 	if err != nil {
 		return fmt.Errorf("filelock: CloseHandle: %w", err)
-	}
-	return nil
-}
-
-// applyLockDirMode on Windows relies on DACL inheritance from app-root/config.
-// No world-writable chmod; fail closed only if the directory is inaccessible.
-func applyLockDirMode(dir string) error {
-	if _, err := os.Stat(dir); err != nil {
-		return fmt.Errorf("filelock: lock dir inaccessible: %w", err)
-	}
-	return nil
-}
-
-// applyConfigDirMode ensures config/ exists and is accessible (DACL inheritance).
-func applyConfigDirMode(dir string) error {
-	if _, err := os.Stat(dir); err != nil {
-		return fmt.Errorf("%w: config dir inaccessible: %v", ErrPermission, err)
 	}
 	return nil
 }

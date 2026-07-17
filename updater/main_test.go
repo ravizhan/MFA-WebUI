@@ -272,6 +272,99 @@ func TestRunAcquiresUpdateLockBeforeStaging(t *testing.T) {
 	}
 }
 
+func TestRunRecoveryObservesUpdateLockHeld(t *testing.T) {
+	root := t.TempDir()
+	d, tr := testDeps(t, root)
+	cfg := validCfg(root)
+	_ = os.WriteFile(cfg.Archive, []byte("x"), 0o644)
+	_ = os.MkdirAll(filepath.Dir(cfg.RestartCmd), 0o755)
+	_ = os.WriteFile(cfg.RestartCmd, []byte("x"), 0o755)
+
+	var sawBusy atomic.Bool
+	d.recoverInterrupted = func(installDir string) error {
+		ul, err := filelock.Open(filelock.UpdateLockPath(installDir))
+		if err != nil {
+			t.Errorf("open update.lock during recovery: %v", err)
+			return nil
+		}
+		err = ul.TryLock()
+		_ = ul.Close()
+		if !errors.Is(err, filelock.ErrBusy) {
+			t.Errorf("update.lock must be held during recovery, got %v", err)
+			return nil
+		}
+		sawBusy.Store(true)
+		return nil
+	}
+
+	code := run(d, cfg)
+	if code != exitCodeOK {
+		t.Fatalf("exit=%d out=%s", code, tr.lastOutput)
+	}
+	if !sawBusy.Load() {
+		t.Fatal("recovery did not observe update.lock held")
+	}
+}
+
+func TestRunLockFailurePreventsRecovery(t *testing.T) {
+	root := t.TempDir()
+	d, tr := testDeps(t, root)
+	cfg := validCfg(root)
+	_ = os.WriteFile(cfg.Archive, []byte("x"), 0o644)
+
+	var recoveryCalled atomic.Bool
+	d.acquireUpdate = func(appRoot string, timeout, interval time.Duration) (*filelock.Lock, error) {
+		return nil, errors.New("injected lock failure")
+	}
+	d.recoverInterrupted = func(installDir string) error {
+		recoveryCalled.Store(true)
+		return nil
+	}
+
+	code := run(d, cfg)
+	if code != exitCodeError {
+		t.Fatalf("exit=%d want error out=%s", code, tr.lastOutput)
+	}
+	if recoveryCalled.Load() {
+		t.Fatal("recovery must not run when update.lock acquisition fails")
+	}
+	if !strings.Contains(tr.lastOutput, "Could not acquire update.lock") {
+		t.Fatalf("expected lock failure message, out=%s", tr.lastOutput)
+	}
+}
+
+func TestRunRecoveryFailureReleasesLock(t *testing.T) {
+	root := t.TempDir()
+	d, tr := testDeps(t, root)
+	cfg := validCfg(root)
+	_ = os.WriteFile(cfg.Archive, []byte("x"), 0o644)
+
+	d.recoverInterrupted = func(installDir string) error {
+		return errors.New("injected recovery failure")
+	}
+	d.extract = func(ctx context.Context, archivePath, destDir string) error {
+		t.Error("extract must not run after recovery failure")
+		return nil
+	}
+
+	code := run(d, cfg)
+	if code != exitCodeError {
+		t.Fatalf("exit=%d want error out=%s", code, tr.lastOutput)
+	}
+	if !strings.Contains(tr.lastOutput, "Self-update recovery failed") {
+		t.Fatalf("expected recovery failure message, out=%s", tr.lastOutput)
+	}
+	if tr.extractCalled.Load() != 0 {
+		t.Fatalf("extract must stay 0 after recovery failure, got %d", tr.extractCalled.Load())
+	}
+
+	l, err := filelock.AcquireUpdateLock(root, time.Second, 10*time.Millisecond)
+	if err != nil {
+		t.Fatalf("update.lock not released after recovery failure: %v", err)
+	}
+	l.Close()
+}
+
 func TestRunSelfUpdateExit10ReleasesLock(t *testing.T) {
 	root := t.TempDir()
 	d, tr := testDeps(t, root)
@@ -474,9 +567,53 @@ func TestPathWithinRootRejectsOutside(t *testing.T) {
 	if ok {
 		t.Fatal("outside path accepted")
 	}
-	ok, err = pathWithinRoot(root, filepath.Join(root, "nested", "bin"))
+	ok, err = pathWithinRoot(root, filepath.Join(outside, "no", "such", "updater"+exeSuffix()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("missing outside path accepted")
+	}
+}
+
+func TestPathWithinRootMissingLeafAndNested(t *testing.T) {
+	root := t.TempDir()
+	ok, err := pathWithinRoot(root, filepath.Join(root, "updater"+exeSuffix()))
 	if err != nil || !ok {
-		t.Fatalf("inside path rejected: ok=%v err=%v", ok, err)
+		t.Fatalf("missing leaf rejected: ok=%v err=%v", ok, err)
+	}
+	ok, err = pathWithinRoot(root, filepath.Join(root, "a", "b", "c", "updater"+exeSuffix()))
+	if err != nil || !ok {
+		t.Fatalf("missing nested rejected: ok=%v err=%v", ok, err)
+	}
+}
+
+func TestPathWithinRootSymlinkAliasAndEscape(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix symlink alias / escape")
+	}
+	realRoot := t.TempDir()
+	aliasRoot := filepath.Join(t.TempDir(), "install-alias")
+	if err := os.Symlink(realRoot, aliasRoot); err != nil {
+		t.Fatal(err)
+	}
+
+	missing := filepath.Join(aliasRoot, "nested", "updater"+exeSuffix())
+	ok, err := pathWithinRoot(aliasRoot, missing)
+	if err != nil || !ok {
+		t.Fatalf("symlink-alias missing target rejected: ok=%v err=%v", ok, err)
+	}
+
+	escape := filepath.Join(aliasRoot, "escape-link")
+	if err := os.Symlink(t.TempDir(), escape); err != nil {
+		t.Fatal(err)
+	}
+	ok, err = pathWithinRoot(aliasRoot, escape)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok {
+		t.Fatal("symlink escape accepted")
 	}
 }
 

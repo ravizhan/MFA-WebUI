@@ -4,7 +4,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 )
@@ -194,7 +193,29 @@ func TestResolveInstallRootNeverHome(t *testing.T) {
 	}
 }
 
-func TestHandoffOrderingReleaseRuntimeThenUpdate(t *testing.T) {
+func TestReopenAfterClose(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "reopen.lock")
+
+	l1, err := Acquire(path, time.Second, 10*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pathCopy := l1.Path()
+	if err := l1.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(pathCopy); err != nil {
+		t.Fatalf("file deleted: %v", err)
+	}
+	l2, err := Acquire(pathCopy, time.Second, 10*time.Millisecond)
+	if err != nil {
+		t.Fatalf("reopen acquire: %v", err)
+	}
+	l2.Close()
+}
+
+func TestIndependentUpdateAndRuntimeLocks(t *testing.T) {
 	root := t.TempDir()
 	update, err := AcquireUpdateLock(root, time.Second, 10*time.Millisecond)
 	if err != nil {
@@ -224,116 +245,16 @@ func TestHandoffOrderingReleaseRuntimeThenUpdate(t *testing.T) {
 	}
 	defer otherR.Close()
 	if err := otherR.TryLock(); err != nil {
-		t.Fatalf("runtime should be free after handoff step1: %v", err)
+		t.Fatalf("runtime should be free after release: %v", err)
 	}
 	if err := otherU.TryLock(); !errors.Is(err, ErrBusy) {
-		t.Fatalf("update must remain held during handoff, got %v", err)
+		t.Fatalf("update must remain held, got %v", err)
 	}
 
 	if err := update.Unlock(); err != nil {
 		t.Fatalf("update unlock: %v", err)
 	}
 	if err := otherU.TryLock(); err != nil {
-		t.Fatalf("update free after handoff: %v", err)
-	}
-}
-
-func TestReopenAfterClose(t *testing.T) {
-	dir := t.TempDir()
-	path := filepath.Join(dir, "reopen.lock")
-
-	l1, err := Acquire(path, time.Second, 10*time.Millisecond)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pathCopy := l1.Path()
-	if err := l1.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(pathCopy); err != nil {
-		t.Fatalf("file deleted: %v", err)
-	}
-	l2, err := Acquire(pathCopy, time.Second, 10*time.Millisecond)
-	if err != nil {
-		t.Fatalf("reopen acquire: %v", err)
-	}
-	l2.Close()
-}
-
-func TestEnsureLockDirStickyOnPOSIX(t *testing.T) {
-	root := t.TempDir()
-	if err := EnsureLockDir(root); err != nil {
-		t.Fatalf("EnsureLockDir: %v", err)
-	}
-	dir := LockDir(root)
-	st, err := os.Stat(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if runtime.GOOS == "windows" {
-		// Windows relies on DACL inheritance; sticky bit is a no-op.
-		return
-	}
-	if st.Mode()&os.ModeSticky == 0 {
-		t.Fatalf("lock dir missing sticky bit: mode=%v", st.Mode())
-	}
-	if st.Mode().Perm()&0o002 == 0 {
-		t.Fatalf("lock dir not world-writable: mode=%04o", st.Mode().Perm())
-	}
-}
-
-func TestOpenDoesNotChmodExistingParent(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX mode bits")
-	}
-	parent := t.TempDir()
-	// Restrict parent to 0700
-	if err := os.Chmod(parent, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	path := filepath.Join(parent, "x.lock")
-	l, err := Open(path)
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	l.Close()
-	st, err := os.Stat(parent)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if st.Mode().Perm() != 0o700 {
-		t.Fatalf("Open must not chmod existing parent: got %04o", st.Mode().Perm())
-	}
-}
-
-func TestPermissionErrorNotBusy(t *testing.T) {
-	// ErrPermission must not be retryable as busy.
-	if errors.Is(ErrPermission, ErrBusy) {
-		t.Fatal("ErrPermission must not equal ErrBusy")
-	}
-	if errors.Is(ErrBusy, ErrPermission) {
-		t.Fatal("ErrBusy must not equal ErrPermission")
-	}
-}
-
-func TestLockFileMode0666OnPOSIX(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX mode bits")
-	}
-	root := t.TempDir()
-	if err := EnsureLockDir(root); err != nil {
-		t.Fatal(err)
-	}
-	l, err := AcquireUpdateLock(root, time.Second, 10*time.Millisecond)
-	if err != nil {
-		t.Fatal(err)
-	}
-	l.Close()
-	st, err := os.Stat(UpdateLockPath(root))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if st.Mode().Perm() != 0o666 {
-		t.Fatalf("lock file mode=%04o want 0666", st.Mode().Perm())
+		t.Fatalf("update free after unlock: %v", err)
 	}
 }

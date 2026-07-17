@@ -30,10 +30,8 @@ func TestCrashReleaseSubprocess(t *testing.T) {
 			os.Stderr.WriteString(err.Error())
 			os.Exit(2)
 		}
-		// Intentionally do not Close/Unlock; write ready then hard-exit.
 		os.Stdout.WriteString("ready\n")
 		os.Stdout.Sync()
-		// Keep handle alive until process death.
 		_ = l
 		os.Exit(0)
 	}
@@ -47,7 +45,6 @@ func TestCrashReleaseSubprocess(t *testing.T) {
 	if err != nil {
 		t.Fatalf("helper failed: %v\n%s", err, out)
 	}
-	// Parent should now acquire (kernel released on child exit).
 	l, err := filelock.Acquire(path, 2*time.Second, 20*time.Millisecond)
 	if err != nil {
 		t.Fatalf("parent acquire after crash: %v\nhelper out: %s", err, out)
@@ -71,7 +68,6 @@ func TestSubprocessContention(t *testing.T) {
 		}
 		os.Stdout.WriteString("held\n")
 		os.Stdout.Sync()
-		// Hold until parent kills us or we see release signal file.
 		deadline := time.Now().Add(10 * time.Second)
 		signal := os.Getenv("FILELOCK_RELEASE_SIGNAL")
 		for time.Now().Before(deadline) {
@@ -100,7 +96,6 @@ func TestSubprocessContention(t *testing.T) {
 		_, _ = cmd.Process.Wait()
 	}()
 
-	// Wait until child holds the lock.
 	deadline := time.Now().Add(5 * time.Second)
 	var busy error
 	for time.Now().Before(deadline) {
@@ -120,7 +115,6 @@ func TestSubprocessContention(t *testing.T) {
 		t.Fatalf("expected child to hold lock, last err=%v (GOOS=%s)", busy, runtime.GOOS)
 	}
 
-	// Release child and acquire.
 	if err := os.WriteFile(signal, []byte("1"), 0o644); err != nil {
 		t.Fatal(err)
 	}

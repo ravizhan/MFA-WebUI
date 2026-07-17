@@ -30,7 +30,6 @@ func TestOpenUsesCLOEXEC(t *testing.T) {
 	if flags&unix.FD_CLOEXEC == 0 {
 		t.Fatalf("lock fd missing CLOEXEC: flags=%#x", flags)
 	}
-	// File still exists after close path is separate; keep stable file.
 	if _, err := os.Stat(path); err != nil {
 		t.Fatal(err)
 	}

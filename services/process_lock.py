@@ -17,6 +17,7 @@ Protocol (normative):
 from __future__ import annotations
 
 import json
+import errno
 import os
 import sys
 import time
@@ -141,12 +142,6 @@ class AdvisoryFileLock:
 
     def _ensure_parent(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        if sys.platform != "win32":
-            try:
-                # Parent traversal for normal app user; non-secret coordination.
-                os.chmod(self.path.parent, 0o777)
-            except OSError:
-                pass
 
     def _open_handle(self) -> None:
         if self._handle is not None:
@@ -185,12 +180,13 @@ class AdvisoryFileLock:
 
     def _open_posix(self) -> None:
         flags = os.O_RDWR | os.O_CREAT
-        # 0666 — non-secret coordination files
-        fd = os.open(str(self.path), flags, 0o666)
+        flags |= getattr(os, "O_CLOEXEC", 0)
         try:
-            os.chmod(str(self.path), 0o666)
-        except OSError:
-            pass
+            fd = os.open(str(self.path), flags, 0o666)
+        except PermissionError as e:
+            raise LockPermissionError(str(e)) from e
+        except OSError as e:
+            raise LockError(str(e)) from e
         self._handle = fd
 
     def _try_lock_posix(self) -> bool:
@@ -205,10 +201,11 @@ class AdvisoryFileLock:
         except BlockingIOError:
             return False
         except OSError as e:
-            # EACCES/EAGAIN variants
-            if getattr(e, "errno", None) in (11, 35, 13):  # EAGAIN/EWOULDBLOCK/EACCES
+            if e.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
                 return False
-            raise LockPermissionError(str(e)) from e
+            if e.errno in (errno.EACCES, errno.EPERM):
+                raise LockPermissionError(str(e)) from e
+            raise LockError(str(e)) from e
 
     def _unlock_posix(self) -> None:
         import fcntl  # type: ignore[import-not-found]

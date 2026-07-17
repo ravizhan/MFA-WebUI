@@ -61,13 +61,14 @@ type deps struct {
 	sleep          func(d time.Duration)
 	now            func() time.Time
 	// test hooks
-	onUpdateLocked    func()
-	runtimeUnlock     func(l *filelock.Lock) error // default: l.Close
-	atomicReplaceHook func(src, dst string, mode os.FileMode) error
-	syncDirHook       func(dir string) error
-	lockTimeout       time.Duration
-	lockInterval      time.Duration
-	shutdownWait      time.Duration
+	onUpdateLocked     func()
+	recoverInterrupted func(installDir string) error // nil → recoverInterruptedSelfUpdate
+	runtimeUnlock      func(l *filelock.Lock) error  // default: l.Close
+	atomicReplaceHook  func(src, dst string, mode os.FileMode) error
+	syncDirHook        func(dir string) error
+	lockTimeout        time.Duration
+	lockInterval       time.Duration
+	shutdownWait       time.Duration
 }
 
 func defaultDeps() deps {
@@ -121,12 +122,13 @@ func main() {
 //
 // Ordering (normative):
 //  1. Resolve single install root (locks + mutations share it)
-//  2. Capture install owner; recover interrupted self-update
-//  3. Acquire update.lock BEFORE any staging/self-update/file mutation
-//  4. Stage extract + optional self-update (exit 10 after cleanup)
-//  5. Notify shutdown, wait for runtime.lock
-//  6. Apply changes (atomic replace + fsync), hold both locks
-//  7. Handoff: unlock runtime (fail aborts) → Start replacement → release update
+//  2. Capture install owner (no install mutation)
+//  3. Acquire update.lock BEFORE any recovery/staging/self-update/file mutation
+//  4. Recover interrupted self-update under lock (failure releases via defer)
+//  5. Stage extract + optional self-update (exit 10 after cleanup)
+//  6. Notify shutdown, wait for runtime.lock
+//  7. Apply changes (atomic replace + fsync), hold both locks
+//  8. Handoff: unlock runtime (fail aborts) → Start replacement → release update
 func run(d deps, cfg Config) int {
 	if d.openLog == nil {
 		d.openLog = os.OpenFile
@@ -152,6 +154,11 @@ func run(d deps, cfg Config) int {
 				return nil
 			}
 			return l.Close()
+		}
+	}
+	if d.recoverInterrupted == nil {
+		d.recoverInterrupted = func(installDir string) error {
+			return recoverInterruptedSelfUpdate(d, installDir)
 		}
 	}
 	if d.selfUpdate == nil {
@@ -202,12 +209,7 @@ func run(d deps, cfg Config) int {
 		return failResult(d, "Failed to capture install owner: %v", err)
 	}
 
-	// Recover interrupted self-update before new work (journal/backup present).
-	if err := recoverInterruptedSelfUpdate(d, installDir); err != nil {
-		return failResult(d, "Self-update recovery failed: %v", err)
-	}
-
-	// --- update.lock BEFORE any staging / self-update / install mutation ---
+	// --- update.lock BEFORE any recovery / staging / self-update / install mutation ---
 	log.Println("获取 update.lock...")
 	updateLock, err := d.acquireUpdate(installDir, d.lockTimeout, d.lockInterval)
 	if err != nil {
@@ -222,6 +224,10 @@ func run(d deps, cfg Config) int {
 			}
 		}
 	}()
+
+	if err := d.recoverInterrupted(installDir); err != nil {
+		return failResult(d, "Self-update recovery failed: %v", err)
+	}
 
 	if d.onUpdateLocked != nil {
 		d.onUpdateLocked()
@@ -410,22 +416,14 @@ func extractArchive(ctx context.Context, archivePath, destDir string) error {
 
 // pathWithinRoot reports whether target is the root or a path strictly inside it.
 func pathWithinRoot(root, target string) (bool, error) {
-	absRoot, err := filepath.Abs(root)
+	absRoot, err := resolveCanonicalPath(root)
 	if err != nil {
 		return false, err
 	}
-	absTarget, err := filepath.Abs(target)
+	absTarget, err := resolveCanonicalPath(target)
 	if err != nil {
 		return false, err
 	}
-	if resolved, err := filepath.EvalSymlinks(absRoot); err == nil {
-		absRoot = resolved
-	}
-	if resolved, err := filepath.EvalSymlinks(absTarget); err == nil {
-		absTarget = resolved
-	}
-	absRoot = filepath.Clean(absRoot)
-	absTarget = filepath.Clean(absTarget)
 	rel, err := filepath.Rel(absRoot, absTarget)
 	if err != nil {
 		return false, err
@@ -435,6 +433,44 @@ func pathWithinRoot(root, target string) (bool, error) {
 		return false, nil
 	}
 	return true, nil
+}
+
+// resolveCanonicalPath EvalSymlinks the longest existing ancestor, then re-appends
+// any missing trailing components (needed for .new/.old recovery of a missing exe).
+func resolveCanonicalPath(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	abs = filepath.Clean(abs)
+
+	existing := abs
+	var missing []string
+	for {
+		_, err := os.Lstat(existing)
+		if err == nil {
+			break
+		}
+		if !os.IsNotExist(err) {
+			return "", err
+		}
+		parent := filepath.Dir(existing)
+		if parent == existing {
+			return abs, nil
+		}
+		missing = append([]string{filepath.Base(existing)}, missing...)
+		existing = parent
+	}
+
+	resolved, err := filepath.EvalSymlinks(existing)
+	if err != nil {
+		return "", err
+	}
+	result := resolved
+	for _, comp := range missing {
+		result = filepath.Join(result, comp)
+	}
+	return filepath.Clean(result), nil
 }
 
 // recoverInterruptedSelfUpdate restores a canonical updater if a previous

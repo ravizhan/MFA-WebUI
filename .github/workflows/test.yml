@@ -1,7 +1,8 @@
 name: Tests
 
 on:
-  push
+  push:
+  pull_request:
 
 concurrency:
   group: tests-${{ github.workflow }}-${{ github.ref }}
@@ -38,6 +39,12 @@ jobs:
         uses: actions/setup-python@v6.2.0
         with:
           python-version-file: ".python-version"
+
+      - name: Setup Go
+        uses: actions/setup-go@v6.3.0
+        with:
+          go-version-file: updater/go.mod
+          cache-dependency-path: updater/go.sum
 
       - name: Install Dependencies
         run: uv sync
@@ -86,3 +93,28 @@ jobs:
 
       - name: Run Vitest
         run: pnpm test:run
+
+  updater-tests:
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
+    runs-on: ${{ matrix.os }}
+    name: Updater Tests (${{ matrix.os }})
+    defaults:
+      run:
+        working-directory: ./updater
+    steps:
+      - name: Check-out repository
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6.3.0
+        with:
+          go-version-file: updater/go.mod
+          cache-dependency-path: updater/go.sum
+
+      - name: Run Go tests
+        run: go test ./...
