@@ -379,10 +379,10 @@ async def test_import_does_not_overwrite_aps_present_key(
 
 
 @pytest.mark.asyncio
-async def test_lifespan_order_paused_import_repair_resume(tmp_path: Path, monkeypatch):
+async def test_lifespan_order_paused_import_repair_resume(
+    main_module, tmp_path: Path, monkeypatch
+):
     """Web lifespan: paused init → import → repair → resume."""
-    import main as main_module
-
     order: list[str] = []
 
     class FakeScheduler:
@@ -502,11 +502,9 @@ async def test_headless_stays_paused(main_module, tmp_path, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_lifespan_corrupt_import_logs_details_then_resumes(
-    tmp_path: Path, monkeypatch
+    main_module, tmp_path: Path, monkeypatch
 ):
     """Corrupt JSON yields failed>0 with details logged before APS resume."""
-    import main as main_module
-
     logs: list[str] = []
     order: list[str] = []
 
