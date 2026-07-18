@@ -1,12 +1,15 @@
+from __future__ import annotations
+
 import uuid
 
-from pydantic import BaseModel, Field, field_validator
-from typing import List, Dict, Optional, Literal
 from datetime import datetime
+from typing import Literal
+
+from pydantic import BaseModel, Field, field_validator
 
 
-TaskOptionValue = str | List[str] | Dict[str, str]
-TaskOptionsByTask = Dict[str, Dict[str, TaskOptionValue]]
+TaskOptionValue = str | list[str] | dict[str, str]
+TaskOptionsByTask = dict[str, dict[str, TaskOptionValue]]
 
 
 class ScheduledTaskDeviceConfig(BaseModel):
@@ -58,13 +61,13 @@ class IntervalTriggerConfig(BaseModel):
     """Interval 触发器配置"""
 
     type: Literal["interval"] = "interval"
-    weeks: Optional[int] = Field(None, ge=0, description="周数")
-    days: Optional[int] = Field(None, ge=0, description="天数")
-    hours: Optional[int] = Field(None, ge=0, description="小时数")
-    minutes: Optional[int] = Field(None, ge=0, description="分钟数")
-    seconds: Optional[int] = Field(None, ge=0, description="秒数")
-    start_date: Optional[datetime] = Field(None, description="开始时间")
-    end_date: Optional[datetime] = Field(None, description="结束时间")
+    weeks: int | None = Field(None, ge=0, description="周数")
+    days: int | None = Field(None, ge=0, description="天数")
+    hours: int | None = Field(None, ge=0, description="小时数")
+    minutes: int | None = Field(None, ge=0, description="分钟数")
+    seconds: int | None = Field(None, ge=0, description="秒数")
+    start_date: datetime | None = Field(None, description="开始时间")
+    end_date: datetime | None = Field(None, description="结束时间")
 
 
 TriggerConfig = CronTriggerConfig | DateTriggerConfig | IntervalTriggerConfig
@@ -73,11 +76,11 @@ TriggerConfig = CronTriggerConfig | DateTriggerConfig | IntervalTriggerConfig
 class TaskExecutionPayload(BaseModel):
     """任务执行载荷"""
 
-    task_list: List[str] = Field(default_factory=list, description="要执行的任务列表")
+    task_list: list[str] = Field(default_factory=list, description="要执行的任务列表")
     task_options: TaskOptionsByTask = Field(
         default_factory=dict, description="任务选项"
     )
-    preTasks: List[PreTaskCommand] = Field(
+    preTasks: list[PreTaskCommand] = Field(
         default_factory=list, description="前置 shell 命令列表"
     )
 
@@ -87,20 +90,20 @@ class ScheduledTask(TaskExecutionPayload):
 
     id: str = Field(..., description="任务唯一标识")
     name: str = Field(..., min_length=1, max_length=100, description="任务名称")
-    description: Optional[str] = Field(None, max_length=500, description="任务描述")
+    description: str | None = Field(None, max_length=500, description="任务描述")
     enabled: bool = Field(True, description="是否启用")
     trigger_type: Literal["cron", "date", "interval"] = Field(
         ..., description="触发器类型"
     )
     trigger_config: TriggerConfig = Field(..., description="触发器配置")
-    controller_name: Optional[str] = Field(None, description="控制器名称")
-    device: Optional[ScheduledTaskDeviceConfig] = Field(None, description="设备配置")
-    resource_name: Optional[str] = Field(None, description="资源包名称")
+    controller_name: str | None = Field(None, description="控制器名称")
+    device: ScheduledTaskDeviceConfig | None = Field(None, description="设备配置")
+    resource_name: str | None = Field(None, description="资源包名称")
     # APS-owned native user-level wakeup flag (False = no OS registration)
     wakeup_enabled: bool = Field(
         False, description="是否注册用户级 OS 原生唤醒（False 表示关闭）"
     )
-    next_run_time: Optional[datetime] = Field(None, description="下次执行时间")
+    next_run_time: datetime | None = Field(None, description="下次执行时间")
     created_at: datetime = Field(default_factory=datetime.now, description="创建时间")
     updated_at: datetime = Field(default_factory=datetime.now, description="更新时间")
 
@@ -109,32 +112,32 @@ class ScheduledTaskCreate(TaskExecutionPayload):
     """创建定时任务请求"""
 
     name: str = Field(..., min_length=1, max_length=100)
-    description: Optional[str] = Field(None, max_length=500)
+    description: str | None = Field(None, max_length=500)
     enabled: bool = True
     trigger_type: Literal["cron", "date", "interval"]
     trigger_config: TriggerConfig
-    controller_name: Optional[str] = Field(None, description="控制器名称")
-    device: Optional[ScheduledTaskDeviceConfig] = Field(None, description="设备配置")
-    resource_name: Optional[str] = Field(None, description="资源包名称")
+    controller_name: str | None = Field(None, description="控制器名称")
+    device: ScheduledTaskDeviceConfig | None = Field(None, description="设备配置")
+    resource_name: str | None = Field(None, description="资源包名称")
     wakeup_enabled: bool = False
 
 
 class ScheduledTaskUpdate(BaseModel):
     """更新定时任务请求"""
 
-    name: Optional[str] = Field(None, min_length=1, max_length=100)
-    description: Optional[str] = Field(None, max_length=500)
-    enabled: Optional[bool] = None
-    trigger_type: Optional[Literal["cron", "date", "interval"]] = None
-    trigger_config: Optional[TriggerConfig] = None
-    controller_name: Optional[str] = Field(None, description="控制器名称")
-    device: Optional[ScheduledTaskDeviceConfig] = Field(None, description="设备配置")
-    resource_name: Optional[str] = Field(None, description="资源包名称")
-    task_list: Optional[List[str]] = None
-    task_options: Optional[TaskOptionsByTask] = None
-    preTasks: Optional[List[PreTaskCommand]] = None
+    name: str | None = Field(None, min_length=1, max_length=100)
+    description: str | None = Field(None, max_length=500)
+    enabled: bool | None = None
+    trigger_type: (Literal["cron", "date", "interval"]) | None = None
+    trigger_config: TriggerConfig | None = None
+    controller_name: str | None = Field(None, description="控制器名称")
+    device: ScheduledTaskDeviceConfig | None = Field(None, description="设备配置")
+    resource_name: str | None = Field(None, description="资源包名称")
+    task_list: (list[str]) | None = None
+    task_options: TaskOptionsByTask | None = None
+    preTasks: (list[PreTaskCommand]) | None = None
     # omitted=keep; true/false via model_fields_set (explicit false disables wakeup)
-    wakeup_enabled: Optional[bool] = None
+    wakeup_enabled: bool | None = None
 
 
 class TaskExecution(BaseModel):
@@ -144,11 +147,11 @@ class TaskExecution(BaseModel):
     task_id: str = Field(..., description="关联的定时任务ID")
     task_name: str = Field(..., description="任务名称")
     started_at: datetime = Field(..., description="开始时间")
-    finished_at: Optional[datetime] = Field(None, description="结束时间")
+    finished_at: datetime | None = Field(None, description="结束时间")
     status: Literal["running", "success", "failed", "stopped"] = Field(
         ..., description="执行状态"
     )
-    error_message: Optional[str] = Field(None, description="错误信息")
+    error_message: str | None = Field(None, description="错误信息")
 
 
 class TaskExecutionCreate(BaseModel):
@@ -157,7 +160,7 @@ class TaskExecutionCreate(BaseModel):
     task_id: str
     task_name: str
     status: Literal["running", "success", "failed", "stopped"]
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -186,11 +189,11 @@ class OSTriggerSpec(BaseModel):
     """OS 级触发器规格，由 APScheduler 触发器映射而来"""
 
     trigger_type: Literal["cron", "date", "interval"]
-    cron_expression: Optional[str] = Field(
+    cron_expression: str | None = Field(
         None, description="cron 类型：5-field cron 表达式"
     )
-    run_date: Optional[datetime] = Field(None, description="date 类型：一次性执行时间")
-    interval_minutes: Optional[int] = Field(
+    run_date: datetime | None = Field(None, description="date 类型：一次性执行时间")
+    interval_minutes: int | None = Field(
         None, description="interval 类型：间隔分钟数（整分钟，禁止静默取整）"
     )
 
@@ -203,7 +206,7 @@ class SystemTaskSpec(BaseModel):
     exe_path: str = Field(
         ..., description="命令可执行文件（frozen: exe；source: python）"
     )
-    cli_args: List[str] = Field(
+    cli_args: list[str] = Field(
         ..., description="命令行参数，如 source 下 [main.py, --headless, --task, id]"
     )
     trigger: OSTriggerSpec
@@ -219,8 +222,8 @@ class SystemTaskOperationalRecord(BaseModel):
     registered_exe_path: str = Field(
         "", description="Last-known registered exe path (diagnostic)"
     )
-    last_registered_at: Optional[datetime] = None
-    last_error: Optional[str] = None
+    last_registered_at: datetime | None = None
+    last_error: str | None = None
 
     def to_operational_dict(self) -> dict:
         """Serialize only operational allowlisted keys."""
@@ -236,15 +239,15 @@ class SystemTaskRegistration(BaseModel):
     platform: Literal["windows", "macos", "linux"]
     state: OperationalState = "active"
     registered_exe_path: str = ""
-    last_registered_at: Optional[datetime] = None
-    last_error: Optional[str] = None
-    trigger_spec: Optional[OSTriggerSpec] = None
-    next_run_time: Optional[datetime] = None
+    last_registered_at: datetime | None = None
+    last_error: str | None = None
+    trigger_spec: OSTriggerSpec | None = None
+    next_run_time: datetime | None = None
     registered: bool = False
     verified: bool = False
     path_valid: bool = False
-    reason: Optional[str] = None
-    enabled: Optional[bool] = None
+    reason: str | None = None
+    enabled: bool | None = None
 
 
 class SystemTaskStatusResponse(BaseModel):
@@ -252,16 +255,16 @@ class SystemTaskStatusResponse(BaseModel):
 
     task_id: str
     registered: bool
-    platform: Optional[str] = None
+    platform: str | None = None
     task_name: str = ""
-    next_run_time: Optional[datetime] = None
-    last_error: Optional[str] = None
+    next_run_time: datetime | None = None
+    last_error: str | None = None
     path_valid: bool = Field(..., description="注册路径是否与当前 command 一致")
-    state: Optional[OperationalState] = None
+    state: OperationalState | None = None
     registered_exe_path: str = ""
-    enabled: Optional[bool] = None
-    verified: Optional[bool] = None
-    reason: Optional[str] = None
+    enabled: bool | None = None
+    verified: bool | None = None
+    reason: str | None = None
 
 
 class TaskUpdateSyncedResult(BaseModel):
@@ -271,11 +274,11 @@ class TaskUpdateSyncedResult(BaseModel):
     ``native_error`` / ``native_status`` without treating the request as failed.
     """
 
-    task: Optional["ScheduledTask"] = None
+    task: ScheduledTask | None = None
     aps_outcome: Literal["success", "not_found", "error"] = "success"
-    aps_error: Optional[str] = None
-    native_status: Optional[SystemTaskStatusResponse] = None
-    native_error: Optional[str] = None
+    aps_error: str | None = None
+    native_status: SystemTaskStatusResponse | None = None
+    native_error: str | None = None
 
 
 class ReconcileTaskResult(BaseModel):
@@ -292,4 +295,4 @@ class ReconcileTaskResult(BaseModel):
         "skipped",
     ] = "noop"
     detail: str = ""
-    native_error: Optional[str] = None
+    native_error: str | None = None

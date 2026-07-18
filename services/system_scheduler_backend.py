@@ -28,9 +28,11 @@ import subprocess
 import tempfile
 import xml.etree.ElementTree as ET
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Literal, Optional, cast
+from typing import cast
+
+from apscheduler.triggers.cron import CronTrigger
 
 from models.scheduler import (
     CronTriggerConfig,
@@ -49,13 +51,8 @@ logger = logging.getLogger(__name__)
 
 _TASK_ID_RE = re.compile(r"^[a-f0-9-]{36}$")
 _XML_NS = "http://schemas.microsoft.com/windows/2004/02/mit/task"
-_CRON_FIELD_RE = re.compile(r"^(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s+(\S+)$")
 # Numeric fixed daily: M H * * *
 _FIXED_DAILY_CRON_RE = re.compile(r"^(\d{1,2})\s+(\d{1,2})\s+\*\s+\*\s+\*$")
-# Numeric cron field pieces (no names)
-_NUMERIC_CRON_TOKEN_RE = re.compile(
-    r"^(\*|\d+)(-\d+)?(/\d+)?(,(\*|\d+)(-\d+)?(/\d+)?)*$"
-)
 _MAX_INTERVAL_MINUTES = 44640  # 31 days
 
 
@@ -76,74 +73,6 @@ def validate_task_id(task_id: str) -> None:
         )
 
 
-def _parse_cron_fields(expr: str) -> dict:
-    m = _CRON_FIELD_RE.match(expr.strip())
-    if not m:
-        raise ValueError(f"无效的 cron 表达式（需要 5 个字段）: {expr!r}")
-    return {
-        "minute": m.group(1),
-        "hour": m.group(2),
-        "day": m.group(3),
-        "month": m.group(4),
-        "weekday": m.group(5),
-    }
-
-
-def _parse_cron_field_list(value: str, max_val: int) -> list[int]:
-    """Expand a numeric cron field. Names/empty/descending ranges rejected."""
-    if value == "*":
-        return list(range(0, max_val + 1))
-    if not _NUMERIC_CRON_TOKEN_RE.match(value):
-        raise ValueError(f"非数字 cron 字段不被支持: {value!r}")
-    results: list[int] = []
-    for part in value.split(","):
-        part = part.strip()
-        if not part:
-            raise ValueError(f"空 cron 字段片段: {value!r}")
-        if "/" in part:
-            base, step_s = part.split("/", 1)
-            if not step_s or not step_s.isdigit():
-                raise ValueError(f"无效 step: {part!r}")
-            step = int(step_s)
-            if step <= 0:
-                raise ValueError(f"无效 step: {part!r}")
-            if base == "*":
-                base_start, base_end = 0, max_val
-            elif "-" in base:
-                lo, hi = base.split("-", 1)
-                base_start, base_end = int(lo), int(hi)
-                if base_start > base_end:
-                    raise ValueError(f"降序 cron 范围不被支持: {part!r}")
-            else:
-                if base == "" or not base.lstrip("-").isdigit():
-                    raise ValueError(f"无效 step base: {part!r}")
-                base_start, base_end = int(base), max_val
-            chunk = list(range(base_start, base_end + 1, step))
-            if not chunk:
-                raise ValueError(f"cron 展开为空: {part!r}")
-            for v in chunk:
-                if v not in results:
-                    results.append(v)
-        elif "-" in part:
-            lo, hi = part.split("-", 1)
-            start, end = int(lo), int(hi)
-            if start > end:
-                raise ValueError(f"降序 cron 范围不被支持: {part!r}")
-            chunk = list(range(start, end + 1))
-            if not chunk:
-                raise ValueError(f"cron 展开为空: {part!r}")
-            for v in chunk:
-                if v not in results:
-                    results.append(v)
-        else:
-            v = int(part)
-            if v not in results:
-                results.append(v)
-    if not results:
-        raise ValueError(f"cron 字段展开为空: {value!r}")
-    return sorted(results)
-
-
 def parse_fixed_daily_cron(expr: str) -> tuple[int, int]:
     """Parse numeric fixed daily M H * * *. Returns (minute, hour)."""
     m = _FIXED_DAILY_CRON_RE.match(expr.strip())
@@ -159,61 +88,74 @@ def parse_fixed_daily_cron(expr: str) -> tuple[int, int]:
 
 
 def validate_linux_cron_expression(expr: str) -> str:
-    """Validate Linux cron: numeric five-field with bounds; DOW must be *."""
-    fields = _parse_cron_fields(expr)
-    bounds = (
-        ("minute", fields["minute"], 0, 59),
-        ("hour", fields["hour"], 0, 23),
-        ("day", fields["day"], 1, 31),
-        ("month", fields["month"], 1, 12),
-        ("weekday", fields["weekday"], 0, 7),
-    )
-    for name, field, min_val, max_val in bounds:
-        if re.search(r"[A-Za-z@]", field):
-            raise ValueError(f"Linux cron 拒绝名称/扩展字段 {name}={field!r}")
-        if field != "*":
-            values = _parse_cron_field_list(field, max_val)
-            for v in values:
-                if v < min_val or v > max_val:
-                    raise ValueError(
-                        f"Linux cron {name} 越界: {v} not in {min_val}..{max_val}"
-                    )
-    if fields["weekday"] != "*":
+    """Validate Linux cron: numeric five-field with bounds; DOW must be *.
+
+    Delegates syntax/bounds/range/step/descending-range/zero-step validation
+    to APScheduler's ``CronTrigger.from_crontab`` (already a project dep),
+    layered with MWU's strict policy: numeric-only tokens (no ``MON``/``JAN``/``L``/
+    ``W``/``#``/``@``) and day-of-week must be ``*`` (DOM+DOW restricted translation
+    has no safe APScheduler→cron mapping and is rejected pre-emptively).
+    """
+    expr = expr.strip()
+    fields = expr.split()
+    if len(fields) != 5:
+        raise ValueError(f"无效的 cron 表达式（需要 5 个字段）: {expr!r}")
+    field_names = ("minute", "hour", "day", "month", "weekday")
+    for name, value in zip(field_names, fields):
+        if re.search(r"[A-Za-z@]", value):
+            raise ValueError(f"Linux cron 拒绝名称/扩展字段 {name}={value!r}")
+    if fields[4] != "*":
         raise ValueError(
             "Linux cron 暂不支持受限 day-of-week（需 DOW=*）；"
             "DOM+DOW 同时限制在 APScheduler→cron 星期翻译验证前被拒绝"
         )
-    return expr.strip()
+    try:
+        CronTrigger.from_crontab(expr)
+    except ValueError as e:
+        raise ValueError(f"Linux cron 越界或语法错误: {e}") from e
+    return expr
 
 
 def windows_quote_argument(arg: str) -> str:
-    """Windows CreateProcess command-line quoting (MSDN rules)."""
-    if not arg:
-        return '""'
-    if re.search(r'[\s"]', arg) is None:
-        return arg
-    result: list[str] = ['"']
-    num_backslashes = 0
-    for ch in arg:
-        if ch == "\\":
-            num_backslashes += 1
-        elif ch == '"':
-            result.append("\\" * (num_backslashes * 2 + 1))
-            result.append('"')
-            num_backslashes = 0
-        else:
-            if num_backslashes:
-                result.append("\\" * num_backslashes)
-                num_backslashes = 0
-            result.append(ch)
-    if num_backslashes:
-        result.append("\\" * (num_backslashes * 2))
-    result.append('"')
-    return "".join(result)
+    """Windows CreateProcess command-line quoting (MSDN rules).
+
+    Delegates to ``subprocess.list2cmdline``, which implements the same
+    backslash-doubling + space/tab/quote-driven quoting rules used by
+    CreateProcess on Windows (CPython's own implementation of list2cmdline is
+    the canonical reference for the rules documented at
+    https://learn.microsoft.com/windows/win32/api/processthreadapi/nf-processthreadapi-createprocessw).
+    """
+    return subprocess.list2cmdline([arg])
 
 
 def windows_join_args(args: list[str]) -> str:
-    return " ".join(windows_quote_argument(a) for a in args)
+    """Join argv into a single Windows command-line string (MSDN rules).
+
+    Equivalent to ``subprocess.list2cmdline(args)``; kept as a named helper
+    for site readability and to mirror the symmetric single-arg form above.
+    """
+    return subprocess.list2cmdline(args)
+
+
+def _run_text(
+    args: list[str], *, check: bool = False
+) -> subprocess.CompletedProcess[str]:
+    """Run a subprocess capturing stdout/stderr as UTF-8 str.
+
+    Standardizes encoding (utf-8) and error handling (errors=replace) so every
+    caller can treat ``proc.stderr`` / ``proc.stdout`` directly as ``str``.
+    Use :func:`subprocess.run` directly with ``capture_output=True`` (no
+    ``text=``) when raw bytes are required (e.g. Windows Task Scheduler XML
+    which may be UTF-16 encoded).
+    """
+    return subprocess.run(
+        args,
+        capture_output=True,
+        check=check,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
 
 
 def ensure_timezone_aware(dt: datetime) -> datetime:
@@ -413,9 +355,7 @@ class WindowsBackend(SystemSchedulerBackend):
             )
             logger.info("Windows 任务注册成功: %s", task_path)
         except subprocess.CalledProcessError as e:
-            stderr = (
-                (e.stderr or b"").decode("utf-8", errors="replace") if e.stderr else ""
-            )
+            stderr = e.stderr or ""
             raise RuntimeError(f"schtasks 注册失败: {stderr.strip() or e}") from e
         finally:
             if temp_path and os.path.exists(temp_path):
@@ -425,12 +365,11 @@ class WindowsBackend(SystemSchedulerBackend):
         validate_task_id(task_id)
         task_path = self.build_identifier(task_id)
         proc = await asyncio.to_thread(
-            subprocess.run,
+            _run_text,
             ["schtasks", "/delete", "/tn", task_path, "/f"],
-            capture_output=True,
         )
         if proc.returncode != 0:
-            stderr = cast(bytes, proc.stderr or b"").decode("utf-8", errors="replace")
+            stderr = proc.stderr or ""
             if _windows_is_not_found(stderr):
                 return
             raise RuntimeError(f"schtasks 卸载失败: {stderr.strip()}")
@@ -439,19 +378,20 @@ class WindowsBackend(SystemSchedulerBackend):
         validate_task_id(task_id)
         task_path = self.build_identifier(task_id)
         proc = await asyncio.to_thread(
-            subprocess.run,
+            _run_text,
             ["schtasks", "/query", "/tn", task_path, "/fo", "list"],
-            capture_output=True,
         )
         if proc.returncode == 0:
             return True
-        stderr = cast(bytes, proc.stderr or b"").decode("utf-8", errors="replace")
+        stderr = proc.stderr or ""
         if _windows_is_not_found(stderr):
             return False
         raise RuntimeError(f"schtasks query failed: {stderr.strip() or proc.returncode}")
 
     async def verify_registration(self, spec: SystemTaskSpec) -> tuple[bool, str]:
         task_path = self.build_identifier(spec.task_id)
+        # NOTE: schtasks /query /xml emits UTF-16 LE; must keep raw bytes for
+        # _decode_task_xml's multi-codepage cascade. Do not switch to _run_text.
         proc = await asyncio.to_thread(
             subprocess.run,
             ["schtasks", "/query", "/tn", task_path, "/xml"],
@@ -494,13 +434,13 @@ class WindowsBackend(SystemSchedulerBackend):
             return tag.rsplit("}", 1)[-1]
         return tag
 
-    def _find_desc(self, root: ET.Element, name: str) -> Optional[ET.Element]:
+    def _find_desc(self, root: ET.Element, name: str) -> ET.Element | None:
         for el in root.iter():
             if self._local_tag(el.tag) == name:
                 return el
         return None
 
-    def _find_settings_child(self, root: ET.Element, name: str) -> Optional[ET.Element]:
+    def _find_settings_child(self, root: ET.Element, name: str) -> ET.Element | None:
         for el in root.iter():
             if self._local_tag(el.tag) != "Settings":
                 continue
@@ -559,7 +499,7 @@ class WindowsBackend(SystemSchedulerBackend):
         expected_root = self._decode_task_xml(self._build_task_xml(spec))
         trig = spec.trigger
 
-        def _sb(el_root: ET.Element) -> Optional[str]:
+        def _sb(el_root: ET.Element) -> str | None:
             sb = self._find_desc(el_root, "StartBoundary")
             return sb.text if sb is not None else None
 
@@ -610,7 +550,7 @@ class WindowsBackend(SystemSchedulerBackend):
             if got_sb is None:
                 return False, "cron StartBoundary missing"
             try:
-                dt = datetime.fromisoformat(got_sb.replace("Z", "+00:00"))
+                dt = datetime.fromisoformat(got_sb)
             except Exception:
                 return False, f"cron StartBoundary unparseable: {got_sb!r}"
             if dt.minute != minute or dt.hour != hour or dt.second != 0:
@@ -633,8 +573,8 @@ class WindowsBackend(SystemSchedulerBackend):
     @staticmethod
     def _run_schtasks(
         args: list[str], check: bool = True
-    ) -> subprocess.CompletedProcess:
-        return subprocess.run(args, capture_output=True, check=check)
+    ) -> subprocess.CompletedProcess[str]:
+        return _run_text(args, check=check)
 
     def _build_task_xml(self, spec: SystemTaskSpec) -> bytes:
         """Build schema-valid user-level Task Scheduler XML."""
@@ -723,8 +663,6 @@ class WindowsBackend(SystemSchedulerBackend):
         now = datetime.now().astimezone()
         start = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if start <= now:
-            from datetime import timedelta
-
             start = start + timedelta(days=1)
         sb = ET.SubElement(trigger, "StartBoundary")
         sb.text = start.isoformat(timespec="seconds")
@@ -773,12 +711,11 @@ class MacOSBackend(SystemSchedulerBackend):
         plist_path = self._plist_path(task_id)
         domain = self._domain()
         proc = await asyncio.to_thread(
-            subprocess.run,
+            _run_text,
             ["launchctl", "bootout", f"{domain}/{label}"],
-            capture_output=True,
         )
         if proc.returncode != 0:
-            stderr = cast(bytes, proc.stderr or b"").decode("utf-8", errors="replace")
+            stderr = proc.stderr or ""
             if not _macos_is_not_found(stderr):
                 raise RuntimeError(f"launchctl bootout failed: {stderr.strip()}")
         if await asyncio.to_thread(os.path.exists, str(plist_path)):
@@ -792,13 +729,12 @@ class MacOSBackend(SystemSchedulerBackend):
         label = self.build_identifier(task_id)
         domain = self._domain()
         proc = await asyncio.to_thread(
-            subprocess.run,
+            _run_text,
             ["launchctl", "print", f"{domain}/{label}"],
-            capture_output=True,
         )
         if proc.returncode == 0:
             return True
-        stderr = cast(bytes, proc.stderr or b"").decode("utf-8", errors="replace")
+        stderr = proc.stderr or ""
         if _macos_is_not_found(stderr) or proc.returncode == 113:
             return False
         detail = stderr.strip() or "no stderr"
@@ -831,9 +767,8 @@ class MacOSBackend(SystemSchedulerBackend):
             return False, f"plist compare failed: {e}"
 
         proc = await asyncio.to_thread(
-            subprocess.run,
+            _run_text,
             ["launchctl", "print", f"{domain}/{label}"],
-            capture_output=True,
         )
         if proc.returncode != 0:
             return False, f"launchctl print {domain}/{label} failed"
@@ -850,17 +785,15 @@ class MacOSBackend(SystemSchedulerBackend):
         target = f"{domain}/{label}"
 
         await asyncio.to_thread(
-            subprocess.run,
+            _run_text,
             ["launchctl", "bootout", target],
-            capture_output=True,
         )
         proc = await asyncio.to_thread(
-            subprocess.run,
+            _run_text,
             ["launchctl", "bootstrap", domain, plist_path_str],
-            capture_output=True,
         )
         if proc.returncode != 0:
-            stderr = cast(bytes, proc.stderr or b"").decode("utf-8", errors="replace")
+            stderr = proc.stderr or ""
             raise RuntimeError(f"launchctl bootstrap 失败: {stderr.strip()}")
 
     def _build_plist(self, spec: SystemTaskSpec) -> dict:
@@ -950,27 +883,24 @@ class LinuxBackend(SystemSchedulerBackend):
         return lock
 
     async def _read_crontab(self) -> str:
-        proc = await asyncio.to_thread(
-            subprocess.run,
-            ["crontab", "-l"],
-            capture_output=True,
-            text=True,
-        )
+        proc = await asyncio.to_thread(_run_text, ["crontab", "-l"])
         if proc.returncode != 0:
             err = f"{proc.stderr or ''}{proc.stdout or ''}"
             err_l = err.lower()
             if "no crontab for" in err_l or "no crontab" in err_l:
                 return ""
             raise RuntimeError(f"crontab -l failed: {err.strip() or proc.returncode}")
-        return cast(str, proc.stdout or "")
+        return proc.stdout or ""
 
     async def _write_crontab(self, content: str) -> None:
         proc = await asyncio.to_thread(
             subprocess.run,
             ["crontab", "-"],
             input=content,
-            text=True,
             capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
         )
         if proc.returncode != 0:
             stderr = proc.stderr or ""
@@ -1004,15 +934,9 @@ class LinuxBackend(SystemSchedulerBackend):
 
         new_crontab = "".join(new_lines)
         if not new_crontab.strip():
-            proc = await asyncio.to_thread(
-                subprocess.run,
-                ["crontab", "-r"],
-                capture_output=True,
-            )
+            proc = await asyncio.to_thread(_run_text, ["crontab", "-r"])
             if proc.returncode != 0:
-                stderr = cast(bytes, proc.stderr or b"").decode(
-                    "utf-8", errors="replace"
-                )
+                stderr = proc.stderr or ""
                 if "no crontab for" not in stderr.lower():
                     raise RuntimeError(f"crontab -r failed: {stderr.strip()}")
         else:
@@ -1060,7 +984,7 @@ class LinuxBackend(SystemSchedulerBackend):
 # ---------------------------------------------------------------------------
 
 
-def get_backend(platform_name: Optional[str] = None) -> SystemSchedulerBackend:
+def get_backend(platform_name: str | None = None) -> SystemSchedulerBackend:
     """根据当前平台返回对应后端实例。"""
     system = (platform_name or platform.system()).lower()
     if system in ("windows", "win32"):
@@ -1073,17 +997,16 @@ def get_backend(platform_name: Optional[str] = None) -> SystemSchedulerBackend:
 
 
 def build_native_command(
-    app_root: Path, task_id: str, *, frozen: Optional[bool] = None
+    app_root: Path, task_id: str, *, frozen: bool | None = None
 ) -> tuple[str, list[str]]:
     """Build source/frozen native command for OS registration.
 
     Source mode: python_executable + absolute main.py + --headless --task id
     Frozen mode: executable + --headless --task id
     """
-    is_frozen = (
-        getattr(__import__("sys"), "frozen", False) if frozen is None else frozen
-    )
     import sys
+
+    is_frozen = getattr(sys, "frozen", False) if frozen is None else frozen
 
     if is_frozen:
         return sys.executable, ["--headless", "--task", task_id]

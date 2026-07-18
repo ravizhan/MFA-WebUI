@@ -4,6 +4,8 @@ Unique reconcile_task scenarios (stale path, decode errors, delete durability)
 live in test_scheduler_reconcile.py; APS+native sync wrappers in test_scheduler_sync.py.
 """
 
+from __future__ import annotations
+
 from datetime import datetime
 from pathlib import Path
 from typing import Literal

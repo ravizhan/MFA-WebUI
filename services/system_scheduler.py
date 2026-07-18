@@ -15,7 +15,7 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, NoReturn, Optional, cast
+from typing import Literal, NoReturn, cast
 
 import json_utils as json
 
@@ -60,7 +60,7 @@ class SystemTaskService:
         self._app_root_dir = Path(app_root_dir)
         self._config_dir = self._app_root_dir / "config"
         self._state_file = self._config_dir / "system_tasks.json"
-        self._backend: Optional[SystemSchedulerBackend] = None
+        self._backend: SystemSchedulerBackend | None = None
         self._async_lock = asyncio.Lock()
 
     @property
@@ -136,7 +136,7 @@ class SystemTaskService:
 
     def _find_record(
         self, state: _SystemTaskState, task_id: str
-    ) -> Optional[SystemTaskOperationalRecord]:
+    ) -> SystemTaskOperationalRecord | None:
         for rec in state.records:
             if rec.task_id == task_id:
                 return rec
@@ -146,15 +146,15 @@ class SystemTaskService:
         self,
         rec: SystemTaskOperationalRecord,
         *,
-        task: Optional[ScheduledTask] = None,
+        task: ScheduledTask | None = None,
         registered: bool = False,
         verified: bool = False,
         path_valid: bool = False,
-        reason: Optional[str] = None,
-        enabled: Optional[bool] = None,
+        reason: str | None = None,
+        enabled: bool | None = None,
     ) -> SystemTaskRegistration:
         name = ""
-        trigger: Optional[OSTriggerSpec] = None
+        trigger: OSTriggerSpec | None = None
         next_run = None
         if task is not None and task.wakeup_enabled:
             name = task.name
@@ -182,14 +182,14 @@ class SystemTaskService:
 
     def _status_from_record(
         self,
-        rec: Optional[SystemTaskOperationalRecord],
+        rec: SystemTaskOperationalRecord | None,
         task_id: str,
         *,
-        task: Optional[ScheduledTask] = None,
+        task: ScheduledTask | None = None,
         path_valid: bool = False,
         os_registered: bool = False,
         verified: bool = False,
-        reason: Optional[str] = None,
+        reason: str | None = None,
     ) -> SystemTaskStatusResponse:
         if rec is None:
             return SystemTaskStatusResponse(
@@ -201,7 +201,7 @@ class SystemTaskService:
                 verified=False,
             )
 
-        enabled: Optional[bool] = None
+        enabled: bool | None = None
         enable_reason = ""
         if task is not None and task.wakeup_enabled:
             try:
@@ -251,7 +251,7 @@ class SystemTaskService:
             return "unknown"
         return "present" if present else "absent"
 
-    async def _ensure_absent(self, task_id: str) -> tuple[bool, Optional[str]]:
+    async def _ensure_absent(self, task_id: str) -> tuple[bool, str | None]:
         presence = await self._query_presence(task_id)
         if presence == "absent":
             return True, None
@@ -269,7 +269,7 @@ class SystemTaskService:
         return False, "still present after unregister"
 
     @staticmethod
-    def _reconcile_error(result: ReconcileTaskResult) -> Optional[str]:
+    def _reconcile_error(result: ReconcileTaskResult) -> str | None:
         if result.action != "error":
             return None
         return result.native_error or result.detail
@@ -280,7 +280,7 @@ class SystemTaskService:
         message: str,
         *,
         mode: Literal["existing_only", "upsert", "restore"],
-        prior: Optional[SystemTaskOperationalRecord] = None,
+        prior: SystemTaskOperationalRecord | None = None,
     ) -> None:
         state = self._load_state()
         if state.corrupt:
@@ -484,8 +484,8 @@ class SystemTaskService:
             )
 
     async def _status_snapshot_locked(
-        self, task_id: str, manager: Optional[SchedulerManager] = None
-    ) -> Optional[SystemTaskStatusResponse]:
+        self, task_id: str, manager: SchedulerManager | None = None
+    ) -> SystemTaskStatusResponse | None:
         state = self._load_state()
         if state.corrupt:
             raise RuntimeError(
@@ -514,15 +514,15 @@ class SystemTaskService:
         state: _SystemTaskState,
         rec: SystemTaskOperationalRecord,
         *,
-        manager: Optional[SchedulerManager],
-    ) -> tuple[SystemTaskStatusResponse, Optional[ScheduledTask]]:
+        manager: SchedulerManager | None,
+    ) -> tuple[SystemTaskStatusResponse, ScheduledTask | None]:
         """Return (status, APS task). Task is read once for reuse by callers."""
         if state.corrupt:
             raise RuntimeError("system_tasks.json corrupt; status unavailable")
 
-        task: Optional[ScheduledTask] = None
+        task: ScheduledTask | None = None
         aps_missing = False
-        aps_error: Optional[str] = None
+        aps_error: str | None = None
         if manager is None:
             aps_error = "APS schedule unknown"
         else:
@@ -611,7 +611,7 @@ class SystemTaskService:
         )
 
     async def get_status(
-        self, task_id: str, manager: Optional[SchedulerManager] = None
+        self, task_id: str, manager: SchedulerManager | None = None
     ) -> SystemTaskStatusResponse:
         async with self._async_lock:
             state = self._load_state()
@@ -632,7 +632,7 @@ class SystemTaskService:
             return status
 
     async def list_registered(
-        self, manager: Optional[SchedulerManager] = None
+        self, manager: SchedulerManager | None = None
     ) -> list[SystemTaskRegistration]:
         async with self._async_lock:
             state = self._load_state()
@@ -668,13 +668,13 @@ class SystemTaskService:
         async with self._async_lock:
             return await self._reconcile_task_locked(manager, task_id)
 
-    async def reconcile_all(self, manager: Optional[SchedulerManager] = None) -> dict:
+    async def reconcile_all(self, manager: SchedulerManager | None = None) -> dict:
         if manager is None:
             raise ValueError("reconcile_all requires SchedulerManager")
         async with self._async_lock:
             return await self._reconcile_all_locked(manager)
 
-    async def repair_all(self, manager: Optional[SchedulerManager] = None) -> dict:
+    async def repair_all(self, manager: SchedulerManager | None = None) -> dict:
         return await self.reconcile_all(manager)
 
     async def _reconcile_all_locked(self, manager: SchedulerManager) -> dict:
@@ -736,7 +736,7 @@ class SystemTaskService:
         reg = self._find_record(state, task_id)
         try:
             task = await manager.get_task(task_id)
-            aps_decode_error: Optional[str] = None
+            aps_decode_error: str | None = None
         except SchedulerJobDecodeError as e:
             task = None
             aps_decode_error = str(e)
@@ -780,7 +780,7 @@ class SystemTaskService:
         return await self._reconcile_ensure_native_locked(manager, task, reg)
 
     async def _reconcile_cleanup_locked(
-        self, task_id: str, reg: Optional[SystemTaskOperationalRecord]
+        self, task_id: str, reg: SystemTaskOperationalRecord | None
     ) -> ReconcileTaskResult:
         ok, err = await self._ensure_absent(task_id)
         if not ok:
@@ -808,7 +808,7 @@ class SystemTaskService:
         self,
         manager: SchedulerManager,
         task: ScheduledTask,
-        reg: Optional[SystemTaskOperationalRecord],
+        reg: SystemTaskOperationalRecord | None,
     ) -> ReconcileTaskResult:
         assert task.wakeup_enabled
         task_id = task.id

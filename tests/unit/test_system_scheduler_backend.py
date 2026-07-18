@@ -18,8 +18,6 @@ from services.system_scheduler_backend import (
     LinuxBackend,
     MacOSBackend,
     WindowsBackend,
-    _parse_cron_field_list,
-    _parse_cron_fields,
     build_native_command,
     map_trigger_to_os_spec,
     validate_linux_cron_expression,
@@ -47,29 +45,6 @@ class TestValidateTaskId:
     def test_command_injection_attempt(self):
         with pytest.raises(ValueError, match="无效的 task_id"):
             validate_task_id("; rm -rf /")
-
-
-class TestParseCronFields:
-    def test_basic_cron(self):
-        result = _parse_cron_fields("0 9 * * *")
-        assert result["minute"] == "0"
-        assert result["hour"] == "9"
-
-    def test_too_few_fields(self):
-        with pytest.raises(ValueError, match="无效的 cron 表达式"):
-            _parse_cron_fields("0 9 * *")
-
-
-class TestParseCronFieldList:
-    def test_wildcard(self):
-        assert _parse_cron_field_list("*", 59) == list(range(60))
-
-    def test_step(self):
-        assert _parse_cron_field_list("*/15", 59) == [0, 15, 30, 45]
-
-    def test_names_rejected(self):
-        with pytest.raises(ValueError):
-            _parse_cron_field_list("MON", 7)
 
 
 class TestMapTriggerToOsSpec:
@@ -287,11 +262,11 @@ class TestPresenceQuerySemantics:
     async def test_windows_is_registered_not_found_false(self, monkeypatch):
         b = WindowsBackend()
 
-        def fake_run(args, capture_output=True):
+        def fake_run(args, **kwargs):
             return SimpleNamespace(
                 returncode=1,
-                stderr=b"ERROR: The system cannot find the file specified.",
-                stdout=b"",
+                stderr="ERROR: The system cannot find the file specified.",
+                stdout="",
             )
 
         monkeypatch.setattr(
@@ -303,11 +278,11 @@ class TestPresenceQuerySemantics:
     async def test_windows_is_registered_other_error_raises(self, monkeypatch):
         b = WindowsBackend()
 
-        def fake_run(args, capture_output=True):
+        def fake_run(args, **kwargs):
             return SimpleNamespace(
                 returncode=1,
-                stderr=b"Access is denied.",
-                stdout=b"",
+                stderr="Access is denied.",
+                stdout="",
             )
 
         monkeypatch.setattr(
@@ -320,11 +295,11 @@ class TestPresenceQuerySemantics:
     async def test_windows_unregister_not_found_silent(self, monkeypatch):
         b = WindowsBackend()
 
-        def fake_run(args, capture_output=True):
+        def fake_run(args, **kwargs):
             return SimpleNamespace(
                 returncode=1,
-                stderr=b"ERROR: The system cannot find the file specified.",
-                stdout=b"",
+                stderr="ERROR: The system cannot find the file specified.",
+                stdout="",
             )
 
         monkeypatch.setattr(
@@ -336,11 +311,11 @@ class TestPresenceQuerySemantics:
     async def test_windows_unregister_other_error_raises(self, monkeypatch):
         b = WindowsBackend()
 
-        def fake_run(args, capture_output=True):
+        def fake_run(args, **kwargs):
             return SimpleNamespace(
                 returncode=1,
-                stderr=b"Access is denied.",
-                stdout=b"",
+                stderr="Access is denied.",
+                stdout="",
             )
 
         monkeypatch.setattr(
@@ -353,11 +328,11 @@ class TestPresenceQuerySemantics:
     async def test_macos_is_registered_not_found_false(self, monkeypatch):
         b = MacOSBackend()
 
-        def fake_run(args, capture_output=True):
+        def fake_run(args, **kwargs):
             return SimpleNamespace(
                 returncode=113,
-                stderr=b"Could not find service",
-                stdout=b"",
+                stderr="Could not find service",
+                stdout="",
             )
 
         monkeypatch.setattr(
@@ -367,24 +342,19 @@ class TestPresenceQuerySemantics:
 
     @pytest.mark.asyncio
     async def test_macos_is_registered_non_not_found_stderr_raises(self, monkeypatch):
-        """Non-not-found stderr with rc!=0.
-
-        Contract intent: raise RuntimeError (unknown). Current production falls
-        through to return False when outer not-found guard is false — see report.
-        """
+        """Non-not-found stderr with rc!=0 raises RuntimeError."""
         b = MacOSBackend()
 
-        def fake_run(args, capture_output=True):
+        def fake_run(args, **kwargs):
             return SimpleNamespace(
                 returncode=1,
-                stderr=b"Permission denied launching domain",
-                stdout=b"",
+                stderr="Permission denied launching domain",
+                stdout="",
             )
 
         monkeypatch.setattr(
             "services.system_scheduler_backend.subprocess.run", fake_run
         )
-        # Actual production behavior (defect vs contract): treated as absent.
         with pytest.raises(RuntimeError, match="launchctl print failed"):
             await b.is_registered(TID)
 

@@ -25,7 +25,6 @@ import json
 import os
 import uuid
 from pathlib import Path
-from typing import Optional
 
 import filelock as _filelock
 
@@ -79,7 +78,7 @@ class AdvisoryFileLock:
     def acquire(
         self,
         *,
-        timeout_seconds: Optional[float] = None,
+        timeout_seconds: float | None = None,
         poll_interval: float = 0.05,
     ) -> None:
         """Acquire exclusive lock.
