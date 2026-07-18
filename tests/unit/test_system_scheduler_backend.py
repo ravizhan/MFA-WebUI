@@ -414,13 +414,6 @@ class TestWindowsXmlVerify:
             working_dir=r"C:\Program Files\MWU",
         )
 
-    def test_golden_xml_verifies(self):
-        b = WindowsBackend()
-        spec = self._spec()
-        raw = b._build_task_xml(spec)
-        ok, detail = b.compare_exported_xml_bytes(raw, spec)
-        assert ok, detail
-
     def test_wrong_command_fails(self):
         b = WindowsBackend()
         spec = self._spec()

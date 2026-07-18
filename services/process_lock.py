@@ -85,7 +85,6 @@ class AdvisoryFileLock:
         *,
         timeout_seconds: Optional[float] = None,
         poll_interval: float = 0.05,
-        exclusive: bool = True,
     ) -> None:
         """Acquire exclusive lock.
 
@@ -93,10 +92,7 @@ class AdvisoryFileLock:
             timeout_seconds: None means try once (nonblocking). 0 same as None.
                 Positive value retries until timeout then raises LockBusyError.
             poll_interval: sleep between nonblocking attempts.
-            exclusive: must be True (shared locks are not used by the protocol).
         """
-        if not exclusive:
-            raise LockError("Only exclusive locks are supported")
         if self._locked:
             return
 
@@ -420,16 +416,3 @@ class RuntimeOwnership:
                 self._pid_path.unlink(missing_ok=True)
         except OSError:
             pass
-
-
-def try_probe_lock(path: Path) -> bool:
-    """Return True if the lock can be acquired (and immediately released)."""
-    lock = AdvisoryFileLock(path)
-    try:
-        lock.acquire(timeout_seconds=None)
-        lock.release()
-        return True
-    except LockBusyError:
-        return False
-    except LockError:
-        return False

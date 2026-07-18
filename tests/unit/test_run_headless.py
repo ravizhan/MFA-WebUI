@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -23,11 +23,6 @@ class TestRunHeadless:
         job = SimpleNamespace(next_run_time=None, kwargs={})
         sched = MagicMock()
         sched.get_job.return_value = job
-        sm = MagicMock()
-        sm.scheduler = sched
-        sm.initialize = AsyncMock()
-        sm.shutdown = AsyncMock()
-        sm.set_worker = MagicMock()
 
         class SM:
             def __init__(self):

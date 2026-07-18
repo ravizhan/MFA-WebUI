@@ -12,11 +12,13 @@ import pytest
 from models.scheduler import (
     OPERATIONAL_STATE_VERSION,
     CronTriggerConfig,
+    ReconcileTaskResult,
     ScheduledTask,
     ScheduledTaskCreate,
     ScheduledTaskUpdate,
     SystemTaskOperationalRecord,
 )
+from scheduler_job_codec import SchedulerJobDecodeError
 from services.system_scheduler import SystemTaskService, _SystemTaskState
 
 TID = "550e8400-e29b-41d4-a716-446655440000"
@@ -194,55 +196,6 @@ async def test_update_omitted_resyncs_new_trigger(service, backend):
     assert backend.register.await_args.args[0].trigger.cron_expression == "0 10 * * *"
     reg = _reg(service)
     assert reg is not None and reg.state == "active"
-
-
-@pytest.mark.asyncio
-async def test_update_explicit_false_unregisters(service, backend):
-    """Explicit wakeup_enabled=false cleans native; no re-register."""
-    service._backend = backend
-    _seed(service)
-    present = {"v": True}
-
-    async def is_reg(*_a, **_k):
-        return present["v"]
-
-    async def unreg(*_a, **_k):
-        present["v"] = False
-
-    backend.is_registered = AsyncMock(side_effect=is_reg)
-    backend.unregister = AsyncMock(side_effect=unreg)
-    task = _task(wakeup_enabled=True)
-    mgr = _mgr(task)
-    with _patch_trig():
-        result = await service.update_task_synced(
-            mgr, TID, ScheduledTaskUpdate(wakeup_enabled=False)
-        )
-    assert result.aps_outcome == "success"
-    backend.register.assert_not_awaited()
-    backend.unregister.assert_awaited()
-    assert _reg(service) is None
-
-
-@pytest.mark.asyncio
-async def test_update_wakeup_true_registers(service, backend):
-    service._backend = backend
-    _seed(service)
-    task = _task("0 12 * * *", wakeup_enabled=True)
-    mgr = _mgr(task)
-    with _patch_trig():
-        result = await service.update_task_synced(
-            mgr,
-            TID,
-            ScheduledTaskUpdate(
-                trigger_type="cron",
-                trigger_config=CronTriggerConfig(cron="0 12 * * *"),
-            ),
-        )
-    assert result.aps_outcome == "success"
-    backend.register.assert_awaited()
-    assert (
-        backend.register.await_args.args[0].trigger.cron_expression == "0 12 * * *"
-    )
 
 
 @pytest.mark.asyncio
@@ -624,3 +577,166 @@ async def test_lock_serializes_mutations(service, backend):
         "second-enter",
         "second-done",
     ]
+
+
+# ---------------------------------------------------------------------------
+# Characterization: create compensation / update outcomes / delete restore
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_create_compensation_unknown_native_keeps_aps_and_error_record(
+    service, backend
+):
+    """Native cleanup unconfirmed: keep APS job, write error on existing record."""
+    service._backend = backend
+    _seed(service)
+    mgr = _mgr()
+    err_result = ReconcileTaskResult(
+        task_id=TID,
+        action="error",
+        detail="native boom",
+        native_error="native boom",
+    )
+    with (
+        _patch_trig(),
+        patch.object(
+            service, "_reconcile_task_locked", new=AsyncMock(return_value=err_result)
+        ),
+        patch.object(
+            service,
+            "_ensure_absent",
+            new=AsyncMock(return_value=(False, "cleanup not confirmed")),
+        ),
+        pytest.raises(RuntimeError, match="cleanup could not be verified"),
+    ):
+        await service.create_task_synced(mgr, _create(wakeup_enabled=True))
+    mgr.delete_task.assert_not_awaited()
+    reg = _reg(service)
+    assert reg is not None
+    assert reg.state == "error"
+    assert "cleanup not confirmed" in (reg.last_error or "")
+
+
+@pytest.mark.asyncio
+async def test_create_compensation_delete_task_raises_chains_exception(
+    service, backend
+):
+    """APS delete_task raises after native absence: chain cause; no record remove."""
+    service._backend = backend
+    _seed(service)
+    mgr = _mgr()
+    aps_err = RuntimeError("aps delete boom")
+    mgr.delete_task = AsyncMock(side_effect=aps_err)
+    err_result = ReconcileTaskResult(
+        task_id=TID,
+        action="error",
+        detail="native boom",
+        native_error="native boom",
+    )
+    with (
+        _patch_trig(),
+        patch.object(
+            service, "_reconcile_task_locked", new=AsyncMock(return_value=err_result)
+        ),
+        patch.object(
+            service, "_ensure_absent", new=AsyncMock(return_value=(True, None))
+        ),
+        pytest.raises(RuntimeError, match="APS cleanup failed") as ei,
+    ):
+        await service.create_task_synced(mgr, _create(wakeup_enabled=True))
+    assert ei.value.__cause__ is aps_err
+    mgr.delete_task.assert_awaited_once_with(TID)
+    # Current behavior: record is only removed after delete_task succeeds.
+    reg = _reg(service)
+    assert reg is not None
+    assert reg.state == "active"
+
+
+@pytest.mark.asyncio
+async def test_update_pre_read_decode_failure_returns_error_outcome(service, backend):
+    service._backend = backend
+    mgr = _mgr()
+    mgr.get_task = AsyncMock(
+        side_effect=SchedulerJobDecodeError("bad trigger", job_id=TID)
+    )
+    result = await service.update_task_synced(
+        mgr, TID, ScheduledTaskUpdate(name="x")
+    )
+    assert result.aps_outcome == "error"
+    assert result.task is None
+    assert result.aps_error is not None
+    assert "decode failed before update" in result.aps_error
+    mgr.update_task.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_update_mutation_decode_failure_returns_error_outcome(service, backend):
+    service._backend = backend
+    mgr = _mgr(_task(wakeup_enabled=True))
+    mgr.update_task = AsyncMock(
+        side_effect=SchedulerJobDecodeError("bad after update", job_id=TID)
+    )
+    with patch.object(
+        service, "_reconcile_task_locked", new=AsyncMock()
+    ) as reconcile:
+        result = await service.update_task_synced(
+            mgr, TID, ScheduledTaskUpdate(name="x")
+        )
+    assert result.aps_outcome == "error"
+    assert result.task is None
+    assert result.aps_error is not None
+    assert "APS update decode failed" in result.aps_error
+    reconcile.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_update_returns_none_aps_absent_returns_not_found(service, backend):
+    service._backend = backend
+    mgr = _mgr(_task(wakeup_enabled=True))
+    mgr.update_task = AsyncMock(return_value=None)
+    mgr.scheduler.get_job = MagicMock(return_value=None)
+    result = await service.update_task_synced(
+        mgr, TID, ScheduledTaskUpdate(name="x")
+    )
+    assert result.aps_outcome == "not_found"
+    assert result.task is None
+
+
+@pytest.mark.asyncio
+async def test_update_returns_none_aps_still_present_returns_error(service, backend):
+    service._backend = backend
+    mgr = _mgr(_task(wakeup_enabled=True))
+    mgr.update_task = AsyncMock(return_value=None)
+    mgr.scheduler.get_job = MagicMock(return_value=MagicMock())
+    result = await service.update_task_synced(
+        mgr, TID, ScheduledTaskUpdate(name="x")
+    )
+    assert result.aps_outcome == "error"
+    assert result.task is None
+    assert result.aps_error == "APS update returned None with job still present"
+
+
+@pytest.mark.asyncio
+async def test_delete_pre_failure_restores_prior_record_as_error(service, backend):
+    service._backend = backend
+    _seed(service)
+    prior = _reg(service)
+    assert prior is not None
+    prior_state = prior.state
+    prior_path = prior.registered_exe_path
+    prior_at = prior.last_registered_at
+
+    mgr = _mgr()
+    mgr.delete_task_classified = AsyncMock(return_value="pre_failure")
+    with pytest.raises(RuntimeError, match="partial delete failure"):
+        await service.delete_task_synced(mgr, TID)
+
+    reg = _reg(service)
+    assert reg is not None
+    assert reg.state == "error"
+    assert reg.last_error == "APS delete pre_failure after native cleanup"
+    # Restored from deep-copied prior (not removed)
+    assert reg.registered_exe_path == prior_path
+    assert reg.last_registered_at == prior_at
+    assert prior_state == "active"

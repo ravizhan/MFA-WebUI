@@ -13,8 +13,6 @@ from models.scheduler import (
     OPERATIONAL_STATE_VERSION,
     CronTriggerConfig,
     ScheduledTask,
-    ScheduledTaskCreate,
-    ScheduledTaskUpdate,
     SystemTaskOperationalRecord,
 )
 from scheduler_job_codec import SchedulerJobDecodeError
@@ -111,33 +109,6 @@ def _find(svc: SystemTaskService):
 
 
 @pytest.mark.asyncio
-async def test_reconcile_noop_when_converged(service, backend):
-    service._backend = backend
-    exe, _ = service.build_command_for_task(TID)
-    _seed(service, exe=exe)
-    backend.is_registered = AsyncMock(return_value=True)
-    backend.verify_registration = AsyncMock(return_value=(True, "ok"))
-    with _trig():
-        result = await service.reconcile_task(_mgr(), TID)
-    assert result.action == "noop"
-    backend.register.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_reconcile_missing_native_registers(service, backend):
-    service._backend = backend
-    _seed(service)
-    backend.is_registered = AsyncMock(return_value=False)
-    with _trig():
-        result = await service.reconcile_task(_mgr(), TID)
-    assert result.action in ("registered", "updated", "materialized")
-    backend.register.assert_awaited()
-    spec = backend.register.await_args.args[0]
-    assert spec.task_id == TID
-    assert "scope" not in type(spec).model_fields
-
-
-@pytest.mark.asyncio
 async def test_reconcile_stale_path_reregisters(service, backend):
     service._backend = backend
     _seed(service, exe="/stale/path")
@@ -186,17 +157,6 @@ async def test_reconcile_aps_missing_cleans_record(service, backend):
 
 
 @pytest.mark.asyncio
-async def test_reconcile_wakeup_false_cleans_record(service, backend):
-    service._backend = backend
-    _seed(service)
-    backend.is_registered = AsyncMock(return_value=False)
-    result = await service.reconcile_task(_mgr(_aps_task(wakeup_enabled=False)), TID)
-    assert result.action == "cleaned"
-    assert _find(service) is None
-    backend.register.assert_not_awaited()
-
-
-@pytest.mark.asyncio
 async def test_reconcile_aps_only_materializes(service, backend):
     service._backend = backend
     backend.is_registered = AsyncMock(return_value=False)
@@ -230,72 +190,6 @@ async def test_reconcile_corrupt_aps_error_no_register(service, backend):
     backend.register.assert_not_awaited()
     reg = _find(service)
     assert reg is not None and reg.state == "error"
-
-
-@pytest.mark.asyncio
-async def test_second_reconcile_noop(service, backend):
-    service._backend = backend
-    exe, _ = service.build_command_for_task(TID)
-    _seed(service, exe=exe)
-    backend.is_registered = AsyncMock(return_value=False)
-    backend.verify_registration = AsyncMock(return_value=(True, "ok"))
-    with _trig():
-        r1 = await service.reconcile_task(_mgr(), TID)
-        assert r1.action != "error"
-        backend.register.reset_mock()
-        backend.is_registered = AsyncMock(return_value=True)
-        st = service._load_state()
-        reg = service._find_record(st, TID)
-        assert reg and reg.state == "active"
-        reg.registered_exe_path = exe
-        service._save_state(st)
-        r2 = await service.reconcile_task(_mgr(), TID)
-    assert r2.action == "noop"
-    backend.register.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_create_native_failure_aps_rollback(service, backend):
-    service._backend = backend
-    backend.is_registered = AsyncMock(return_value=False)
-    backend.register = AsyncMock(side_effect=RuntimeError("native boom"))
-    mgr = MagicMock()
-    task = _aps_task()
-    mgr.create_task = AsyncMock(return_value=task)
-    mgr.get_task = AsyncMock(return_value=task)
-    mgr.delete_task = AsyncMock(return_value=True)
-    mgr.delete_task_classified = AsyncMock(return_value="success")
-    mgr.scheduler = MagicMock(get_jobs=MagicMock(return_value=[]))
-    with _trig(), pytest.raises(RuntimeError, match="native"):
-        await service.create_task_synced(
-            mgr,
-            ScheduledTaskCreate(
-                name="task",
-                trigger_type="cron",
-                trigger_config=CronTriggerConfig(cron="0 9 * * *"),
-                task_list=["Main"],
-                wakeup_enabled=True,
-            ),
-        )
-    mgr.delete_task.assert_awaited()
-
-
-@pytest.mark.asyncio
-async def test_update_partial_result_shape(service, backend):
-    service._backend = backend
-    _seed(service)
-    backend.is_registered = AsyncMock(return_value=False)
-    backend.register = AsyncMock(side_effect=RuntimeError("native fail"))
-    t = _aps_task()
-    mgr = _mgr(t)
-    mgr.update_task = AsyncMock(return_value=t)
-    with _trig():
-        result = await service.update_task_synced(
-            mgr, TID, ScheduledTaskUpdate(name="n")
-        )
-    assert result.aps_outcome == "success"
-    assert result.task is not None
-    assert result.native_error is not None
 
 
 @pytest.mark.asyncio

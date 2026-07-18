@@ -1,6 +1,7 @@
-"""SystemTaskService unit tests — status/persistence + wakeup contracts.
+"""SystemTaskService unit tests — status/persistence + repair_all entry contracts.
 
-External reconcile/repair matrix lives in test_scheduler_reconcile.py.
+Unique reconcile_task scenarios (stale path, decode errors, delete durability)
+live in test_scheduler_reconcile.py; APS+native sync wrappers in test_scheduler_sync.py.
 """
 
 from datetime import datetime

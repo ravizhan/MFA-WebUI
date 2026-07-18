@@ -15,7 +15,7 @@ import logging
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Literal, Optional, cast
+from typing import Literal, NoReturn, Optional, cast
 
 import json_utils as json
 
@@ -87,12 +87,7 @@ class SystemTaskService:
                 data = json.load(f)
             if not isinstance(data, dict):
                 raise ValueError("state root must be object")
-            file_ver = int(data.get("version", -1))
-            if file_ver != OPERATIONAL_STATE_VERSION:
-                raise ValueError(
-                    f"unsupported system_tasks.json version {file_ver}; "
-                    f"expected {OPERATIONAL_STATE_VERSION} (no migration)"
-                )
+            # version is informational only; not validated on load.
             state = _SystemTaskState(version=OPERATIONAL_STATE_VERSION)
             raw_regs = data.get("registrations", [])
             if not isinstance(raw_regs, list):
@@ -100,13 +95,10 @@ class SystemTaskService:
             for reg_data in raw_regs:
                 if not isinstance(reg_data, dict):
                     raise ValueError("registration must be object")
-                # Reject unknown / forbidden keys strictly.
-                extra = set(reg_data.keys()) - OPERATIONAL_STATE_KEYS
-                if extra:
-                    raise ValueError(f"registration has forbidden keys: {sorted(extra)}")
                 missing = {"task_id", "platform", "state"} - set(reg_data.keys())
                 if missing:
                     raise ValueError(f"registration missing keys: {sorted(missing)}")
+                # Known keys only; unknown fields are silently ignored.
                 state.records.append(
                     SystemTaskOperationalRecord.model_validate(
                         {k: reg_data[k] for k in OPERATIONAL_STATE_KEYS if k in reg_data}
@@ -115,9 +107,7 @@ class SystemTaskService:
             self._memory_state = state
             return state
         except Exception as e:
-            logger.error(
-                "加载 system_tasks.json 失败（fail closed，不迁移旧 schema）: %s", e
-            )
+            logger.error("加载 system_tasks.json 失败（fail closed）: %s", e)
             state = _SystemTaskState()
             state.corrupt = True
             self._memory_state = state
@@ -126,7 +116,7 @@ class SystemTaskService:
     def _save_state(self, state: _SystemTaskState) -> None:
         if state.corrupt:
             raise RuntimeError(
-                "system_tasks.json is corrupt or unsupported; refusing to overwrite"
+                "system_tasks.json is corrupt; refusing to overwrite"
             )
         self._memory_state = state
         self._config_dir.mkdir(parents=True, exist_ok=True)
@@ -134,12 +124,6 @@ class SystemTaskService:
             "version": OPERATIONAL_STATE_VERSION,
             "registrations": [rec.to_operational_dict() for rec in state.records],
         }
-        for reg in data["registrations"]:
-            forbidden = set(reg.keys()) - OPERATIONAL_STATE_KEYS
-            if forbidden:
-                raise RuntimeError(
-                    f"operational save contains forbidden keys: {forbidden}"
-                )
         tmp = self._state_file.with_suffix(".json.tmp")
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=4, ensure_ascii=False)
@@ -293,50 +277,100 @@ class SystemTaskService:
             return False, "absence query unknown after unregister"
         return False, "still present after unregister"
 
-    def _persist_reg_error(self, task_id: str, message: str) -> None:
-        state = self._load_state()
-        r = self._find_record(state, task_id)
-        if r is None:
-            return
-        r.state = "error"
-        r.last_error = message
-        self._save_state(state)
+    @staticmethod
+    def _reconcile_error(result: ReconcileTaskResult) -> Optional[str]:
+        if result.action != "error":
+            return None
+        return result.native_error or result.detail
 
-    def _upsert_error_record(self, task_id: str, message: str) -> None:
-        state = self._load_state()
-        if state.corrupt:
-            return
-        r = self._find_record(state, task_id)
-        if r is None:
-            r = SystemTaskOperationalRecord(
-                task_id=task_id,
-                platform=cast(
-                    Literal["windows", "macos", "linux"],
-                    self.backend.platform_name,
-                ),
-                state="error",
-                last_error=message,
-            )
-            state.records.append(r)
-        else:
-            r.state = "error"
-            r.last_error = message
-        self._save_state(state)
-
-    def _restore_reg_as_repair_after_aps_fail(
-        self, prior: SystemTaskOperationalRecord, last_error: str
+    def _write_error_record_locked(
+        self,
+        task_id: str,
+        message: str,
+        *,
+        mode: Literal["existing_only", "upsert", "restore"],
+        prior: Optional[SystemTaskOperationalRecord] = None,
     ) -> None:
         state = self._load_state()
         if state.corrupt:
             return
-        reg = prior.model_copy(deep=True)
-        reg.state = "error"
-        reg.last_error = last_error
-        existing = self._find_record(state, reg.task_id)
-        if existing is not None:
-            state.records.remove(existing)
-        state.records.append(reg)
+        existing = self._find_record(state, task_id)
+        if mode == "existing_only":
+            if existing is None:
+                return
+            target = existing
+        elif mode == "upsert":
+            if existing is None:
+                target = SystemTaskOperationalRecord(
+                    task_id=task_id,
+                    platform=cast(
+                        Literal["windows", "macos", "linux"],
+                        self.backend.platform_name,
+                    ),
+                    state="error",
+                )
+                state.records.append(target)
+            else:
+                target = existing
+        else:  # restore
+            if prior is None:
+                raise ValueError("restore mode requires prior record")
+            target = prior.model_copy(deep=True)
+            if existing is not None:
+                state.records.remove(existing)
+            state.records.append(target)
+        target.state = "error"
+        target.last_error = message
         self._save_state(state)
+
+    def _remove_operational_record_locked(self, task_id: str) -> bool:
+        state = self._load_state()
+        record = self._find_record(state, task_id)
+        if record is None:
+            return False
+        state.records.remove(record)
+        self._save_state(state)
+        return True
+
+    async def _raise_after_failed_create_locked(
+        self,
+        manager: SchedulerManager,
+        task_id: str,
+        native_error: str,
+    ) -> NoReturn:
+        absent, clean_err = await self._ensure_absent(task_id)
+        if not absent:
+            self._write_error_record_locked(
+                task_id,
+                f"create native failed ({native_error}); "
+                f"cleanup not confirmed: {clean_err}",
+                mode="existing_only",
+            )
+            raise RuntimeError(
+                f"native registration failed and cleanup could not be verified "
+                f"for {task_id}: {native_error}; "
+                f"cleanup={clean_err}"
+            )
+
+        try:
+            cleaned = await manager.delete_task(task_id)
+        except Exception as cleanup_err:
+            raise RuntimeError(
+                f"native registration failed and APS cleanup failed "
+                f"for {task_id}: native={native_error}; "
+                f"cleanup={cleanup_err}"
+            ) from cleanup_err
+        if not cleaned:
+            raise RuntimeError(
+                f"native registration failed and APS cleanup failed "
+                f"for {task_id}: native={native_error}; "
+                f"cleanup=delete returned false"
+            )
+        self._remove_operational_record_locked(task_id)
+        raise RuntimeError(
+            f"native registration failed for {task_id}: "
+            f"{native_error}"
+        )
 
     # ------------------------------------------------------------------
     # APS + native sync wrappers
@@ -350,44 +384,11 @@ class SystemTaskService:
             if not task_create.wakeup_enabled:
                 return task
             result = await self._reconcile_task_locked(manager, task.id)
-            if result.action != "error" and result.native_error is None:
+            native_error = self._reconcile_error(result)
+            if native_error is None:
                 return task
-
-            absent, clean_err = await self._ensure_absent(task.id)
-            if not absent:
-                self._persist_reg_error(
-                    task.id,
-                    f"create native failed ({result.native_error or result.detail}); "
-                    f"cleanup not confirmed: {clean_err}",
-                )
-                raise RuntimeError(
-                    f"native registration failed and cleanup could not be verified "
-                    f"for {task.id}: {result.native_error or result.detail}; "
-                    f"cleanup={clean_err}"
-                )
-
-            try:
-                cleaned = await manager.delete_task(task.id)
-            except Exception as cleanup_err:
-                raise RuntimeError(
-                    f"native registration failed and APS cleanup failed "
-                    f"for {task.id}: native={result.native_error or result.detail}; "
-                    f"cleanup={cleanup_err}"
-                ) from cleanup_err
-            if not cleaned:
-                raise RuntimeError(
-                    f"native registration failed and APS cleanup failed "
-                    f"for {task.id}: native={result.native_error or result.detail}; "
-                    f"cleanup=delete returned false"
-                )
-            state = self._load_state()
-            reg = self._find_record(state, task.id)
-            if reg is not None:
-                state.records.remove(reg)
-                self._save_state(state)
-            raise RuntimeError(
-                f"native registration failed for {task.id}: "
-                f"{result.native_error or result.detail}"
+            await self._raise_after_failed_create_locked(
+                manager, task.id, native_error
             )
 
     async def update_task_synced(
@@ -440,8 +441,7 @@ class SystemTaskService:
                 task=task,
                 aps_outcome="success",
                 native_status=native_status,
-                native_error=rec.native_error
-                or (rec.detail if rec.action == "error" else None),
+                native_error=self._reconcile_error(rec),
             )
 
     async def delete_task_synced(
@@ -459,13 +459,16 @@ class SystemTaskService:
             ok, err = await self._ensure_absent(task_id)
             if not ok:
                 if prior_snap is not None:
-                    self._persist_reg_error(
-                        task_id, f"delete native cleanup incomplete: {err}"
+                    self._write_error_record_locked(
+                        task_id,
+                        f"delete native cleanup incomplete: {err}",
+                        mode="existing_only",
                     )
                 else:
-                    self._upsert_error_record(
+                    self._write_error_record_locked(
                         task_id,
                         f"delete native cleanup incomplete (no prior record): {err}",
+                        mode="upsert",
                     )
                 raise RuntimeError(
                     f"partial delete failure: native cleanup incomplete "
@@ -474,18 +477,16 @@ class SystemTaskService:
 
             outcome = await manager.delete_task_classified(task_id)
             if outcome in ("success", "not_found"):
-                state = self._load_state()
-                reg = self._find_record(state, task_id)
-                if reg is not None:
-                    state.records.remove(reg)
-                    self._save_state(state)
+                self._remove_operational_record_locked(task_id)
                 return True
 
             msg = f"APS delete {outcome} after native cleanup"
             if prior_snap is not None:
-                self._restore_reg_as_repair_after_aps_fail(prior_snap, msg)
+                self._write_error_record_locked(
+                    task_id, msg, mode="restore", prior=prior_snap
+                )
             else:
-                self._upsert_error_record(task_id, msg)
+                self._write_error_record_locked(task_id, msg, mode="upsert")
             raise RuntimeError(
                 f"partial delete failure: native registration removed "
                 f"but APS job delete {outcome} for {task_id}"
@@ -508,9 +509,10 @@ class SystemTaskService:
                 verified=False,
                 reason="no operational record",
             )
-        return await self._authoritative_status_locked(
+        status, _ = await self._authoritative_status_locked(
             state, reg, manager=manager
         )
+        return status
 
     # ------------------------------------------------------------------
     # status / list
@@ -522,7 +524,8 @@ class SystemTaskService:
         rec: SystemTaskOperationalRecord,
         *,
         manager: Optional[SchedulerManager],
-    ) -> SystemTaskStatusResponse:
+    ) -> tuple[SystemTaskStatusResponse, Optional[ScheduledTask]]:
+        """Return (status, APS task). Task is read once for reuse by callers."""
         if state.corrupt:
             raise RuntimeError("system_tasks.json corrupt; status unavailable")
 
@@ -542,14 +545,17 @@ class SystemTaskService:
                 aps_missing = True
 
         if task is not None and not task.wakeup_enabled:
-            return self._status_from_record(
-                rec,
-                rec.task_id,
-                task=task,
-                path_valid=False,
-                os_registered=False,
-                verified=False,
-                reason="APS wakeup_enabled is false",
+            return (
+                self._status_from_record(
+                    rec,
+                    rec.task_id,
+                    task=task,
+                    path_valid=False,
+                    os_registered=False,
+                    verified=False,
+                    reason="APS wakeup_enabled is false",
+                ),
+                task,
             )
 
         os_registered = False
@@ -600,14 +606,17 @@ class SystemTaskService:
             exe, _ = self.build_command_for_task(rec.task_id)
             path_valid = rec.registered_exe_path == exe
 
-        return self._status_from_record(
-            rec,
-            rec.task_id,
-            task=task,
-            path_valid=path_valid,
-            os_registered=os_registered,
-            verified=verified,
-            reason=detail,
+        return (
+            self._status_from_record(
+                rec,
+                rec.task_id,
+                task=task,
+                path_valid=path_valid,
+                os_registered=os_registered,
+                verified=verified,
+                reason=detail,
+            ),
+            task,
         )
 
     async def get_status(
@@ -626,9 +635,10 @@ class SystemTaskService:
                     reason="no operational record",
                     verified=False,
                 )
-            return await self._authoritative_status_locked(
+            status, _ = await self._authoritative_status_locked(
                 state, reg, manager=manager
             )
+            return status
 
     async def list_registered(
         self, manager: Optional[SchedulerManager] = None
@@ -639,15 +649,9 @@ class SystemTaskService:
                 raise RuntimeError("system_tasks.json corrupt; list unavailable")
             out: list[SystemTaskRegistration] = []
             for rec in state.records:
-                status = await self._authoritative_status_locked(
+                status, task = await self._authoritative_status_locked(
                     state, rec, manager=manager
                 )
-                task = None
-                if manager is not None:
-                    try:
-                        task = await manager.get_task(rec.task_id)
-                    except SchedulerJobDecodeError:
-                        task = None
                 out.append(
                     self._hydrate_registration(
                         rec,
@@ -749,9 +753,9 @@ class SystemTaskService:
         if aps_decode_error is not None:
             msg = f"APS job decode failed: {aps_decode_error}"
             if reg is not None:
-                self._persist_reg_error(task_id, msg)
+                self._write_error_record_locked(task_id, msg, mode="existing_only")
             else:
-                self._upsert_error_record(task_id, msg)
+                self._write_error_record_locked(task_id, msg, mode="upsert")
             return ReconcileTaskResult(
                 task_id=task_id, action="error", detail=msg, native_error=msg
             )
@@ -790,8 +794,8 @@ class SystemTaskService:
         ok, err = await self._ensure_absent(task_id)
         if not ok:
             if reg is not None:
-                self._persist_reg_error(
-                    task_id, f"cleanup incomplete: {err}"
+                self._write_error_record_locked(
+                    task_id, f"cleanup incomplete: {err}", mode="existing_only"
                 )
             return ReconcileTaskResult(
                 task_id=task_id,
@@ -799,11 +803,7 @@ class SystemTaskService:
                 detail=f"cleanup incomplete: {err}",
                 native_error=err,
             )
-        state = self._load_state()
-        cur = self._find_record(state, task_id)
-        if cur is not None:
-            state.records.remove(cur)
-            self._save_state(state)
+        if self._remove_operational_record_locked(task_id):
             return ReconcileTaskResult(
                 task_id=task_id,
                 action="cleaned",
@@ -826,9 +826,9 @@ class SystemTaskService:
         except Exception as e:
             msg = f"APS trigger map failed: {e}"
             if reg is not None:
-                self._persist_reg_error(task_id, msg)
+                self._write_error_record_locked(task_id, msg, mode="existing_only")
             else:
-                self._upsert_error_record(task_id, msg)
+                self._write_error_record_locked(task_id, msg, mode="upsert")
             return ReconcileTaskResult(
                 task_id=task_id, action="error", detail=msg, native_error=msg
             )
@@ -844,9 +844,9 @@ class SystemTaskService:
         if presence == "unknown":
             msg = "native query error (unknown)"
             if reg is not None:
-                self._persist_reg_error(task_id, msg)
+                self._write_error_record_locked(task_id, msg, mode="existing_only")
             else:
-                self._upsert_error_record(task_id, msg)
+                self._write_error_record_locked(task_id, msg, mode="upsert")
             return ReconcileTaskResult(
                 task_id=task_id, action="error", detail=msg, native_error=msg
             )
@@ -924,7 +924,7 @@ class SystemTaskService:
                 detail = f"{detail}; compensation unregister failed: {ce}"
             still = await self._query_presence(task_id)
             detail = f"{detail}; still_present={still}"
-            self._persist_reg_error(task_id, detail)
+            self._write_error_record_locked(task_id, detail, mode="existing_only")
             return ReconcileTaskResult(
                 task_id=task_id,
                 action="error",

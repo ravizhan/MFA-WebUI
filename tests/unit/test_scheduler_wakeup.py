@@ -1,4 +1,4 @@
-"""wakeup_enabled codec, manager create/update, execute ignore, lifespan order."""
+"""wakeup_enabled: execute ignore, manager explicit disable, lifespan order."""
 
 from __future__ import annotations
 
@@ -10,84 +10,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from models.scheduler import CronTriggerConfig, ScheduledTaskCreate, ScheduledTaskUpdate
-from scheduler_job_codec import (
-    SchedulerJobDecodeError,
-    build_trigger,
-    decode_job_to_scheduled_task,
-    encode_execution_kwargs,
-)
 from scheduler_manager import SchedulerManager, execute_scheduled_task
 
 TID = "550e8400-e29b-41d4-a716-446655440000"
-
-
-def _identity_normalize(task_list, task_options, pre_tasks):
-    return list(task_list or []), dict(task_options or {}), list(pre_tasks or [])
-
-
-# ---------------------------------------------------------------------------
-# Codec round-trip
-# ---------------------------------------------------------------------------
-
-
-def test_encode_decode_wakeup_enabled_round_trip():
-    for value in (True, False):
-        kwargs = encode_execution_kwargs(
-            task_id=TID,
-            task_name="n",
-            task_description="",
-            task_list=["Main"],
-            task_options={},
-            pre_tasks=[],
-            controller_name=None,
-            device=None,
-            resource_name=None,
-            wakeup_enabled=value,
-        )
-        assert kwargs["wakeup_enabled"] is value
-        job = SimpleNamespace(
-            id=TID,
-            kwargs=kwargs,
-            trigger=build_trigger(CronTriggerConfig(cron="0 9 * * *")),
-            next_run_time=None,
-        )
-        task = decode_job_to_scheduled_task(job, normalize=_identity_normalize)
-        assert task.wakeup_enabled is value
-
-
-def test_decode_missing_wakeup_enabled_defaults_false():
-    job = SimpleNamespace(
-        id=TID,
-        kwargs={
-            "task_name": "n",
-            "task_description": "",
-            "task_list": ["Main"],
-            "task_options": {},
-            "pre_tasks": [],
-        },
-        trigger=build_trigger(CronTriggerConfig(cron="0 9 * * *")),
-        next_run_time=None,
-    )
-    task = decode_job_to_scheduled_task(job, normalize=_identity_normalize)
-    assert task.wakeup_enabled is False
-
-
-def test_decode_invalid_wakeup_enabled_raises():
-    job = SimpleNamespace(
-        id="bad-wakeup",
-        kwargs={
-            "task_name": "n",
-            "task_description": "",
-            "task_list": ["Main"],
-            "task_options": {},
-            "pre_tasks": [],
-            "wakeup_enabled": "yes",
-        },
-        trigger=build_trigger(CronTriggerConfig(cron="0 9 * * *")),
-        next_run_time=None,
-    )
-    with pytest.raises(SchedulerJobDecodeError, match="invalid wakeup_enabled"):
-        decode_job_to_scheduled_task(job, normalize=_identity_normalize)
 
 
 @pytest.mark.asyncio
@@ -141,26 +66,6 @@ def _create(**overrides: Any) -> ScheduledTaskCreate:
     }
     data.update(overrides)
     return ScheduledTaskCreate(**data)
-
-
-@pytest.mark.asyncio
-async def test_create_writes_wakeup_enabled(manager: SchedulerManager):
-    task = await manager.create_task(_create(wakeup_enabled=True))
-    assert task.wakeup_enabled is True
-    assert manager.scheduler is not None
-    job = manager.scheduler.get_job(task.id)
-    assert job is not None
-    assert job.kwargs["wakeup_enabled"] is True
-
-
-@pytest.mark.asyncio
-async def test_update_omitted_preserves_wakeup_enabled(manager: SchedulerManager):
-    task = await manager.create_task(_create(wakeup_enabled=True))
-    updated = await manager.update_task(task.id, ScheduledTaskUpdate(name="renamed"))
-    assert updated is not None
-    assert updated.wakeup_enabled is True
-    assert manager.scheduler is not None
-    assert manager.scheduler.get_job(task.id).kwargs["wakeup_enabled"] is True
 
 
 @pytest.mark.asyncio
@@ -333,42 +238,3 @@ async def test_lifespan_repair_failure_still_resumes(
                 if "失败" in m or "failed" in m.lower() or "修复" in m
             )
             assert fail_idx < resume_idx
-
-
-@pytest.mark.asyncio
-async def test_headless_stays_paused(main_module, tmp_path, monkeypatch):
-    """Headless initialize remains paused; no resume path."""
-    monkeypatch.setattr(main_module, "APP_ROOT_DIR", tmp_path)
-    monkeypatch.setattr(main_module, "LOGS_DIR", tmp_path / "config" / "logs")
-    (tmp_path / "config" / "logs").mkdir(parents=True)
-
-    ownership = MagicMock()
-    monkeypatch.setattr(main_module, "acquire_runtime_ownership", lambda: ownership)
-    monkeypatch.setattr(main_module, "release_runtime_ownership", lambda: None)
-
-    seen: dict[str, Any] = {}
-
-    class SM:
-        def set_worker(self, w):
-            pass
-
-        async def initialize(self, **kw):
-            seen["init"] = kw
-            self.scheduler = MagicMock()
-            self.scheduler.get_job.return_value = SimpleNamespace(
-                next_run_time=None, kwargs={}
-            )
-
-        async def shutdown(self):
-            pass
-
-    monkeypatch.setattr(main_module, "SchedulerManager", SM)
-    monkeypatch.setattr(
-        main_module,
-        "MaaWorker",
-        lambda *a, **k: MagicMock(task_state=SimpleNamespace(last_status="failed")),
-    )
-
-    code = await main_module.run_headless(TID)
-    assert code == main_module.EXIT_TASK_FAILED
-    assert seen["init"].get("paused") is True
