@@ -3,9 +3,10 @@ module github.com/ravizhan/MWU/updater
 go 1.26.0
 
 require (
+	github.com/gofrs/flock v0.13.0
 	github.com/mholt/archives v0.1.5
 	github.com/zeebo/xxh3 v1.1.0
-	golang.org/x/sys v0.30.0
+	golang.org/x/sys v0.37.0
 )
 
 require (

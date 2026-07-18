@@ -6,16 +6,22 @@
 //	config/locks/update.lock
 //	config/locks/runtime.lock
 //
-// Stable lock files are never deleted on unlock. POSIX uses whole-file flock;
-// Windows uses LockFileEx on offset 0 length 1 with shared open flags.
+// Stable lock files are never deleted on unlock. Implementation delegates to
+// github.com/gofrs/flock, which uses POSIX whole-file flock and Windows
+// LockFileEx on offset 0 length 1 — the same kernel primitives as the previous
+// hand-rolled platform backends and as Python process_lock.py.
 package filelock
 
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
+
+	"github.com/gofrs/flock"
 )
 
 const (
@@ -51,7 +57,7 @@ var ErrPermission = errors.New("filelock: permission denied")
 type Lock struct {
 	path   string
 	locked bool
-	plat   platformState
+	fl     *flock.Flock
 }
 
 // Path returns the absolute path of the lock file.
@@ -134,6 +140,37 @@ func ensureParentExists(parent string) error {
 	return nil
 }
 
+// openPlatform creates a gofrs Flock handle and verifies the path can be opened.
+// Open must leave the lock unheld: a successful probe TryLock is unlocked immediately.
+func openPlatform(path string) (*Lock, error) {
+	fl := flock.New(path,
+		// os.OpenFile always applies O_CLOEXEC on supported platforms.
+		flock.SetFlag(os.O_RDWR|os.O_CREATE),
+		flock.SetPermissions(fs.FileMode(lockFileMode)),
+	)
+
+	// Probe open by attempting a nonblocking exclusive lock, then release if held.
+	// gofrs opens the fd lazily on TryLock; this creates the stable lock file if needed
+	// without leaving the lock held for the caller.
+	ok, err := fl.TryLock()
+	if err != nil {
+		if isPermissionErr(err) {
+			return nil, fmt.Errorf("%w: open %s: %v", ErrPermission, path, err)
+		}
+		return nil, fmt.Errorf("filelock: open %s: %w", path, err)
+	}
+	if ok {
+		if err := fl.Unlock(); err != nil {
+			return nil, fmt.Errorf("filelock: open probe unlock %s: %w", path, err)
+		}
+	}
+	// ok == false: lock is busy, but open succeeded — return handle for caller's TryLock/Acquire.
+	return &Lock{
+		path: path,
+		fl:   fl,
+	}, nil
+}
+
 // TryLock attempts a nonblocking exclusive lock.
 // Returns ErrBusy if another process holds the lock.
 // Permission errors fail closed and are never treated as busy.
@@ -151,6 +188,20 @@ func (l *Lock) TryLock() error {
 	return nil
 }
 
+func (l *Lock) tryLockPlatform() error {
+	ok, err := l.fl.TryLock()
+	if err != nil {
+		if isPermissionErr(err) {
+			return fmt.Errorf("%w: flock: %v", ErrPermission, err)
+		}
+		return fmt.Errorf("filelock: flock: %w", err)
+	}
+	if !ok {
+		return ErrBusy
+	}
+	return nil
+}
+
 // Unlock releases the exclusive lock. The lock file is never deleted.
 func (l *Lock) Unlock() error {
 	if l == nil {
@@ -163,6 +214,13 @@ func (l *Lock) Unlock() error {
 		return err
 	}
 	l.locked = false
+	return nil
+}
+
+func (l *Lock) unlockPlatform() error {
+	if err := l.fl.Unlock(); err != nil {
+		return fmt.Errorf("filelock: flock unlock: %w", err)
+	}
 	return nil
 }
 
@@ -182,6 +240,32 @@ func (l *Lock) Close() error {
 		first = err
 	}
 	return first
+}
+
+func (l *Lock) closePlatform() error {
+	// gofrs Close() == Unlock(); safe and idempotent when already unlocked.
+	if err := l.fl.Close(); err != nil {
+		return fmt.Errorf("filelock: close: %w", err)
+	}
+	return nil
+}
+
+// isPermissionErr maps OS access denials to ErrPermission (not retried as busy).
+func isPermissionErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, syscall.EACCES) || errors.Is(err, syscall.EPERM) {
+		return true
+	}
+	// Windows ERROR_ACCESS_DENIED = 5; some wrappers expose ErrorCode().
+	type errno interface{ ErrorCode() int }
+	if e, ok := err.(errno); ok {
+		if e.ErrorCode() == 5 {
+			return true
+		}
+	}
+	return false
 }
 
 // Acquire opens path and acquires an exclusive lock with bounded nonblocking retries.
