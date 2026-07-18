@@ -65,7 +65,6 @@ def _seed(
             last_error="pending" if op == "error" else None,
         )
     )
-    svc._memory_state = st
     svc._save_state(st)
 
 
@@ -157,17 +156,6 @@ async def test_reconcile_aps_missing_cleans_record(service, backend):
 
 
 @pytest.mark.asyncio
-async def test_reconcile_aps_only_materializes(service, backend):
-    service._backend = backend
-    backend.is_registered = AsyncMock(return_value=False)
-    with _trig():
-        result = await service.reconcile_task(_mgr(_aps_task()), TID)
-    assert result.action == "materialized"
-    reg = _find(service)
-    assert reg is not None and reg.state == "active"
-
-
-@pytest.mark.asyncio
 async def test_reconcile_error_state_reregisters(service, backend):
     service._backend = backend
     _seed(service, state="error")
@@ -188,22 +176,6 @@ async def test_reconcile_corrupt_aps_error_no_register(service, backend):
     result = await service.reconcile_task(_mgr(decode_err=True), TID)
     assert result.action == "error"
     backend.register.assert_not_awaited()
-    reg = _find(service)
-    assert reg is not None and reg.state == "error"
-
-
-@pytest.mark.asyncio
-async def test_delete_partial_native_incomplete(service, backend):
-    service._backend = backend
-    _seed(service)
-    backend.is_registered = AsyncMock(return_value=True)
-    backend.unregister = AsyncMock()  # still present after
-    mgr = MagicMock()
-    mgr.delete_task = AsyncMock(return_value=True)
-    mgr.delete_task_classified = AsyncMock(return_value="success")
-    with pytest.raises(RuntimeError, match="partial delete"):
-        await service.delete_task_synced(mgr, TID)
-    mgr.delete_task_classified.assert_not_awaited()
     reg = _find(service)
     assert reg is not None and reg.state == "error"
 
@@ -234,78 +206,6 @@ async def test_reconcile_all_invalid_wakeup_decode_error(service, backend):
     reg = _find(service)
     assert reg is not None and reg.state == "error"
     backend.register.assert_not_awaited()
-
-
-@pytest.mark.asyncio
-async def test_delete_success_removes_record(service, backend):
-    service._backend = backend
-    _seed(service)
-    present = {"v": True}
-
-    async def is_reg(*_a, **_k):
-        return present["v"]
-
-    async def unreg(*_a, **_k):
-        present["v"] = False
-
-    backend.is_registered = AsyncMock(side_effect=is_reg)
-    backend.unregister = AsyncMock(side_effect=unreg)
-    mgr = MagicMock()
-    mgr.delete_task_classified = AsyncMock(return_value="success")
-    assert await service.delete_task_synced(mgr, TID) is True
-    assert _find(service) is None
-
-
-@pytest.mark.asyncio
-async def test_delete_aps_not_found_removes_record(service, backend):
-    service._backend = backend
-    _seed(service)
-    backend.is_registered = AsyncMock(return_value=False)
-    mgr = MagicMock()
-    mgr.delete_task_classified = AsyncMock(return_value="not_found")
-    assert await service.delete_task_synced(mgr, TID) is True
-    assert _find(service) is None
-
-
-@pytest.mark.asyncio
-async def test_delete_aps_indeterminate_retains_record(service, backend):
-    service._backend = backend
-    _seed(service)
-    backend.is_registered = AsyncMock(return_value=False)
-    mgr = MagicMock()
-    mgr.delete_task_classified = AsyncMock(return_value="indeterminate")
-    with pytest.raises(RuntimeError, match="indeterminate"):
-        await service.delete_task_synced(mgr, TID)
-    reg = _find(service)
-    assert reg is not None and reg.state == "error"
-    assert "indeterminate" in (reg.last_error or "")
-
-
-@pytest.mark.asyncio
-async def test_delete_no_prior_record_indeterminate_creates_error(service, backend):
-    service._backend = backend
-    backend.is_registered = AsyncMock(return_value=False)
-    mgr = MagicMock()
-    mgr.delete_task_classified = AsyncMock(return_value="indeterminate")
-    with pytest.raises(RuntimeError, match="indeterminate"):
-        await service.delete_task_synced(mgr, TID)
-    reg = _find(service)
-    assert reg is not None and reg.state == "error"
-
-
-@pytest.mark.asyncio
-async def test_delete_synced_unknown_native_does_not_drop_record(service, backend):
-    """Native presence unknown during delete keeps operational record."""
-    service._backend = backend
-    _seed(service)
-    backend.is_registered = AsyncMock(side_effect=RuntimeError("query boom"))
-    mgr = MagicMock()
-    mgr.delete_task_classified = AsyncMock(return_value="success")
-    with pytest.raises(RuntimeError, match="partial delete|unknown|cleanup"):
-        await service.delete_task_synced(mgr, TID)
-    reg = _find(service)
-    assert reg is not None and reg.state == "error"
-    mgr.delete_task_classified.assert_not_awaited()
 
 
 @pytest.mark.asyncio

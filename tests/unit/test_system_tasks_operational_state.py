@@ -44,7 +44,6 @@ def _seed_v4(
             last_error=last_error,
         )
     )
-    service._memory_state = st
     service._save_state(st)
 
 
@@ -89,7 +88,6 @@ def test_operational_save_only_allowlisted_keys(service: SystemTaskService):
 
 def test_valid_v4_load_round_trip(service: SystemTaskService):
     _seed_v4(service, state="active", exe="/bin/mwu")
-    service._memory_state = None
     loaded = service._load_state()
     assert loaded.corrupt is False
     assert loaded.version == 4
@@ -101,7 +99,6 @@ def test_valid_v4_load_round_trip(service: SystemTaskService):
 
 def test_error_state_persists(service: SystemTaskService):
     _seed_v4(service, state="error", last_error="native boom")
-    service._memory_state = None
     loaded = service._load_state()
     assert loaded.records[0].state == "error"
     assert loaded.records[0].last_error == "native boom"
@@ -109,7 +106,6 @@ def test_error_state_persists(service: SystemTaskService):
 
 def test_malformed_current_state_fail_closed(service: SystemTaskService):
     service._state_file.write_text("{not-json", encoding="utf-8")
-    service._memory_state = None
     st = service._load_state()
     assert st.corrupt is True
     with pytest.raises(RuntimeError, match="corrupt"):

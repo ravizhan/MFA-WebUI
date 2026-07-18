@@ -22,7 +22,6 @@ import os
 import sys
 import time
 import uuid
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -49,13 +48,6 @@ class LockBusyError(LockError):
 
 class LockPermissionError(LockError):
     """Cannot open or lock the file due to permissions."""
-
-
-@dataclass
-class PidMetadata:
-    pid: int
-    owner_token: str
-    started_at: str
 
 
 def lock_paths(app_root: Path) -> tuple[Path, Path]:

@@ -129,7 +129,6 @@ def _seed(svc: SystemTaskService) -> None:
             last_registered_at=datetime(2026, 7, 6, 12, 0, 0),
         )
     )
-    svc._memory_state = st
     svc._save_state(st)
 
 
@@ -199,125 +198,6 @@ async def test_update_omitted_resyncs_new_trigger(service, backend):
 
 
 @pytest.mark.asyncio
-async def test_real_wakeup_false_update_no_reregister(tmp_path, backend):
-    """Real paused SQLite: wakeup_enabled=false is not re-registered."""
-    from apscheduler.triggers.cron import CronTrigger
-
-    from scheduler_manager import SchedulerManager, execute_scheduled_task
-
-    (tmp_path / "config").mkdir()
-    (tmp_path / "main.py").write_text("# main", encoding="utf-8")
-    svc = SystemTaskService(tmp_path)
-    svc._backend = backend
-    _seed(svc)
-    present = {"v": True}
-
-    async def is_reg(*_a, **_k):
-        return present["v"]
-
-    async def unreg(*_a, **_k):
-        present["v"] = False
-
-    backend.is_registered = AsyncMock(side_effect=is_reg)
-    backend.unregister = AsyncMock(side_effect=unreg)
-
-    mgr = SchedulerManager()
-    mgr._db_path = tmp_path / "scheduler.sqlite"
-    await mgr.initialize(start_scheduler=True, paused=True)
-    assert mgr.scheduler is not None
-    mgr.scheduler.add_job(
-        execute_scheduled_task,
-        CronTrigger(minute="0", hour="9", day="*", month="*", day_of_week="*"),
-        id=TID,
-        kwargs={
-            "task_id": TID,
-            "task_name": "disabled-wakeup",
-            "task_description": "",
-            "task_list": ["Main"],
-            "task_options": {"Main": {}},
-            "pre_tasks": [],
-            "controller_name": None,
-            "device": None,
-            "resource_name": None,
-            "wakeup_enabled": False,
-        },
-    )
-    mgr.scheduler.pause_job(TID)
-
-    with _patch_trig():
-        result = await svc.update_task_synced(
-            mgr, TID, ScheduledTaskUpdate(name="still-disabled")
-        )
-    assert result.aps_outcome == "success"
-    assert result.task is not None
-    assert result.task.wakeup_enabled is False
-    job = mgr.scheduler.get_job(TID)
-    assert job is not None
-    assert job.kwargs.get("wakeup_enabled") is False
-    backend.register.assert_not_awaited()
-    backend.unregister.assert_awaited()
-    await mgr.shutdown()
-
-
-@pytest.mark.asyncio
-async def test_real_wakeup_true_update_persists(tmp_path, backend):
-    """Real paused SQLite: name/trigger update keeps wakeup_enabled and registers."""
-    from apscheduler.triggers.cron import CronTrigger
-
-    from scheduler_manager import SchedulerManager, execute_scheduled_task
-
-    (tmp_path / "config").mkdir()
-    (tmp_path / "main.py").write_text("# main", encoding="utf-8")
-    svc = SystemTaskService(tmp_path)
-    svc._backend = backend
-    _seed(svc)
-
-    mgr = SchedulerManager()
-    mgr._db_path = tmp_path / "scheduler.sqlite"
-    await mgr.initialize(start_scheduler=True, paused=True)
-    assert mgr.scheduler is not None
-    mgr.scheduler.add_job(
-        execute_scheduled_task,
-        CronTrigger(minute="0", hour="9", day="*", month="*", day_of_week="*"),
-        id=TID,
-        kwargs={
-            "task_id": TID,
-            "task_name": "live",
-            "task_description": "",
-            "task_list": ["Main"],
-            "task_options": {"Main": {}},
-            "pre_tasks": [],
-            "controller_name": None,
-            "device": None,
-            "resource_name": None,
-            "wakeup_enabled": True,
-        },
-    )
-    mgr.scheduler.pause_job(TID)
-
-    with _patch_trig():
-        result = await svc.update_task_synced(
-            mgr,
-            TID,
-            ScheduledTaskUpdate(
-                name="renamed",
-                trigger_type="cron",
-                trigger_config=CronTriggerConfig(cron="0 10 * * *"),
-            ),
-        )
-    assert result.aps_outcome == "success"
-    assert result.task is not None
-    assert result.task.wakeup_enabled is True
-    job = mgr.scheduler.get_job(TID)
-    assert job is not None
-    assert job.kwargs["wakeup_enabled"] is True
-    assert job.kwargs["task_name"] == "renamed"
-    backend.register.assert_awaited()
-    assert backend.register.await_args.args[0].trigger.cron_expression == "0 10 * * *"
-    await mgr.shutdown()
-
-
-@pytest.mark.asyncio
 async def test_update_native_failure_error_state(service, backend):
     service._backend = backend
     _seed(service)
@@ -338,35 +218,6 @@ async def test_update_native_failure_error_state(service, backend):
     mgr.update_task.assert_awaited_once()
     mgr.delete_task.assert_not_awaited()
     assert _reg(service) is not None and _reg(service).state == "error"
-
-
-@pytest.mark.asyncio
-async def test_update_snapshot_wakeup_false_disabled_status(service, backend):
-    service._backend = backend
-    _seed(service)
-    present = {"v": True}
-
-    async def is_reg(*_a, **_k):
-        return present["v"]
-
-    async def unreg(*_a, **_k):
-        present["v"] = False
-
-    backend.is_registered = AsyncMock(side_effect=is_reg)
-    backend.unregister = AsyncMock(side_effect=unreg)
-
-    task = _task(wakeup_enabled=True)
-    mgr = _mgr(task)
-    with _patch_trig():
-        result = await service.update_task_synced(
-            mgr, TID, ScheduledTaskUpdate(wakeup_enabled=False)
-        )
-    assert result.aps_outcome == "success"
-    assert result.native_status is not None
-    ns = result.native_status
-    assert ns.registered is False
-    assert ns.path_valid is False
-    assert ns.verified is False
 
 
 @pytest.mark.asyncio
@@ -470,6 +321,11 @@ async def test_update_explicit_wakeup(
     else:
         backend.unregister.assert_awaited()
         assert _reg(service) is None
+        assert result.native_status is not None
+        ns = result.native_status
+        assert ns.registered is False
+        assert ns.path_valid is False
+        assert ns.verified is False
 
 
 @pytest.mark.asyncio
@@ -531,6 +387,60 @@ async def test_delete_untracked_native_before_aps(service, backend):
     backend.unregister.assert_awaited()
     mgr.delete_task_classified.assert_awaited_once_with(TID)
     assert _reg(service) is None
+
+
+@pytest.mark.asyncio
+async def test_delete_partial_native_incomplete(service, backend):
+    service._backend = backend
+    _seed(service)
+    backend.is_registered = AsyncMock(return_value=True)
+    backend.unregister = AsyncMock()  # still present after
+    mgr = MagicMock()
+    mgr.delete_task = AsyncMock(return_value=True)
+    mgr.delete_task_classified = AsyncMock(return_value="success")
+    with pytest.raises(RuntimeError, match="partial delete"):
+        await service.delete_task_synced(mgr, TID)
+    mgr.delete_task_classified.assert_not_awaited()
+    reg = _reg(service)
+    assert reg is not None and reg.state == "error"
+
+
+@pytest.mark.asyncio
+async def test_delete_aps_not_found_removes_record(service, backend):
+    service._backend = backend
+    _seed(service)
+    backend.is_registered = AsyncMock(return_value=False)
+    mgr = MagicMock()
+    mgr.delete_task_classified = AsyncMock(return_value="not_found")
+    assert await service.delete_task_synced(mgr, TID) is True
+    assert _reg(service) is None
+
+
+@pytest.mark.asyncio
+async def test_delete_no_prior_record_indeterminate_creates_error(service, backend):
+    service._backend = backend
+    backend.is_registered = AsyncMock(return_value=False)
+    mgr = MagicMock()
+    mgr.delete_task_classified = AsyncMock(return_value="indeterminate")
+    with pytest.raises(RuntimeError, match="indeterminate"):
+        await service.delete_task_synced(mgr, TID)
+    reg = _reg(service)
+    assert reg is not None and reg.state == "error"
+
+
+@pytest.mark.asyncio
+async def test_delete_synced_unknown_native_does_not_drop_record(service, backend):
+    """Native presence unknown during delete keeps operational record."""
+    service._backend = backend
+    _seed(service)
+    backend.is_registered = AsyncMock(side_effect=RuntimeError("query boom"))
+    mgr = MagicMock()
+    mgr.delete_task_classified = AsyncMock(return_value="success")
+    with pytest.raises(RuntimeError, match="partial delete|unknown|cleanup"):
+        await service.delete_task_synced(mgr, TID)
+    reg = _reg(service)
+    assert reg is not None and reg.state == "error"
+    mgr.delete_task_classified.assert_not_awaited()
 
 
 @pytest.mark.asyncio

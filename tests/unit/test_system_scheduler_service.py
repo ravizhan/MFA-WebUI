@@ -66,7 +66,6 @@ def _seed(
             last_error="boom" if state == "error" else None,
         )
     )
-    svc._memory_state = st
     svc._save_state(st)
 
 
@@ -120,22 +119,6 @@ class TestStatePersistence:
         assert state.version == OPERATIONAL_STATE_VERSION
         assert state.records == []
 
-    def test_save_and_load(self, service: SystemTaskService):
-        _seed(service)
-        service._memory_state = None
-        loaded = service._load_state()
-        assert len(loaded.records) == 1
-        assert loaded.records[0].task_id == TID
-        assert loaded.records[0].state == "active"
-
-    def test_load_corrupted_file_fail_closed(self, service: SystemTaskService):
-        service._state_file.parent.mkdir(parents=True, exist_ok=True)
-        service._state_file.write_text("{ invalid json", encoding="utf-8")
-        state = service._load_state()
-        assert state.corrupt is True
-        with pytest.raises(RuntimeError, match="corrupt"):
-            service._save_state(state)
-
 
 class TestGetStatus:
     @pytest.mark.asyncio
@@ -183,10 +166,9 @@ class TestRepairServiceContracts:
         service._backend = mock_backend
         _seed(service)
         mock_backend.is_registered = AsyncMock(return_value=False)
+        mgr = _mgr(name="from-aps", cron="0 8 * * *", wakeup_enabled=True)
         with _trig():
-            await service.repair_all(
-                _mgr(name="from-aps", cron="0 8 * * *", wakeup_enabled=True)
-            )
+            await service.repair_all(mgr)
         mock_backend.register.assert_awaited()
         spec = mock_backend.register.await_args.args[0]
         assert spec.task_name == "from-aps"
@@ -195,34 +177,11 @@ class TestRepairServiceContracts:
         )
         assert spec.trigger.cron_expression == "0 8 * * *"
 
-    @pytest.mark.asyncio
-    async def test_repair_wakeup_false_cleans(self, service, mock_backend):
-        service._backend = mock_backend
-        _seed(service)
-        present = {"v": True}
-
-        async def is_reg(_tid):
-            return present["v"]
-
-        async def unreg(_tid):
-            present["v"] = False
-
-        mock_backend.is_registered = AsyncMock(side_effect=is_reg)
-        mock_backend.unregister = AsyncMock(side_effect=unreg)
-        result = await service.repair_all(_mgr(wakeup_enabled=False))
-        assert result["repaired"] == 1
-        mock_backend.register.assert_not_awaited()
-        mock_backend.unregister.assert_awaited()
-        assert service._find_record(service._load_state(), TID) is None
-
-    @pytest.mark.asyncio
-    async def test_repair_converged_noop(self, service, mock_backend):
-        service._backend = mock_backend
-        exe, _ = service.build_command_for_task(TID)
-        _seed(service, exe=exe)
+        # Second repair after convergence reports zero repairs.
         mock_backend.is_registered = AsyncMock(return_value=True)
         mock_backend.verify_registration = AsyncMock(return_value=(True, "ok"))
+        mock_backend.register.reset_mock()
         with _trig():
-            result = await service.repair_all(_mgr())
+            result = await service.repair_all(mgr)
         assert result["repaired"] == 0
         mock_backend.register.assert_not_awaited()

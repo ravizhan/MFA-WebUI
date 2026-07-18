@@ -269,17 +269,6 @@ def map_trigger_to_os_spec(trigger_config: TriggerConfig) -> OSTriggerSpec:
     raise TypeError(f"未知的触发器类型: {type(trigger_config)}")
 
 
-def current_platform_name() -> Literal["windows", "macos", "linux"]:
-    system = platform.system().lower()
-    if system == "windows":
-        return "windows"
-    if system == "darwin":
-        return "macos"
-    if system == "linux":
-        return "linux"
-    raise RuntimeError(f"不支持的平台: {system}")
-
-
 def validate_trigger_for_platform(
     platform_name: str, trigger: OSTriggerSpec
 ) -> list[str]:

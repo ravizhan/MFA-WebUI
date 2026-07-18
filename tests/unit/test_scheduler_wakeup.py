@@ -85,12 +85,22 @@ async def test_update_explicit_false_disables_wakeup(manager: SchedulerManager):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_lifespan_order_paused_repair_resume(
-    main_module, tmp_path: Path, monkeypatch
-):
-    """Web lifespan: paused init → repair → resume (no scope import)."""
+def _install_lifespan_fakes(
+    main_module,
+    tmp_path: Path,
+    monkeypatch,
+    *,
+    repair_result: dict[str, Any] | None = None,
+    capture_logs: bool = False,
+) -> tuple[list[str], list[str]]:
+    """Shared fake manager/service/scheduler + monkeypatches for lifespan tests.
+
+    Returns (order, logs). logs is populated only when capture_logs=True.
+    """
     order: list[str] = []
+    logs: list[str] = []
+    if repair_result is None:
+        repair_result = {"repaired": 0, "failed": 0, "details": []}
 
     class FakeScheduler:
         def __init__(self):
@@ -124,7 +134,7 @@ async def test_lifespan_order_paused_repair_resume(
             order.append("repair")
             assert manager is not None
             assert manager.scheduler.resumed is False
-            return {"repaired": 0, "failed": 0, "details": []}
+            return repair_result
 
     monkeypatch.setattr(main_module, "SchedulerManager", FakeManager)
     monkeypatch.setattr(main_module, "SystemTaskService", FakeService)
@@ -135,7 +145,14 @@ async def test_lifespan_order_paused_repair_resume(
         main_module, "webbrowser", SimpleNamespace(open_new=lambda *_: None)
     )
     monkeypatch.setattr(main_module, "release_runtime_ownership", lambda: None)
-    monkeypatch.setattr(main_module.app_state, "send_log", lambda *_a, **_k: None)
+    if capture_logs:
+        monkeypatch.setattr(
+            main_module.app_state,
+            "send_log",
+            lambda msg, *a, **k: logs.append(str(msg)),
+        )
+    else:
+        monkeypatch.setattr(main_module.app_state, "send_log", lambda *_a, **_k: None)
     monkeypatch.setattr(main_module.app_state, "message_conn", MagicMock())
     monkeypatch.setattr(main_module.app_state, "worker", None)
     monkeypatch.setattr(main_module.app_state, "broadcaster", None)
@@ -146,6 +163,16 @@ async def test_lifespan_order_paused_repair_resume(
     settings_file.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(main_module, "SETTINGS_FILE", settings_file)
     monkeypatch.setattr(main_module, "APP_ROOT_DIR", tmp_path)
+
+    return order, logs
+
+
+@pytest.mark.asyncio
+async def test_lifespan_order_paused_repair_resume(
+    main_module, tmp_path: Path, monkeypatch
+):
+    """Web lifespan: paused init → repair → resume (no scope import)."""
+    order, _ = _install_lifespan_fakes(main_module, tmp_path, monkeypatch)
 
     with patch(
         "main.SettingsModel.model_validate",
@@ -169,67 +196,29 @@ async def test_lifespan_repair_failure_still_resumes(
     main_module, tmp_path: Path, monkeypatch
 ):
     """Corrupt/repair failure is logged; APS still resumes."""
-    logs: list[str] = []
-    order: list[str] = []
-
-    class FakeScheduler:
-        def resume(self):
-            order.append("resume")
-
-    class FakeManager:
-        def __init__(self):
-            self.scheduler = FakeScheduler()
-
-        def set_worker(self, w):
-            pass
-
-        async def initialize(self, **kw):
-            order.append("init")
-            assert kw.get("paused") is True
-
-        async def shutdown(self):
-            pass
-
-    class FakeService:
-        def __init__(self, root):
-            pass
-
-        async def repair_all(self, manager=None):
-            order.append("repair")
-            return {
-                "repaired": 0,
-                "failed": 1,
-                "details": ["state corrupt; repair refused"],
-            }
-
-    monkeypatch.setattr(main_module, "SchedulerManager", FakeManager)
-    monkeypatch.setattr(main_module, "SystemTaskService", FakeService)
-    monkeypatch.setattr(main_module, "MaaWorker", lambda *a, **k: MagicMock())
-    monkeypatch.setattr(main_module, "LogBroadcaster", lambda: MagicMock())
-    monkeypatch.setattr(main_module, "log_monitor", AsyncMock())
-    monkeypatch.setattr(
-        main_module, "webbrowser", SimpleNamespace(open_new=lambda *_: None)
+    order, logs = _install_lifespan_fakes(
+        main_module,
+        tmp_path,
+        monkeypatch,
+        repair_result={
+            "repaired": 0,
+            "failed": 1,
+            "details": ["state corrupt; repair refused"],
+        },
+        capture_logs=True,
     )
-    monkeypatch.setattr(main_module, "release_runtime_ownership", lambda: None)
-    monkeypatch.setattr(
-        main_module.app_state, "send_log", lambda msg, *a, **k: logs.append(str(msg))
-    )
-    monkeypatch.setattr(main_module.app_state, "message_conn", MagicMock())
-    monkeypatch.setattr(main_module.app_state, "worker", None)
-    monkeypatch.setattr(main_module.app_state, "broadcaster", None)
-    monkeypatch.setattr(main_module.app_state, "scheduler_manager", None)
-    monkeypatch.setattr(main_module.app_state, "system_scheduler", None)
-
-    settings_file = tmp_path / "settings.json"
-    settings_file.write_text("{}", encoding="utf-8")
-    monkeypatch.setattr(main_module, "SETTINGS_FILE", settings_file)
-    monkeypatch.setattr(main_module, "APP_ROOT_DIR", tmp_path)
 
     with patch(
         "main.SettingsModel.model_validate", return_value=MagicMock()
     ), patch("main.interface_lock"):
         async with main_module.lifespan(MagicMock()):
-            assert order == ["init", "repair", "resume"]
+            assert order == [
+                "set_worker",
+                "init",
+                "service_ctor",
+                "repair",
+                "resume",
+            ]
             assert any("失败" in m or "failed" in m.lower() or "修复" in m for m in logs)
             resume_idx = next(i for i, m in enumerate(logs) if "恢复派发" in m)
             fail_idx = next(

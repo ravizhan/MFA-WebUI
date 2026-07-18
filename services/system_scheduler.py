@@ -62,7 +62,6 @@ class SystemTaskService:
         self._state_file = self._config_dir / "system_tasks.json"
         self._backend: Optional[SystemSchedulerBackend] = None
         self._async_lock = asyncio.Lock()
-        self._memory_state: Optional[_SystemTaskState] = None
 
     @property
     def backend(self) -> SystemSchedulerBackend:
@@ -79,9 +78,7 @@ class SystemTaskService:
 
     def _load_state(self) -> _SystemTaskState:
         if not self._state_file.exists():
-            st = _SystemTaskState(version=OPERATIONAL_STATE_VERSION)
-            self._memory_state = st
-            return st
+            return _SystemTaskState(version=OPERATIONAL_STATE_VERSION)
         try:
             with self._state_file.open("r", encoding="utf-8") as f:
                 data = json.load(f)
@@ -104,13 +101,11 @@ class SystemTaskService:
                         {k: reg_data[k] for k in OPERATIONAL_STATE_KEYS if k in reg_data}
                     )
                 )
-            self._memory_state = state
             return state
         except Exception as e:
             logger.error("加载 system_tasks.json 失败（fail closed）: %s", e)
             state = _SystemTaskState()
             state.corrupt = True
-            self._memory_state = state
             return state
 
     def _save_state(self, state: _SystemTaskState) -> None:
@@ -118,7 +113,6 @@ class SystemTaskService:
             raise RuntimeError(
                 "system_tasks.json is corrupt; refusing to overwrite"
             )
-        self._memory_state = state
         self._config_dir.mkdir(parents=True, exist_ok=True)
         data = {
             "version": OPERATIONAL_STATE_VERSION,
@@ -147,9 +141,6 @@ class SystemTaskService:
             if rec.task_id == task_id:
                 return rec
         return None
-
-    def _build_identifier(self, task_id: str) -> str:
-        return self.backend.build_identifier(task_id)
 
     def _hydrate_registration(
         self,

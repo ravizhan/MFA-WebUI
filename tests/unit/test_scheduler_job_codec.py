@@ -333,11 +333,12 @@ def _create(**overrides: Any) -> ScheduledTaskCreate:
 
 @pytest.mark.asyncio
 async def test_create_and_update_share_identical_kwargs_schema(manager: SchedulerManager):
-    task = await manager.create_task(_create())
+    task = await manager.create_task(_create(wakeup_enabled=True))
     assert manager.scheduler is not None
     created_job = manager.scheduler.get_job(task.id)
     assert created_job is not None
     create_keys = set(created_job.kwargs.keys())
+    assert created_job.kwargs["wakeup_enabled"] is True
 
     updated = await manager.update_task(task.id, ScheduledTaskUpdate(name="renamed"))
     assert updated is not None
@@ -349,6 +350,9 @@ async def test_create_and_update_share_identical_kwargs_schema(manager: Schedule
     assert "pre_tasks" in create_keys
     assert "preTasks" not in create_keys
     assert updated_job.kwargs["task_name"] == "renamed"
+    # Omitted update fields must preserve wakeup_enabled.
+    assert updated.wakeup_enabled is True
+    assert updated_job.kwargs["wakeup_enabled"] is True
     assert created_job.func_ref == "scheduler_manager:execute_scheduled_task"
     assert updated_job.func_ref == "scheduler_manager:execute_scheduled_task"
 

@@ -64,13 +64,6 @@ def test_runtime_ownership_busy(tmp_path: Path):
         first.release()
 
 
-def test_import_does_not_lock():
-    """Importing process_lock must not acquire locks."""
-    import services.process_lock as pl
-
-    assert pl.AdvisoryFileLock is not None
-
-
 # ---------------------------------------------------------------------------
 # Process lock cross-process + Go interop
 # ---------------------------------------------------------------------------
