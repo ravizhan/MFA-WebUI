@@ -377,9 +377,12 @@ func TestRunRuntimeUnlockFailureAbortsHandoff(t *testing.T) {
 	_ = os.MkdirAll(filepath.Dir(cfg.RestartCmd), 0o755)
 	_ = os.WriteFile(cfg.RestartCmd, []byte("x"), 0o755)
 
+	// Fail only the intentional handoff unlock; the deferred cleanup call must
+	// still Close() the lock so the fd is released (Windows cannot delete a
+	// lock file held open by the test process during t.TempDir cleanup).
+	var unlockAttempted atomic.Bool
 	d.runtimeUnlock = func(l *filelock.Lock) error {
-		// Fail the intentional handoff unlock; deferred cleanup will also call this.
-		if tr.restartCalled.Load() == 0 && l != nil && l.Locked() {
+		if !unlockAttempted.Swap(true) && l != nil && l.Locked() {
 			return errors.New("injected unlock failure")
 		}
 		if l != nil {
