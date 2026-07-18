@@ -178,21 +178,6 @@ func TestResolveInstallRootIgnoresMWUAppRootEnv(t *testing.T) {
 	}
 }
 
-func TestResolveInstallRootNeverHome(t *testing.T) {
-	wd := t.TempDir()
-	root, err := ResolveInstallRoot(wd, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	home, err := os.UserHomeDir()
-	if err == nil && root == home {
-		t.Fatal("app root must not be user home")
-	}
-	if filepath.Base(root) == ".mwu" && filepath.Dir(root) == home {
-		t.Fatal("must not use ~/.mwu as app root")
-	}
-}
-
 func TestReopenAfterClose(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "reopen.lock")

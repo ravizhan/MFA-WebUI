@@ -16,9 +16,6 @@
 //	  N seconds elapse (if -seconds > 0) or stdin EOF. Then "released".
 //	  Exit 0 on success, 1 on hard error, 2 on busy/timeout.
 //
-//	lockhelper paths -app-root <dir>
-//	  Print absolute update.lock and runtime.lock paths (one per line).
-//
 // Exit codes (stable for Python interop):
 //
 //	0 success / free-and-acquired
@@ -43,7 +40,7 @@ func main() {
 
 func run(args []string) int {
 	if len(args) < 1 {
-		fmt.Fprintln(os.Stderr, "usage: lockhelper <try|hold|paths> [flags]")
+		fmt.Fprintln(os.Stderr, "usage: lockhelper <try|hold> [flags]")
 		return 1
 	}
 	cmd := args[0]
@@ -52,8 +49,6 @@ func run(args []string) int {
 		return cmdTry(args[1:])
 	case "hold":
 		return cmdHold(args[1:])
-	case "paths":
-		return cmdPaths(args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n", cmd)
 		return 1
@@ -128,25 +123,5 @@ func cmdHold(args []string) int {
 		return 1
 	}
 	fmt.Println("released")
-	return 0
-}
-
-func cmdPaths(args []string) int {
-	fs := flag.NewFlagSet("paths", flag.ContinueOnError)
-	appRoot := fs.String("app-root", "", "application/install root")
-	if err := fs.Parse(args); err != nil {
-		return 1
-	}
-	if *appRoot == "" {
-		fmt.Fprintln(os.Stderr, "paths: -app-root required")
-		return 1
-	}
-	root, err := filelock.ResolveInstallRoot(*appRoot, "")
-	if err != nil {
-		fmt.Printf("error: %v\n", err)
-		return 1
-	}
-	fmt.Println(filelock.UpdateLockPath(root))
-	fmt.Println(filelock.RuntimeLockPath(root))
 	return 0
 }
