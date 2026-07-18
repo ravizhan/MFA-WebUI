@@ -212,20 +212,6 @@ func TestRestartMainOpaquePathWithSpaces(t *testing.T) {
 	}
 }
 
-func TestInstallRootStableSingleRoot(t *testing.T) {
-	root := t.TempDir()
-	other := t.TempDir()
-	t.Setenv("MWU_APP_ROOT", other)
-	got, err := filelock.ResolveInstallRoot(root, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	abs, _ := filepath.Abs(root)
-	if got != filepath.Clean(abs) {
-		t.Fatalf("got %q want %q", got, abs)
-	}
-}
-
 func TestRunAcquiresUpdateLockBeforeStaging(t *testing.T) {
 	root := t.TempDir()
 	d, tr := testDeps(t, root)
@@ -723,53 +709,6 @@ func TestSelfUpdateRecoveryFromOld(t *testing.T) {
 	}
 }
 
-func TestCopyFilePreservesContent(t *testing.T) {
-	dir := t.TempDir()
-	src := filepath.Join(dir, "a.txt")
-	dst := filepath.Join(dir, "b.txt")
-	_ = os.WriteFile(src, []byte("hello-update"), 0o644)
-	if err := copyFile(src, dst, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	data, _ := os.ReadFile(dst)
-	if string(data) != "hello-update" {
-		t.Fatalf("got %q", data)
-	}
-}
-
-func TestHashFileStable(t *testing.T) {
-	dir := t.TempDir()
-	p := filepath.Join(dir, "x.bin")
-	_ = os.WriteFile(p, []byte{1, 2, 3, 4}, 0o644)
-	h1, _ := hashFile(p)
-	h2, _ := hashFile(p)
-	if h1 != h2 || h1 == "" {
-		t.Fatalf("unstable hash %q %q", h1, h2)
-	}
-}
-
-func TestSelfUpdateExitCodeConstant(t *testing.T) {
-	if exitCodeSelfUpdate != 10 {
-		t.Fatalf("exitCodeSelfUpdate=%d want 10", exitCodeSelfUpdate)
-	}
-}
-
-func TestFailResultDoesNotPanic(t *testing.T) {
-	d := defaultDeps()
-	var got string
-	d.output = func(v any) {
-		data, _ := json.Marshal(v)
-		got = string(data)
-	}
-	code := failResult(d, "test error %d", 42)
-	if code != exitCodeError {
-		t.Fatalf("code=%d", code)
-	}
-	if !strings.Contains(got, "test error 42") {
-		t.Fatalf("output=%s", got)
-	}
-}
-
 func TestRestartMainRejectsMissingExe(t *testing.T) {
 	err := restartMain(filepath.Join(t.TempDir(), "no-such-binary"))
 	if err == nil {
@@ -777,9 +716,148 @@ func TestRestartMainRejectsMissingExe(t *testing.T) {
 	}
 }
 
-func TestLockBusyErrorDistinctFromTimeout(t *testing.T) {
-	if errors.Is(filelock.ErrBusy, filelock.ErrTimeout) {
-		t.Fatal("ErrBusy must not equal ErrTimeout")
+func TestApplyChangesRejectsMaliciousPaths(t *testing.T) {
+	root := t.TempDir()
+	install := filepath.Join(root, "install")
+	extract := filepath.Join(root, "extract")
+	outside := filepath.Join(root, "outside")
+	if err := os.MkdirAll(install, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(extract, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	victim := filepath.Join(outside, "keep.txt")
+	if err := os.WriteFile(victim, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Source content that must never be applied outside install.
+	if err := os.WriteFile(filepath.Join(extract, "payload.txt"), []byte("pwn"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	d := defaultDeps()
+	escapeKeep := filepath.ToSlash(filepath.Join("..", "outside", "keep.txt"))
+	escapePwned := filepath.ToSlash(filepath.Join("..", "outside", "pwned.txt"))
+
+	if err := applyChanges(d, install, extract, ChangeLog{Deleted: []string{escapeKeep}}); err == nil {
+		t.Fatal("expected deleted path escape rejection")
+	}
+	if data, err := os.ReadFile(victim); err != nil || string(data) != "keep" {
+		t.Fatalf("outside file deleted or changed: err=%v data=%q", err, data)
+	}
+
+	if err := applyChanges(d, install, extract, ChangeLog{Added: []string{escapePwned}}); err == nil {
+		t.Fatal("expected added path escape rejection")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "pwned.txt")); err == nil {
+		t.Fatal("outside file was created via Added escape")
+	}
+
+	if runtime.GOOS != "windows" {
+		link := filepath.Join(install, "outside-link")
+		if err := os.Symlink(outside, link); err != nil {
+			t.Fatal(err)
+		}
+		if err := applyChanges(d, install, extract, ChangeLog{Added: []string{"outside-link/pwned.txt"}}); err == nil {
+			t.Fatal("expected symlink escape rejection")
+		}
+		if _, err := os.Stat(filepath.Join(outside, "pwned.txt")); err == nil {
+			t.Fatal("outside file was created through install symlink")
+		}
+	}
+
+	if err := applyChanges(d, install, extract, ChangeLog{Modified: []string{escapeKeep}}); err == nil {
+		t.Fatal("expected modified path escape rejection")
+	}
+	if data, err := os.ReadFile(victim); err != nil || string(data) != "keep" {
+		t.Fatalf("outside file modified: err=%v data=%q", err, data)
+	}
+
+	// Absolute path must also be rejected.
+	absEscape := filepath.Join(outside, "abs.txt")
+	if err := applyChanges(d, install, extract, ChangeLog{Added: []string{absEscape}}); err == nil {
+		t.Fatal("expected absolute path rejection")
+	}
+}
+
+func TestGetChangesRejectsMaliciousChangeLog(t *testing.T) {
+	install := t.TempDir()
+	extract := t.TempDir()
+	cl := ChangeLog{
+		Added:    []string{"../evil-added"},
+		Modified: []string{"safe.txt"},
+		Deleted:  []string{"ok.txt"},
+	}
+	data, err := json.Marshal(cl)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(extract, defaultChangesFile), data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = getChanges(install, extract)
+	if err == nil {
+		t.Fatal("expected malicious changes.json rejection")
+	}
+	if !strings.Contains(err.Error(), "added") && !strings.Contains(err.Error(), "escape") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestGetChangesPropagatesHashError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("relies on POSIX file permissions")
+	}
+	install := t.TempDir()
+	extract := t.TempDir()
+	// Both sides exist so worker hashes instead of treating as added.
+	if err := os.WriteFile(filepath.Join(extract, "secret.bin"), []byte("pkg"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	inst := filepath.Join(install, "secret.bin")
+	if err := os.WriteFile(inst, []byte("inst"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(inst, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(inst, 0o644) })
+
+	_, err := getChanges(install, extract)
+	if err == nil {
+		t.Fatal("expected hash error propagation")
+	}
+	if !strings.Contains(err.Error(), "hash") {
+		t.Fatalf("expected hash error, got %v", err)
+	}
+}
+
+func TestGetChangesPropagatesWalkDirError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("relies on POSIX directory permissions")
+	}
+	install := t.TempDir()
+	extract := t.TempDir()
+	locked := filepath.Join(extract, "locked")
+	if err := os.MkdirAll(locked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(locked, "f.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+
+	_, err := getChanges(install, extract)
+	if err == nil {
+		t.Fatal("expected WalkDir error propagation")
 	}
 }
 

@@ -265,9 +265,3 @@ func ResolveInstallRoot(workingDir, exePath string) (string, error) {
 	}
 	return filepath.Clean(filepath.Dir(abs)), nil
 }
-
-// ResolveAppRoot is an alias for ResolveInstallRoot for callers that used the
-// previous name. Same single-root contract; no MWU_APP_ROOT divergence.
-func ResolveAppRoot(workingDir, exePath string) (string, error) {
-	return ResolveInstallRoot(workingDir, exePath)
-}

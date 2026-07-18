@@ -531,10 +531,6 @@ func handleSelfUpdate(d deps, installDir, extractDir string) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("executable not relative to install root: %w", err)
 	}
-	// Reject .. components even if Rel succeeded on some edge cases.
-	if strings.HasPrefix(filepath.ToSlash(relPath), "../") || relPath == ".." {
-		return false, fmt.Errorf("executable path escapes install root: %s", relPath)
-	}
 
 	candidate := filepath.Join(extractDir, relPath)
 	if _, err := os.Stat(candidate); os.IsNotExist(err) {
@@ -627,21 +623,65 @@ type ChangeLog struct {
 	Modified []string `json:"modified"`
 }
 
+// validateRelativeChangePath rejects absolute paths, empty paths, and .. traversal
+// so ChangeLog entries cannot escape install/extract roots.
+func validateRelativeChangePath(rel string) error {
+	if strings.TrimSpace(rel) == "" {
+		return errors.New("empty change path")
+	}
+	normalized := strings.ReplaceAll(rel, "\\", "/")
+	if filepath.IsAbs(normalized) || filepath.VolumeName(normalized) != "" {
+		return fmt.Errorf("illegal absolute change path: %q", rel)
+	}
+	clean := filepath.Clean(normalized)
+	if filepath.IsAbs(clean) || filepath.VolumeName(clean) != "" {
+		return fmt.Errorf("illegal absolute change path: %q", rel)
+	}
+	slash := filepath.ToSlash(clean)
+	if slash == "." || slash == "" {
+		return fmt.Errorf("illegal change path: %q", rel)
+	}
+	if slash == ".." || strings.HasPrefix(slash, "../") {
+		return fmt.Errorf("illegal change path escapes root: %q", rel)
+	}
+	return nil
+}
+
+func validateChangeLog(changes ChangeLog) error {
+	for _, rel := range changes.Added {
+		if err := validateRelativeChangePath(rel); err != nil {
+			return fmt.Errorf("added: %w", err)
+		}
+	}
+	for _, rel := range changes.Modified {
+		if err := validateRelativeChangePath(rel); err != nil {
+			return fmt.Errorf("modified: %w", err)
+		}
+	}
+	for _, rel := range changes.Deleted {
+		if err := validateRelativeChangePath(rel); err != nil {
+			return fmt.Errorf("deleted: %w", err)
+		}
+	}
+	return nil
+}
+
 func getChanges(installDir, extractDir string) (ChangeLog, error) {
-	changesPath := filepath.Join(extractDir, defaultChangesFile)
-	changes := ChangeLog{
+	empty := ChangeLog{
 		Added:    []string{},
 		Deleted:  []string{},
 		Modified: []string{},
 	}
+	changesPath := filepath.Join(extractDir, defaultChangesFile)
 
 	if _, err := os.Stat(changesPath); err == nil {
 		data, err := os.ReadFile(changesPath)
 		if err != nil {
-			return changes, err
+			return empty, err
 		}
+		changes := empty
 		if err := json.Unmarshal(data, &changes); err != nil {
-			return changes, err
+			return empty, err
 		}
 		if changes.Added == nil {
 			changes.Added = []string{}
@@ -652,39 +692,58 @@ func getChanges(installDir, extractDir string) (ChangeLog, error) {
 		if changes.Modified == nil {
 			changes.Modified = []string{}
 		}
+		if err := validateChangeLog(changes); err != nil {
+			return empty, err
+		}
 		return changes, nil
+	} else if !os.IsNotExist(err) {
+		return empty, err
 	}
 
 	type fileInfo struct {
 		path string
 		rel  string
 	}
-	type localChanges struct {
+	type workerResult struct {
 		added    []string
 		modified []string
+		err      error
 	}
 
 	pkgFiles := make(chan fileInfo, 100)
 	pkgFileMap := make(map[string]bool)
 	var mapMu sync.Mutex
 	numWorkers := runtime.NumCPU()
+	if numWorkers < 1 {
+		numWorkers = 1
+	}
 	var wg sync.WaitGroup
-	results := make(chan localChanges, numWorkers)
+	results := make(chan workerResult, numWorkers)
+	walkDone := make(chan error, 1)
 
 	go func() {
-		filepath.WalkDir(extractDir, func(path string, d os.DirEntry, err error) error {
-			if err != nil || d.IsDir() {
+		walkDone <- filepath.WalkDir(extractDir, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.IsDir() {
 				return nil
 			}
-			rel, _ := filepath.Rel(extractDir, path)
+			rel, err := filepath.Rel(extractDir, path)
+			if err != nil {
+				return err
+			}
 			rel = filepath.ToSlash(rel)
 			if rel == defaultChangesFile || rel == filepath.Base(os.Args[0]) {
 				return nil
 			}
+			if err := validateRelativeChangePath(rel); err != nil {
+				return err
+			}
 			mapMu.Lock()
 			pkgFileMap[rel] = true
 			mapMu.Unlock()
-			pkgFiles <- fileInfo{path, rel}
+			pkgFiles <- fileInfo{path: path, rel: rel}
 			return nil
 		})
 		close(pkgFiles)
@@ -694,36 +753,75 @@ func getChanges(installDir, extractDir string) (ChangeLog, error) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			local := localChanges{added: make([]string, 0), modified: make([]string, 0)}
+			var added, modified []string
+			var werr error
 			for f := range pkgFiles {
-				targetPath := filepath.Join(installDir, f.rel)
-				if _, err := os.Stat(targetPath); err != nil {
-					local.added = append(local.added, f.rel)
+				if werr != nil {
 					continue
 				}
-				h1, _ := hashFile(f.path)
-				h2, _ := hashFile(targetPath)
+				targetPath, err := safeJoin(installDir, f.rel)
+				if err != nil {
+					werr = fmt.Errorf("install path %q: %w", f.rel, err)
+					continue
+				}
+				_, err = os.Stat(targetPath)
+				if os.IsNotExist(err) {
+					added = append(added, f.rel)
+					continue
+				}
+				if err != nil {
+					werr = fmt.Errorf("stat install file %s: %w", f.rel, err)
+					continue
+				}
+				h1, err := hashFile(f.path)
+				if err != nil {
+					werr = fmt.Errorf("hash package file %s: %w", f.rel, err)
+					continue
+				}
+				h2, err := hashFile(targetPath)
+				if err != nil {
+					werr = fmt.Errorf("hash install file %s: %w", f.rel, err)
+					continue
+				}
 				if h1 != h2 {
-					local.modified = append(local.modified, f.rel)
+					modified = append(modified, f.rel)
 				}
 			}
-			results <- local
+			results <- workerResult{added: added, modified: modified, err: werr}
 		}()
 	}
 	go func() {
 		wg.Wait()
 		close(results)
 	}()
-	for local := range results {
-		changes.Added = append(changes.Added, local.added...)
-		changes.Modified = append(changes.Modified, local.modified...)
+
+	changes := empty
+	var workerErr error
+	for r := range results {
+		if r.err != nil && workerErr == nil {
+			workerErr = r.err
+		}
+		changes.Added = append(changes.Added, r.added...)
+		changes.Modified = append(changes.Modified, r.modified...)
+	}
+	if err := <-walkDone; err != nil {
+		return empty, err
+	}
+	if workerErr != nil {
+		return empty, workerErr
 	}
 
-	filepath.WalkDir(installDir, func(path string, d os.DirEntry, err error) error {
-		if err != nil || d.IsDir() {
+	err := filepath.WalkDir(installDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
 			return nil
 		}
-		rel, _ := filepath.Rel(installDir, path)
+		rel, err := filepath.Rel(installDir, path)
+		if err != nil {
+			return err
+		}
 		rel = filepath.ToSlash(rel)
 		if strings.HasPrefix(rel, "config/") ||
 			rel == "update_temp" ||
@@ -744,19 +842,31 @@ func getChanges(installDir, extractDir string) (ChangeLog, error) {
 		}
 		return nil
 	})
+	if err != nil {
+		return empty, err
+	}
 	return changes, nil
 }
 
 func applyChanges(d deps, installDir, extractDir string, changes ChangeLog) error {
+	if err := validateChangeLog(changes); err != nil {
+		return err
+	}
 	owner, err := captureInstallOwner(installDir)
 	if err != nil {
 		return err
 	}
 	for _, rel := range append(changes.Added, changes.Modified...) {
-		src := filepath.Join(extractDir, rel)
-		dst := filepath.Join(installDir, rel)
 		if rel == filepath.Base(os.Args[0]) || rel == defaultChangesFile {
 			continue
+		}
+		src, err := resolveChangePath(extractDir, rel)
+		if err != nil {
+			return fmt.Errorf("invalid change path %q: %w", rel, err)
+		}
+		dst, err := resolveChangePath(installDir, rel)
+		if err != nil {
+			return fmt.Errorf("invalid change path %q: %w", rel, err)
 		}
 		if err := os.MkdirAll(filepath.Dir(dst), installDirMode); err != nil {
 			return err
@@ -773,9 +883,30 @@ func applyChanges(d deps, installDir, extractDir string, changes ChangeLog) erro
 		}
 	}
 	for _, rel := range changes.Deleted {
-		_ = os.Remove(filepath.Join(installDir, rel))
+		dst, err := resolveChangePath(installDir, rel)
+		if err != nil {
+			return fmt.Errorf("invalid delete path %q: %w", rel, err)
+		}
+		if err := os.Remove(dst); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("delete %q: %w", rel, err)
+		}
 	}
 	return nil
+}
+
+func resolveChangePath(root, rel string) (string, error) {
+	path, err := safeJoin(root, rel)
+	if err != nil {
+		return "", err
+	}
+	ok, err := pathWithinRoot(root, path)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", errors.New("非法路径：路径超出目标目录")
+	}
+	return path, nil
 }
 
 // restartMain treats exePath as an opaque executable path (may contain spaces).
@@ -829,21 +960,17 @@ func writeChanges(path string, changes ChangeLog) error {
 	return atomicWriteFile(path, data, 0o644)
 }
 
+// safeJoin joins baseDir/name and rejects any result that escapes baseDir.
+// Single filepath.Rel root check covers absolute names and .. traversal on
+// both Windows and Unix.
 func safeJoin(baseDir, name string) (string, error) {
-	cleanName := filepath.Clean(name)
-	cleanNameSlash := filepath.ToSlash(cleanName)
-	if strings.HasPrefix(cleanNameSlash, "..") {
-		return "", errors.New("非法路径：路径遍历攻击")
-	}
-	if strings.Contains(cleanNameSlash, "../") {
-		return "", errors.New("非法路径：包含路径遍历")
-	}
-	joined := filepath.Join(baseDir, cleanName)
+	joined := filepath.Join(baseDir, filepath.Clean(strings.ReplaceAll(name, "\\", "/")))
 	rel, err := filepath.Rel(baseDir, joined)
 	if err != nil {
 		return "", fmt.Errorf("路径解析失败: %w", err)
 	}
-	if strings.HasPrefix(filepath.ToSlash(rel), "..") {
+	relSlash := filepath.ToSlash(rel)
+	if relSlash == ".." || strings.HasPrefix(relSlash, "../") {
 		return "", errors.New("非法路径：路径超出目标目录")
 	}
 	return joined, nil
@@ -956,10 +1083,6 @@ func atomicWriteFile(path string, data []byte, mode os.FileMode) error {
 		return err
 	}
 	return nil
-}
-
-func copyFile(src, dst string, mode os.FileMode) error {
-	return atomicReplaceFile(defaultDeps(), src, dst, mode)
 }
 
 func hashFile(path string) (string, error) {
