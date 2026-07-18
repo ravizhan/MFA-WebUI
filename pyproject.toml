@@ -8,6 +8,7 @@ dependencies = [
     "apscheduler>=3.11.3,<4",
     "aiosqlite>=0.22.1",
     "fastapi>=0.139.0",
+    "filelock>=3.31.0",
     "httpx>=0.28.1",
     "maafw>=5.11.1",
     "nuitka[all]>=4.1.3",

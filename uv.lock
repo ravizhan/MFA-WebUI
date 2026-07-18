@@ -102,6 +102,15 @@ wheels = [
 ]
 
 [[package]]
+name = "filelock"
+version = "3.31.0"
+source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/4a/9f/994e80905542b748eb5b9f36d71458f0aea51a7be0fcb52ad959787dc1b7/filelock-3.31.0.tar.gz", hash = "sha256:c188cbc4307c18894c5424fa73f97ea7fa127ddf62192487546da3a214d0a381", size = 180931, upload-time = "2026-07-18T05:53:29.262Z" }
+wheels = [
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/5b/4a/e213905d3b8ad3d35d14fc056b36134a274e7f6a1050e94428b5be10a94c/filelock-3.31.0-py3-none-any.whl", hash = "sha256:739b73e580fe88bb78d830aeddbc492519ece3d97ac8368de13a2032c61010c1", size = 96080, upload-time = "2026-07-18T05:53:27.732Z" },
+]
+
+[[package]]
 name = "greenlet"
 version = "3.3.1"
 source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
@@ -242,6 +251,7 @@ dependencies = [
     { name = "aiosqlite" },
     { name = "apscheduler" },
     { name = "fastapi" },
+    { name = "filelock" },
     { name = "httpx" },
     { name = "maafw" },
     { name = "nuitka", extra = ["all"] },
@@ -267,6 +277,7 @@ requires-dist = [
     { name = "aiosqlite", specifier = ">=0.22.1" },
     { name = "apscheduler", specifier = ">=3.11.3,<4" },
     { name = "fastapi", specifier = ">=0.139.0" },
+    { name = "filelock", specifier = ">=3.31.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "maafw", specifier = ">=5.11.1" },
     { name = "nuitka", extras = ["all"], specifier = ">=4.1.3" },

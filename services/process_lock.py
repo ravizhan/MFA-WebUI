@@ -1,41 +1,33 @@
 """Cross-platform kernel advisory locks for MWU runtime/update coordination.
 
+Thin facade over filelock (PyPI: filelock, by tox-dev). Kernel primitives match
+the Go updater's gofrs/flock (Phase 2 interop):
+  - Unix: fcntl.flock(fd, LOCK_EX|LOCK_NB)
+  - Windows: LockFileEx 1-byte region at offset 0
+
 Canonical paths (app-root relative):
   config/locks/runtime.lock
   config/locks/update.lock
 
 Protocol (normative):
-  - Stable lock files are never deleted on unlock.
-  - POSIX: fcntl.flock whole-file exclusive, mode 0666.
-  - Windows: CreateFileW + LockFileEx/UnlockFileEx on offset 0 length 1 with
-    GENERIC_READ|GENERIC_WRITE and FILE_SHARE_READ|WRITE|DELETE, OPEN_ALWAYS.
-  - Bounded waits use nonblocking retries.
+  - Stable lock files are never deleted on unlock (preserve_lock_file=True).
+  - Bounded waits use nonblocking retries (filelock poll).
   - PID metadata is diagnostic only, written after runtime lock acquisition
     with an owner token, and removed only by that owner.
+
+Note: filelock may truncate the lock file to 0 bytes after acquire. MWU never
+writes content into lock files, so this is a behavioral no-op.
 """
 
 from __future__ import annotations
 
 import json
-import errno
 import os
-import sys
-import time
 import uuid
 from pathlib import Path
 from typing import Optional
 
-# Windows constants (win32)
-_GENERIC_READ = 0x80000000
-_GENERIC_WRITE = 0x40000000
-_FILE_SHARE_READ = 0x00000001
-_FILE_SHARE_WRITE = 0x00000002
-_FILE_SHARE_DELETE = 0x00000004
-_OPEN_ALWAYS = 4
-_FILE_ATTRIBUTE_NORMAL = 0x80
-_LOCKFILE_EXCLUSIVE_LOCK = 0x00000002
-_LOCKFILE_FAIL_IMMEDIATELY = 0x00000001
-_INVALID_HANDLE_VALUE = -1
+import filelock as _filelock
 
 
 class LockError(Exception):
@@ -61,11 +53,23 @@ def pid_metadata_path(app_root: Path) -> Path:
 
 
 class AdvisoryFileLock:
-    """One-byte exclusive advisory lock owned by a process handle/fd."""
+    """One-byte exclusive advisory lock owned by a process handle/fd.
+
+    Thin facade over filelock.FileLock. Kernel primitives (flock on Unix,
+    LockFileEx 1-byte region at offset 0 on Windows) match MWU's Go updater's
+    gofrs/flock, preserving cross-language interop (Phase 2 hardening).
+    """
 
     def __init__(self, path: Path):
         self.path = Path(path)
-        self._handle = None  # Windows HANDLE or POSIX int fd
+        # preserve_lock_file=True is CRITICAL: default filelock deletes the file
+        # on release, which would break the stable lock files protocol.
+        self._fl = _filelock.FileLock(
+            str(self.path),
+            timeout=0,
+            poll_interval=0.05,
+            preserve_lock_file=True,
+        )
         self._locked = False
 
     @property
@@ -88,217 +92,42 @@ class AdvisoryFileLock:
         if self._locked:
             return
 
-        self._ensure_parent()
-        deadline = None
-        if timeout_seconds is not None and timeout_seconds > 0:
-            deadline = time.monotonic() + timeout_seconds
+        # filelock does NOT create parent dirs by default
+        self.path.parent.mkdir(parents=True, exist_ok=True)
 
-        while True:
-            try:
-                self._open_handle()
-                if self._try_lock():
-                    self._locked = True
-                    return
-                self._close_handle()
-            except LockPermissionError:
-                self._close_handle()
-                raise
-            except LockError:
-                self._close_handle()
-                raise
+        # Map MWU timeout semantics → filelock:
+        #   None / <=0 → non-blocking one-shot (filelock timeout=0)
+        #   >0         → block up to N seconds
+        if timeout_seconds is None or timeout_seconds <= 0:
+            fl_timeout = 0
+        else:
+            fl_timeout = float(timeout_seconds)
 
-            if deadline is None or time.monotonic() >= deadline:
-                raise LockBusyError(f"Lock busy: {self.path}")
-            time.sleep(poll_interval)
+        try:
+            self._fl.acquire(timeout=fl_timeout, poll_interval=poll_interval)
+        except _filelock.Timeout as e:
+            raise LockBusyError(f"Lock busy: {self.path}") from e
+        except PermissionError as e:
+            raise LockPermissionError(str(e)) from e
+        except OSError as e:
+            raise LockError(str(e)) from e
+        self._locked = True
 
     def release(self) -> None:
         if not self._locked:
-            self._close_handle()
+            self._fl.release()  # idempotent, safe
             return
         try:
-            self._unlock()
+            self._fl.release()
         finally:
             self._locked = False
-            self._close_handle()
-            # Stable lock files are never deleted.
+            # Stable lock files are NEVER deleted (preserve_lock_file=True).
 
     def __enter__(self) -> "AdvisoryFileLock":
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
         self.release()
-
-    def _ensure_parent(self) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-
-    def _open_handle(self) -> None:
-        if self._handle is not None:
-            return
-        if sys.platform == "win32":
-            self._open_windows()
-        else:
-            self._open_posix()
-
-    def _close_handle(self) -> None:
-        if self._handle is None:
-            return
-        if sys.platform == "win32":
-            import ctypes
-
-            ctypes.windll.kernel32.CloseHandle(self._handle)
-        else:
-            try:
-                os.close(self._handle)
-            except OSError:
-                pass
-        self._handle = None
-
-    def _try_lock(self) -> bool:
-        if sys.platform == "win32":
-            return self._try_lock_windows()
-        return self._try_lock_posix()
-
-    def _unlock(self) -> None:
-        if sys.platform == "win32":
-            self._unlock_windows()
-        else:
-            self._unlock_posix()
-
-    # --- POSIX ---
-
-    def _open_posix(self) -> None:
-        flags = os.O_RDWR | os.O_CREAT
-        flags |= getattr(os, "O_CLOEXEC", 0)
-        try:
-            fd = os.open(str(self.path), flags, 0o666)
-        except PermissionError as e:
-            raise LockPermissionError(str(e)) from e
-        except OSError as e:
-            raise LockError(str(e)) from e
-        self._handle = fd
-
-    def _try_lock_posix(self) -> bool:
-        import fcntl  # type: ignore[import-not-found]
-
-        flock = getattr(fcntl, "flock")
-        lock_ex = getattr(fcntl, "LOCK_EX")
-        lock_nb = getattr(fcntl, "LOCK_NB")
-        try:
-            flock(self._handle, lock_ex | lock_nb)
-            return True
-        except BlockingIOError:
-            return False
-        except OSError as e:
-            if e.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
-                return False
-            if e.errno in (errno.EACCES, errno.EPERM):
-                raise LockPermissionError(str(e)) from e
-            raise LockError(str(e)) from e
-
-    def _unlock_posix(self) -> None:
-        import fcntl  # type: ignore[import-not-found]
-
-        flock = getattr(fcntl, "flock")
-        lock_un = getattr(fcntl, "LOCK_UN")
-        try:
-            flock(self._handle, lock_un)
-        except OSError:
-            pass
-
-    # --- Windows ---
-
-    def _open_windows(self) -> None:
-        import ctypes
-        from ctypes import wintypes
-
-        kernel32 = ctypes.windll.kernel32
-        kernel32.CreateFileW.argtypes = [
-            wintypes.LPCWSTR,
-            wintypes.DWORD,
-            wintypes.DWORD,
-            wintypes.LPVOID,
-            wintypes.DWORD,
-            wintypes.DWORD,
-            wintypes.HANDLE,
-        ]
-        kernel32.CreateFileW.restype = wintypes.HANDLE
-
-        handle = kernel32.CreateFileW(
-            str(self.path),
-            _GENERIC_READ | _GENERIC_WRITE,
-            _FILE_SHARE_READ | _FILE_SHARE_WRITE | _FILE_SHARE_DELETE,
-            None,
-            _OPEN_ALWAYS,
-            _FILE_ATTRIBUTE_NORMAL,
-            None,
-        )
-        if (
-            handle == wintypes.HANDLE(_INVALID_HANDLE_VALUE).value
-            or handle == _INVALID_HANDLE_VALUE
-        ):
-            err = ctypes.get_last_error()
-            raise LockPermissionError(
-                f"CreateFileW failed for {self.path}: error {err}"
-            )
-        self._handle = handle
-
-    def _try_lock_windows(self) -> bool:
-        import ctypes
-        from ctypes import wintypes
-
-        class OVERLAPPED(ctypes.Structure):
-            _fields_ = [
-                ("Internal", ctypes.c_ulonglong),
-                ("InternalHigh", ctypes.c_ulonglong),
-                ("Offset", wintypes.DWORD),
-                ("OffsetHigh", wintypes.DWORD),
-                ("hEvent", wintypes.HANDLE),
-            ]
-
-        kernel32 = ctypes.windll.kernel32
-        ov = OVERLAPPED()
-        ov.Offset = 0
-        ov.OffsetHigh = 0
-        ov.hEvent = None
-
-        # Lock exactly 1 byte at offset 0
-        ok = kernel32.LockFileEx(
-            self._handle,
-            _LOCKFILE_EXCLUSIVE_LOCK | _LOCKFILE_FAIL_IMMEDIATELY,
-            0,
-            1,  # nNumberOfBytesToLockLow
-            0,  # nNumberOfBytesToLockHigh
-            ctypes.byref(ov),
-        )
-        if ok:
-            return True
-        err = ctypes.GetLastError()
-        # ERROR_LOCK_VIOLATION=33, ERROR_IO_PENDING=997, ERROR_LOCK_FAILED=167
-        if err in (33, 167, 997):
-            return False
-        if err in (5,):  # ACCESS_DENIED
-            raise LockPermissionError(f"LockFileEx access denied: {self.path}")
-        return False
-
-    def _unlock_windows(self) -> None:
-        import ctypes
-        from ctypes import wintypes
-
-        class OVERLAPPED(ctypes.Structure):
-            _fields_ = [
-                ("Internal", ctypes.c_ulonglong),
-                ("InternalHigh", ctypes.c_ulonglong),
-                ("Offset", wintypes.DWORD),
-                ("OffsetHigh", wintypes.DWORD),
-                ("hEvent", wintypes.HANDLE),
-            ]
-
-        kernel32 = ctypes.windll.kernel32
-        ov = OVERLAPPED()
-        ov.Offset = 0
-        ov.OffsetHigh = 0
-        ov.hEvent = None
-        kernel32.UnlockFileEx(self._handle, 0, 1, 0, ctypes.byref(ov))
 
 
 class RuntimeOwnership:

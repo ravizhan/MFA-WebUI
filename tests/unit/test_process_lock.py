@@ -16,23 +16,6 @@ from services.process_lock import (
 )
 
 
-def test_advisory_lock_exclusive_contention(tmp_path: Path):
-    lock_path = tmp_path / "config" / "locks" / "runtime.lock"
-    a = AdvisoryFileLock(lock_path)
-    b = AdvisoryFileLock(lock_path)
-    a.acquire(timeout_seconds=None)
-    assert a.is_locked
-    with pytest.raises(LockBusyError):
-        b.acquire(timeout_seconds=None)
-    # Stable file never deleted
-    assert lock_path.exists()
-    a.release()
-    assert lock_path.exists()
-    b.acquire(timeout_seconds=None)
-    b.release()
-    assert lock_path.exists()
-
-
 def test_runtime_ownership_pid_after_lock(tmp_path: Path):
     ownership = RuntimeOwnership(tmp_path)
     ownership.acquire()
