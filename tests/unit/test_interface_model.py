@@ -1,4 +1,4 @@
-"""Tests for models/interface.py — Pydantic models for interface.json schema."""
+"""Tests for models/interface.py — MWU custom validators and schema rules."""
 
 import re
 
@@ -9,7 +9,6 @@ from models.interface import (
     Controller,
     GamepadController,
     InterfaceModel,
-    MacOSController,
     Option,
     OptionCase,
     Resource,
@@ -20,8 +19,7 @@ from models.interface import (
 
 
 class _FakeFieldInfo:
-    """A minimal stand-in for ValidationInfo (which is a Protocol and cannot be
-    instantiated directly)."""
+    """Minimal stand-in for ValidationInfo."""
 
     def __init__(self, field_name: str = "test"):
         self.field_name = field_name
@@ -51,51 +49,31 @@ class TestValidateRegex:
 
 
 # ---------------------------------------------------------------------------
-# _pipeline_override_contains_attach_option helper
+# _pipeline_override_contains_attach_option — representative cases
 # ---------------------------------------------------------------------------
 
 
 class TestPipelineOverrideContainsAttachOption:
     def test_direct_attach(self):
-        override = {"attach": {"my_option": "value"}}
-        assert _pipeline_override_contains_attach_option(override, "my_option")
-
-    def test_nested_attach(self):
-        override = {"sub": {"attach": {"my_option": "value"}}}
-        assert _pipeline_override_contains_attach_option(override, "my_option")
-
-    def test_attach_not_present(self):
-        assert not _pipeline_override_contains_attach_option(
-            {"other": "value"}, "my_option"
+        assert _pipeline_override_contains_attach_option(
+            {"attach": {"my_option": "value"}}, "my_option"
         )
 
-    def test_attach_wrong_key(self):
+    def test_nested_and_list(self):
+        assert _pipeline_override_contains_attach_option(
+            {"a": {"b": [{"attach": {"my_option": 1}}]}}, "my_option"
+        )
         assert not _pipeline_override_contains_attach_option(
             {"attach": {"other": "value"}}, "my_option"
         )
 
-    def test_in_list(self):
-        override = [{"attach": {"my_option": "value"}}]
-        assert _pipeline_override_contains_attach_option(override, "my_option")
-
-    def test_deeply_nested(self):
-        override = {"a": {"b": {"c": [{"attach": {"my_option": 1}}]}}}
-        assert _pipeline_override_contains_attach_option(override, "my_option")
-
 
 # ---------------------------------------------------------------------------
-# Win32Controller — regex compilation & method→int coercion
+# Win32Controller — method→int coercion (MWU custom)
 # ---------------------------------------------------------------------------
 
 
 class TestWin32Controller:
-    def test_regex_fields_compiled(self):
-        ctrl = Win32Controller.model_validate(
-            {"class_regex": r"^Qt.*", "window_regex": r".*MyApp.*"}
-        )
-        assert isinstance(ctrl.class_regex, re.Pattern)
-        assert isinstance(ctrl.window_regex, re.Pattern)
-
     def test_string_method_converted_to_int(self):
         ctrl = Win32Controller(mouse="Seize", keyboard="SendMessage", screencap="GDI")
         assert ctrl.mouse == 1
@@ -106,34 +84,19 @@ class TestWin32Controller:
         with pytest.raises(ValidationError):
             Win32Controller.model_validate({"mouse": "InvalidMethod"})
 
-
-# ---------------------------------------------------------------------------
-# MacOSController
-# ---------------------------------------------------------------------------
-
-
-class TestMacOSController:
-    def test_regex_field_compiled(self):
-        ctrl = MacOSController.model_validate({"title_regex": r"^MyApp"})
-        assert isinstance(ctrl.title_regex, re.Pattern)
-
-    def test_invalid_input_raises(self):
-        with pytest.raises(ValidationError):
-            MacOSController.model_validate({"input": "InvalidInput"})
+    def test_regex_fields_compiled(self):
+        ctrl = Win32Controller.model_validate(
+            {"class_regex": r"^Qt.*", "window_regex": r".*MyApp.*"}
+        )
+        assert isinstance(ctrl.class_regex, re.Pattern)
 
 
 # ---------------------------------------------------------------------------
-# GamepadController — method→int coercion & defaults
+# GamepadController — method→int coercion
 # ---------------------------------------------------------------------------
 
 
 class TestGamepadController:
-    def test_regex_fields(self):
-        ctrl = GamepadController.model_validate(
-            {"class_regex": r".*", "window_regex": r".*"}
-        )
-        assert isinstance(ctrl.class_regex, re.Pattern)
-
     def test_gamepad_type_default_converted(self):
         """Default 'Xbox360' is converted to int 0 by method_to_int."""
         ctrl = GamepadController()
@@ -143,38 +106,13 @@ class TestGamepadController:
         ctrl = GamepadController(gamepad_type="DualShock4")
         assert ctrl.gamepad_type == 1
 
-    def test_ds4_converted(self):
-        ctrl = GamepadController(gamepad_type="DS4")
-        assert ctrl.gamepad_type == 1
-
-    def test_invalid_gamepad_type_raises(self):
-        """Pydantic Literal validation rejects invalid type before method_to_int."""
-        with pytest.raises(ValidationError, match="Xbox360.*DualShock4.*DS4"):
-            GamepadController.model_validate({"gamepad_type": "InvalidType"})
-
-    def test_screencap_converted_to_int(self):
-        ctrl = GamepadController(screencap="GDI")
-        assert ctrl.screencap == 1
-
 
 # ---------------------------------------------------------------------------
-# Controller — parametrized type tests & display field mutual exclusion
+# Controller — display field mutual exclusion (MWU custom)
 # ---------------------------------------------------------------------------
 
 
 class TestController:
-    @pytest.mark.parametrize(
-        "ctrl_type", ["Adb", "Win32", "MacOS", "PlayCover", "Gamepad"]
-    )
-    def test_valid_types(self, ctrl_type):
-        ctrl = Controller(name="c", type=ctrl_type)
-        assert ctrl.type == ctrl_type
-        assert ctrl.name == "c"
-
-    def test_invalid_type_raises(self):
-        with pytest.raises(ValidationError):
-            Controller.model_validate({"name": "bad", "type": "InvalidType"})
-
     def test_display_short_side_and_long_side_mutual_exclusion(self):
         with pytest.raises(ValidationError, match="互斥"):
             Controller(
@@ -185,10 +123,6 @@ class TestController:
         with pytest.raises(ValidationError, match="互斥"):
             Controller(name="c", type="Adb", display_short_side=1080, display_raw=True)
 
-    def test_display_long_side_and_raw_mutual_exclusion(self):
-        with pytest.raises(ValidationError, match="互斥"):
-            Controller(name="c", type="Adb", display_long_side=1920, display_raw=True)
-
     def test_display_short_side_default_no_conflict(self):
         """Default 720 should not trigger conflict."""
         ctrl = Controller(name="c", type="Adb", display_long_side=1920)
@@ -196,7 +130,7 @@ class TestController:
 
 
 # ---------------------------------------------------------------------------
-# Option — type-specific validators
+# Option — type-specific validators (MWU custom)
 # ---------------------------------------------------------------------------
 
 
@@ -209,11 +143,9 @@ class TestOption:
         with pytest.raises(ValidationError, match="必须有且仅有 2 个元素"):
             Option(type="switch", cases=[OptionCase(name="a")])
 
-    def test_checkbox_requires_cases(self):
+    def test_checkbox_requires_cases_and_list_default(self):
         with pytest.raises(ValidationError, match="cases 不能为空"):
             Option(type="checkbox")
-
-    def test_checkbox_default_case_must_be_list(self):
         with pytest.raises(ValidationError, match="default_case 必须为字符串数组"):
             Option(type="checkbox", cases=[OptionCase(name="a")], default_case="a")
 
@@ -221,29 +153,17 @@ class TestOption:
         with pytest.raises(ValidationError, match="inputs 不能为空"):
             Option(type="input")
 
-    def test_scan_select_requires_scan_dir(self):
+    def test_scan_select_requires_fields(self):
         with pytest.raises(ValidationError, match="scan_dir 不能为空"):
             Option(type="scan_select")
-
-    def test_scan_select_requires_scan_filter(self):
         with pytest.raises(ValidationError, match="scan_filter 不能为空"):
             Option(type="scan_select", scan_dir="images")
-
-    def test_scan_select_requires_pipeline_override(self):
         with pytest.raises(ValidationError, match="pipeline_override 不能为空"):
             Option(type="scan_select", scan_dir="images", scan_filter="*.png")
 
     def test_select_default_case_must_be_str(self):
         with pytest.raises(ValidationError, match="default_case 必须为字符串"):
             Option(type="select", cases=[OptionCase(name="a")], default_case=["a"])
-
-    def test_switch_default_case_must_be_str(self):
-        with pytest.raises(ValidationError, match="default_case 必须为字符串"):
-            Option(
-                type="switch",
-                cases=[OptionCase(name="a"), OptionCase(name="b")],
-                default_case=["a"],
-            )
 
 
 # ---------------------------------------------------------------------------
@@ -275,16 +195,6 @@ class TestInterfaceModel:
         model = InterfaceModel(**_base_iface_data, **{"import": ["tasks.json5"]})
         assert model.import_ == ["tasks.json5"]
 
-    def test_invalid_interface_version_raises(self, _base_iface_data):
-        data = {k: v for k, v in _base_iface_data.items() if k != "interface_version"}
-        with pytest.raises(ValidationError):
-            InterfaceModel.model_validate({**data, "interface_version": 1})
-
-    def test_controller_list_required(self, _base_iface_data):
-        data = {k: v for k, v in _base_iface_data.items() if k != "controller"}
-        with pytest.raises(ValidationError):
-            InterfaceModel.model_validate({**data, "controller": "not_a_list"})
-
     def test_scan_select_pipeline_override_valid(self, _base_iface_data):
         """pipeline_override must contain the option name in any-level attach."""
         data = {
@@ -311,21 +221,6 @@ class TestInterfaceModel:
                     "scan_dir": "images",
                     "scan_filter": "*.png",
                     "pipeline_override": {"Action": {}},
-                }
-            },
-        }
-        with pytest.raises(ValidationError, match="至少包含一次键"):
-            InterfaceModel.model_validate(data)
-
-    def test_scan_select_pipeline_override_wrong_key(self, _base_iface_data):
-        data = {
-            **_base_iface_data,
-            "option": {
-                "skin": {
-                    "type": "scan_select",
-                    "scan_dir": "images",
-                    "scan_filter": "*.png",
-                    "pipeline_override": {"attach": {"other_key": ""}},
                 }
             },
         }

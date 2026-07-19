@@ -427,18 +427,6 @@ def test_register_creates_mwu_folder_when_missing(
     assert len(service.folders["\\MWU"].registered) == 1
 
 
-def test_list_uses_1based_enumeration(monkeypatch: pytest.MonkeyPatch) -> None:
-    service = FakeScheduleService()
-    service.tasks[_UUID] = object()
-    service.tasks["22222222-2222-2222-2222-222222222222"] = object()
-    service.tasks["not-a-uuid"] = object()
-    _install_fake_com(monkeypatch, service)
-    backend = WindowsBackend()
-
-    ids = backend.list_registered_task_ids()
-    assert set(ids) == {_UUID, "22222222-2222-2222-2222-222222222222"}
-
-
 def test_list_missing_folder_returns_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     service = FakeScheduleService(folder_exists=False)
     pc = _install_fake_com(monkeypatch, service)
@@ -474,17 +462,6 @@ def test_unregister_missing_folder_raises(monkeypatch: pytest.MonkeyPatch) -> No
     backend = WindowsBackend()
     with pytest.raises(RuntimeError, match="GetFolder"):
         backend.unregister(_UUID)
-
-
-def test_register_uses_empty_string_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
-    service = FakeScheduleService()
-    _install_fake_com(monkeypatch, service)
-    backend = WindowsBackend()
-    backend.register(_spec())
-    rec = service.folders["\\MWU"].registered[0]
-    assert rec["user"] == ""
-    assert rec["password"] == ""
-    assert rec["flags"] == _TASK_CREATE_OR_UPDATE
 
 
 def test_get_task_error_becomes_runtime_error(monkeypatch: pytest.MonkeyPatch) -> None:

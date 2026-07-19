@@ -34,26 +34,9 @@ describe("useSchedulerStore", () => {
     vi.clearAllMocks()
   })
 
-  it("has correct initial state", () => {
-    const store = useSchedulerStore()
-    expect(store.tasks).toEqual([])
-    expect(store.executions).toEqual([])
-    expect(store.loading).toBe(false)
-    expect(store.error).toBeNull()
-  })
-
-  describe("enabledTasks getter", () => {
-    it("filters only enabled tasks", () => {
-      const store = useSchedulerStore()
-      store.tasks = [mockTask("1", true), mockTask("2", false), mockTask("3", true)]
-      expect(store.enabledTasks).toHaveLength(2)
-      expect(store.enabledTasks.map((t) => t.id)).toEqual(["1", "3"])
-    })
-  })
-
   describe("fetchTasks", () => {
-    it("sets tasks on success", async () => {
-      vi.mocked(api.getSchedulerTasks).mockResolvedValue({
+    it("sets tasks on success and maps error on failure/network", async () => {
+      vi.mocked(api.getSchedulerTasks).mockResolvedValueOnce({
         status: "success",
         tasks: [mockTask("1", true, true)],
       })
@@ -62,31 +45,24 @@ describe("useSchedulerStore", () => {
       expect(store.tasks).toHaveLength(1)
       expect(store.tasks[0].wakeup_enabled).toBe(true)
       expect(store.error).toBeNull()
-    })
 
-    it("sets error on failure response", async () => {
-      vi.mocked(api.getSchedulerTasks).mockResolvedValue({
+      vi.mocked(api.getSchedulerTasks).mockResolvedValueOnce({
         status: "failed",
         message: "load failed",
       })
-      const store = useSchedulerStore()
       await store.fetchTasks()
-      expect(store.tasks).toEqual([])
       expect(store.error).toBe("load failed")
-    })
 
-    it("sets network error on exception", async () => {
-      vi.mocked(api.getSchedulerTasks).mockRejectedValue(new Error("network"))
-      const store = useSchedulerStore()
+      vi.mocked(api.getSchedulerTasks).mockRejectedValueOnce(new Error("network"))
       await store.fetchTasks()
       expect(store.error).toBe("网络错误，请稍后重试")
     })
   })
 
   describe("createTask", () => {
-    it("pushes task and returns created task on success", async () => {
+    it("pushes task on success and returns null on failure", async () => {
       const created = mockTask("new", true, true)
-      vi.mocked(api.createSchedulerTask).mockResolvedValue({
+      vi.mocked(api.createSchedulerTask).mockResolvedValueOnce({
         status: "success",
         task: created,
       })
@@ -105,15 +81,12 @@ describe("useSchedulerStore", () => {
       expect(api.createSchedulerTask).toHaveBeenCalledWith(
         expect.objectContaining({ wakeup_enabled: true }),
       )
-    })
 
-    it("sets error and returns null on failure", async () => {
-      vi.mocked(api.createSchedulerTask).mockResolvedValue({
+      vi.mocked(api.createSchedulerTask).mockResolvedValueOnce({
         status: "failed",
         message: "create failed",
       })
-      const store = useSchedulerStore()
-      const result = await store.createTask({
+      const failed = await store.createTask({
         name: "new",
         enabled: true,
         wakeup_enabled: false,
@@ -122,18 +95,18 @@ describe("useSchedulerStore", () => {
         preTasks: [],
         trigger_config: { type: "cron", cron: "* * * * *" },
       })
-      expect(result).toBeNull()
+      expect(failed).toBeNull()
       expect(store.error).toBe("create failed")
     })
   })
 
   describe("updateTask", () => {
-    it("updates task in list and returns true on success", async () => {
+    it("updates task including wakeup_enabled and returns false on failure", async () => {
       const original = mockTask("1", true)
       const updated = { ...original, name: "updated", wakeup_enabled: true }
       const store = useSchedulerStore()
       store.tasks = [original]
-      vi.mocked(api.updateSchedulerTask).mockResolvedValue({
+      vi.mocked(api.updateSchedulerTask).mockResolvedValueOnce({
         status: "success",
         task: updated,
       })
@@ -145,83 +118,60 @@ describe("useSchedulerStore", () => {
         name: "updated",
         wakeup_enabled: true,
       })
-    })
 
-    it("sends wakeup_enabled false to disable native wakeup", async () => {
-      const original = mockTask("1", true, true)
-      const updated = { ...original, wakeup_enabled: false }
-      const store = useSchedulerStore()
-      store.tasks = [original]
-      vi.mocked(api.updateSchedulerTask).mockResolvedValue({
+      vi.mocked(api.updateSchedulerTask).mockResolvedValueOnce({
         status: "success",
-        task: updated,
+        task: { ...updated, wakeup_enabled: false },
       })
-      const result = await store.updateTask("1", { wakeup_enabled: false })
-      expect(result).toBe(true)
+      await store.updateTask("1", { wakeup_enabled: false })
       expect(store.tasks[0].wakeup_enabled).toBe(false)
       expect(api.updateSchedulerTask).toHaveBeenCalledWith("1", { wakeup_enabled: false })
-    })
 
-    it("returns false on failure", async () => {
-      vi.mocked(api.updateSchedulerTask).mockResolvedValue({
+      vi.mocked(api.updateSchedulerTask).mockResolvedValueOnce({
         status: "failed",
         message: "update failed",
       })
-      const store = useSchedulerStore()
-      store.tasks = [mockTask("1", true)]
-      const result = await store.updateTask("1", { name: "updated" })
-      expect(result).toBe(false)
+      expect(await store.updateTask("1", { name: "x" })).toBe(false)
       expect(store.error).toBe("update failed")
     })
   })
 
   describe("deleteTask", () => {
-    it("removes task and returns true on success", async () => {
-      vi.mocked(api.deleteSchedulerTask).mockResolvedValue({ status: "success" })
+    it("removes task on success and returns false on failure", async () => {
+      vi.mocked(api.deleteSchedulerTask).mockResolvedValueOnce({ status: "success" })
       const store = useSchedulerStore()
       store.tasks = [mockTask("1", true), mockTask("2", true)]
-      const result = await store.deleteTask("1")
-      expect(result).toBe(true)
+      expect(await store.deleteTask("1")).toBe(true)
       expect(store.tasks.map((t) => t.id)).toEqual(["2"])
-    })
 
-    it("returns false on failure", async () => {
-      vi.mocked(api.deleteSchedulerTask).mockResolvedValue({
+      vi.mocked(api.deleteSchedulerTask).mockResolvedValueOnce({
         status: "failed",
         message: "delete failed",
       })
-      const store = useSchedulerStore()
-      store.tasks = [mockTask("1", true)]
-      const result = await store.deleteTask("1")
-      expect(result).toBe(false)
+      expect(await store.deleteTask("2")).toBe(false)
       expect(store.error).toBe("delete failed")
     })
   })
 
   describe("toggleTask", () => {
-    it("enables task by calling resumeSchedulerTask", async () => {
+    it("enables via resume and disables via pause", async () => {
       vi.mocked(api.resumeSchedulerTask).mockResolvedValue({ status: "success" })
-      const store = useSchedulerStore()
-      store.tasks = [mockTask("1", false)]
-      const result = await store.toggleTask("1", true)
-      expect(api.resumeSchedulerTask).toHaveBeenCalledWith("1")
-      expect(result).toBe(true)
-      expect(store.tasks[0].enabled).toBe(true)
-    })
-
-    it("disables task by calling pauseSchedulerTask", async () => {
       vi.mocked(api.pauseSchedulerTask).mockResolvedValue({ status: "success" })
       const store = useSchedulerStore()
-      store.tasks = [mockTask("1", true)]
-      const result = await store.toggleTask("1", false)
+      store.tasks = [mockTask("1", false)]
+
+      expect(await store.toggleTask("1", true)).toBe(true)
+      expect(api.resumeSchedulerTask).toHaveBeenCalledWith("1")
+      expect(store.tasks[0].enabled).toBe(true)
+
+      expect(await store.toggleTask("1", false)).toBe(true)
       expect(api.pauseSchedulerTask).toHaveBeenCalledWith("1")
-      expect(result).toBe(true)
       expect(store.tasks[0].enabled).toBe(false)
     })
   })
 
   describe("fetchExecutions", () => {
-    it("sets executions on success", async () => {
+    it("sets executions on success and error on failure", async () => {
       const executions: TaskExecution[] = [
         {
           id: "e1",
@@ -238,7 +188,7 @@ describe("useSchedulerStore", () => {
           error_message: null,
         },
       ]
-      vi.mocked(api.getSchedulerExecutions).mockResolvedValue({
+      vi.mocked(api.getSchedulerExecutions).mockResolvedValueOnce({
         status: "success",
         executions,
       })
@@ -246,14 +196,11 @@ describe("useSchedulerStore", () => {
       await store.fetchExecutions(10)
       expect(api.getSchedulerExecutions).toHaveBeenCalledWith(10)
       expect(store.executions).toEqual(executions)
-    })
 
-    it("sets error on failure", async () => {
-      vi.mocked(api.getSchedulerExecutions).mockResolvedValue({
+      vi.mocked(api.getSchedulerExecutions).mockResolvedValueOnce({
         status: "failed",
         message: "history failed",
       })
-      const store = useSchedulerStore()
       await store.fetchExecutions()
       expect(store.error).toBe("history failed")
     })

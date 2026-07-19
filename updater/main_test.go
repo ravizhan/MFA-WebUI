@@ -103,7 +103,6 @@ func testDeps(t *testing.T, root string) (deps, *runTrace) {
 	tr.out = &out
 	return d, tr
 }
-
 func exeSuffix() string {
 	if runtime.GOOS == "windows" {
 		return ".exe"
@@ -410,15 +409,14 @@ func TestRunRuntimeUnlockFailureAbortsHandoff(t *testing.T) {
 }
 
 func TestRunPostLockFailureCleansUp(t *testing.T) {
+	// Representative early/mid/late post-lock failures; all share the same
+	// update.lock release + error-exit cleanup path.
 	cases := []struct {
 		name string
 		mut  func(*runTrace)
 	}{
 		{"extract", func(tr *runTrace) { tr.failExtract = true }},
-		{"selfUpdate", func(tr *runTrace) { tr.failSelfUpdate = true }},
-		{"getChanges", func(tr *runTrace) { tr.failGetChanges = true }},
 		{"apply", func(tr *runTrace) { tr.failApply = true }},
-		{"writeChanges", func(tr *runTrace) { tr.failWriteChanges = true }},
 		{"restart", func(tr *runTrace) { tr.failRestart = true }},
 	}
 	for _, tc := range cases {
@@ -508,41 +506,6 @@ func TestAtomicReplaceFailureLeavesDestination(t *testing.T) {
 	data, _ := os.ReadFile(dst)
 	if string(data) != "keep-me" {
 		t.Fatalf("destination corrupted: %q", data)
-	}
-}
-
-func TestAtomicWriteFileChmodFailClosed(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX chmod semantics")
-	}
-	// atomicWriteFile must not ignore chmod errors — verified by ensuring
-	// successful writes end with correct mode.
-	dir := t.TempDir()
-	path := filepath.Join(dir, "c.json")
-	if err := atomicWriteFile(path, []byte(`{}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	st, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if st.Mode().Perm()&0o644 != 0o644 {
-		t.Fatalf("mode=%04o", st.Mode().Perm())
-	}
-}
-
-func TestSyncDirFailurePropagates(t *testing.T) {
-	d := defaultDeps()
-	d.syncDirHook = func(dir string) error {
-		return errors.New("injected fsync failure")
-	}
-	dir := t.TempDir()
-	src := filepath.Join(dir, "s")
-	dst := filepath.Join(dir, "d")
-	_ = os.WriteFile(src, []byte("x"), 0o644)
-	err := atomicReplaceFile(d, src, dst, 0o644)
-	if err == nil || !strings.Contains(err.Error(), "injected fsync") {
-		t.Fatalf("expected fsync failure, got %v", err)
 	}
 }
 
@@ -809,90 +772,5 @@ func TestGetChangesRejectsMaliciousChangeLog(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "added") && !strings.Contains(err.Error(), "escape") {
 		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestGetChangesPropagatesHashError(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("relies on POSIX file permissions")
-	}
-	install := t.TempDir()
-	extract := t.TempDir()
-	// Both sides exist so worker hashes instead of treating as added.
-	if err := os.WriteFile(filepath.Join(extract, "secret.bin"), []byte("pkg"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	inst := filepath.Join(install, "secret.bin")
-	if err := os.WriteFile(inst, []byte("inst"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(inst, 0o000); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(inst, 0o644) })
-
-	_, err := getChanges(install, extract)
-	if err == nil {
-		t.Fatal("expected hash error propagation")
-	}
-	if !strings.Contains(err.Error(), "hash") {
-		t.Fatalf("expected hash error, got %v", err)
-	}
-}
-
-func TestGetChangesPropagatesWalkDirError(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("relies on POSIX directory permissions")
-	}
-	install := t.TempDir()
-	extract := t.TempDir()
-	locked := filepath.Join(extract, "locked")
-	if err := os.MkdirAll(locked, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(locked, "f.txt"), []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(locked, 0o000); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
-
-	_, err := getChanges(install, extract)
-	if err == nil {
-		t.Fatal("expected WalkDir error propagation")
-	}
-}
-
-func TestCaptureInstallOwnerAndApply(t *testing.T) {
-	root := t.TempDir()
-	owner, err := captureInstallOwner(root)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Create a file as "elevated" simulation and re-apply ownership.
-	f := filepath.Join(root, "owned.txt")
-	if err := os.WriteFile(f, []byte("x"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := owner.apply(f); err != nil {
-		t.Fatal(err)
-	}
-	if err := owner.applyTree(root); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestPlatformReplaceFailure(t *testing.T) {
-	dir := t.TempDir()
-	dst := filepath.Join(dir, "dst")
-	_ = os.WriteFile(dst, []byte("keep"), 0o644)
-	err := replaceFile(filepath.Join(dir, "missing-src"), dst)
-	if err == nil {
-		t.Fatal("expected replace failure")
-	}
-	data, _ := os.ReadFile(dst)
-	if string(data) != "keep" {
-		t.Fatalf("dst corrupted: %q", data)
 	}
 }

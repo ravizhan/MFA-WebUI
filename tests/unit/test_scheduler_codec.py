@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
-from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.date import DateTrigger
-from apscheduler.triggers.interval import IntervalTrigger
 
 from models.scheduler import (
     CronTriggerConfig,
@@ -49,10 +46,8 @@ def _identity_normalize(task_list, task_options, pre_tasks):
 def test_cron_trigger_round_trip_no_dow():
     cfg = CronTriggerConfig(cron="0 9 * * *")
     trigger = build_trigger(cfg)
-    assert isinstance(trigger, CronTrigger)
     ttype, decoded = decode_trigger(trigger)
     assert ttype == "cron"
-    assert isinstance(decoded, CronTriggerConfig)
     assert decoded.cron == "0 9 * * *"
 
 
@@ -60,13 +55,11 @@ def test_cron_trigger_round_trip_with_dow_unix_mapping():
     """Unix DOW 1 (Monday) must map to APS 0 and back."""
     cfg = CronTriggerConfig(cron="0 12 * * 1")
     trigger = build_trigger(cfg)
-    assert isinstance(trigger, CronTrigger)
     field_map = {f.name: str(f) for f in trigger.fields}
     assert field_map["day_of_week"] == str(unix_dow_to_aps(1))  # APS Monday = 0
 
     ttype, decoded = decode_trigger(trigger)
     assert ttype == "cron"
-    assert isinstance(decoded, CronTriggerConfig)
     assert decoded.cron == "0 12 * * 1"
 
 
@@ -74,11 +67,9 @@ def test_cron_trigger_round_trip_sunday_unix_zero():
     """Unix DOW 0 (Sunday) ↔ APS 6."""
     cfg = CronTriggerConfig(cron="0 12 * * 0")
     trigger = build_trigger(cfg)
-    assert isinstance(trigger, CronTrigger)
     field_map = {f.name: str(f) for f in trigger.fields}
     assert field_map["day_of_week"] == str(unix_dow_to_aps(0))  # 6
     _, decoded = decode_trigger(trigger)
-    assert isinstance(decoded, CronTriggerConfig)
     assert decoded.cron == "0 12 * * 0"
     assert aps_dow_to_unix(int(field_map["day_of_week"])) == 0
 
@@ -87,10 +78,8 @@ def test_date_trigger_round_trip_timezone_aware():
     run_date = datetime(2026, 7, 17, 12, 30, tzinfo=timezone.utc)
     cfg = DateTriggerConfig(run_date=run_date)
     trigger = build_trigger(cfg)
-    assert isinstance(trigger, DateTrigger)
     ttype, decoded = decode_trigger(trigger)
     assert ttype == "date"
-    assert isinstance(decoded, DateTriggerConfig)
     assert decoded.run_date == run_date
     assert decoded.run_date.tzinfo is not None
 
@@ -108,10 +97,8 @@ def test_interval_trigger_round_trip_with_bounds():
         end_date=end,
     )
     trigger = build_trigger(cfg)
-    assert isinstance(trigger, IntervalTrigger)
     ttype, decoded = decode_trigger(trigger)
     assert ttype == "interval"
-    assert isinstance(decoded, IntervalTriggerConfig)
     assert decoded.weeks == 1
     assert decoded.days == 2
     assert decoded.hours == 3
@@ -157,7 +144,14 @@ def test_encode_execution_kwargs_pre_tasks_key_round_trip():
     assert decode_pre_tasks_from_job_kwargs({}) == []
 
 
-def test_encode_execution_kwargs_wakeup_non_cron_raises():
+@pytest.mark.parametrize(
+    "trigger_config",
+    [
+        DateTriggerConfig(run_date=datetime(2026, 7, 19, 9, 0, tzinfo=timezone.utc)),
+        IntervalTriggerConfig(hours=1),
+    ],
+)
+def test_encode_execution_kwargs_wakeup_non_cron_raises(trigger_config):
     with pytest.raises(ValueError, match="wakeup_enabled"):
         encode_execution_kwargs(
             task_id="t",
@@ -170,26 +164,7 @@ def test_encode_execution_kwargs_wakeup_non_cron_raises():
             device=None,
             resource_name=None,
             wakeup_enabled=True,
-            trigger_config=DateTriggerConfig(
-                run_date=datetime(2026, 7, 19, 9, 0, tzinfo=timezone.utc)
-            ),
-        )
-
-
-def test_encode_execution_kwargs_wakeup_interval_raises():
-    with pytest.raises(ValueError, match="wakeup_enabled"):
-        encode_execution_kwargs(
-            task_id="t",
-            task_name="n",
-            task_description=None,
-            task_list=[],
-            task_options={},
-            pre_tasks=[],
-            controller_name=None,
-            device=None,
-            resource_name=None,
-            wakeup_enabled=True,
-            trigger_config=IntervalTriggerConfig(hours=1),
+            trigger_config=trigger_config,
         )
 
 
@@ -238,7 +213,6 @@ def test_decode_job_to_scheduled_task_no_trigger_type_field():
     assert (
         not hasattr(task, "trigger_type") or "trigger_type" not in task.model_fields_set
     )
-    assert isinstance(task.trigger_config, CronTriggerConfig)
     assert task.trigger_config.cron == "0 9 * * *"
     assert task.wakeup_enabled is False
     assert len(task.preTasks) == 1

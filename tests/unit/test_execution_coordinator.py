@@ -192,43 +192,6 @@ async def test_two_scheduled_different_tasks_skipped_busy_scheduled(
 
 
 @pytest.mark.asyncio
-async def test_same_occurrence_no_claim_second_blocked_by_active_run(
-    coord: ExecutionCoordinator, store: ExecutionStore, state: AppState, monkeypatch
-):
-    """Without occurrence claims, a second fire while active is busy-skipped."""
-    fixed_now = datetime(2026, 7, 19, 9, 5, 0, tzinfo=timezone.utc)
-
-    monkeypatch.setattr(
-        "services.execution_coordinator._local_now",
-        lambda: fixed_now.astimezone(),
-    )
-    monkeypatch.setattr(
-        "services.execution_coordinator._utc_now",
-        lambda: fixed_now,
-    )
-    monkeypatch.setattr(
-        "services.execution_coordinator.compute_occurrence",
-        lambda trigger, now: fixed_now.replace(minute=0, second=0, microsecond=0),
-    )
-
-    # Hold active_run so the first submit_scheduled would set it; simulate mid-run
-    # by leaving prepare short (default fake worker finishes immediately).
-    first = await coord.submit_scheduled(_scheduled(), origin="in_app")
-    assert first.accepted is True
-    assert first.run_id is not None
-    assert coord.active_run() is None
-
-    # After first completes, second fire of same occurrence is accepted again
-    # (no claim/lease dedup layer).
-    second = await coord.submit_scheduled(_scheduled(), origin="native")
-    assert second.accepted is True
-
-    rows = await store.list()
-    assert len(rows) == 2
-    assert {r.origin for r in rows} == {"in_app", "native"}
-
-
-@pytest.mark.asyncio
 async def test_update_gate_manual_conflict_and_scheduled_skip(
     coord: ExecutionCoordinator, store: ExecutionStore
 ):

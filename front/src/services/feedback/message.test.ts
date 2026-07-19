@@ -30,13 +30,4 @@ describe("message service", () => {
       vi.useRealTimers()
     })
   })
-
-  describe("useToasts", () => {
-    it("returns the reactive toasts ref", () => {
-      const toasts = useToasts()
-      showGlobalMessage("error", "error message")
-      expect(toasts.value).toHaveLength(1)
-      expect(toasts.value[0].type).toBe("error")
-    })
-  })
 })

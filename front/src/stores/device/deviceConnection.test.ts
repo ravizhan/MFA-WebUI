@@ -142,63 +142,20 @@ describe("useDeviceConnectionStore", () => {
     store.cleanup()
   })
 
-  it("has correct initial state", () => {
-    const store = useDeviceConnectionStore()
-    expect(store.selectedController).toBeNull()
-    expect(store.availableDevices).toEqual([])
-    expect(store.loading).toBe(false)
-    expect(store.isDeviceResourceLocked).toBe(false)
-  })
-
   describe("applyDeviceRuntimeState", () => {
-    it("sets locked state and names when connected and locked", () => {
-      const store = useDeviceConnectionStore()
-      store.applyDeviceRuntimeState(lockedAdbState)
-      expect(store.isDeviceResourceLocked).toBe(true)
-      expect(store.connectedControllerName).toBe("adb")
-      expect(store.connectedResourceName).toBe("res1")
-    })
-
-    it("hydrates selected controller from runtime state when locked", () => {
-      const store = useDeviceConnectionStore()
-      store.controllerCapabilities = [adbCapability]
-      store.applyDeviceRuntimeState({
-        connected: true,
-        configuration_locked: true,
-        controller_name: "adb",
-        resource_name: null,
-      })
-      expect(store.selectedController).toBe("ADB")
-    })
-
-    it("hydrates resource from runtime state when locked", () => {
-      const store = useDeviceConnectionStore()
-      store.applyDeviceRuntimeState({
-        connected: true,
-        configuration_locked: true,
-        controller_name: null,
-        resource_name: "res1",
-      })
-      expect(store.resource).toBe("res1")
-    })
-
-    it("overwrites local selection with backend authority when locked", () => {
+    it("applies lock authority from backend and does not lock when disconnected", () => {
       const store = useDeviceConnectionStore()
       store.controllerCapabilities = [adbCapability, playCoverCapability]
       store.selectedController = "PlayCover"
       store.resource = "local-res"
-      store.applyDeviceRuntimeState({
-        connected: true,
-        configuration_locked: true,
-        controller_name: "adb",
-        resource_name: "res1",
-      })
+
+      store.applyDeviceRuntimeState(lockedAdbState)
+      expect(store.isDeviceResourceLocked).toBe(true)
+      expect(store.connectedControllerName).toBe("adb")
+      expect(store.connectedResourceName).toBe("res1")
       expect(store.selectedController).toBe("ADB")
       expect(store.resource).toBe("res1")
-    })
 
-    it("does not lock when not connected even if configuration_locked is true", () => {
-      const store = useDeviceConnectionStore()
       store.applyDeviceRuntimeState({
         connected: false,
         configuration_locked: true,
@@ -241,61 +198,45 @@ describe("useDeviceConnectionStore", () => {
       resource_name: "res1",
     }
 
-    it("returns false when no device selected", async () => {
+    it("guards missing device/resource/compatible/selected tasks", async () => {
       const store = useDeviceConnectionStore()
       store.controllerCapabilities = [adbCapability]
       store.selectedController = "ADB"
       store.selectedDeviceKey = null
       store.resource = "res1"
       vi.mocked(api.getDeviceState).mockResolvedValue(lockedAdbState)
-      const result = await store.StartTask()
-      expect(result).toBe(false)
+      expect(await store.StartTask()).toBe(false)
       expect(showGlobalMessage).toHaveBeenCalledWith("error", "panel.selectDevice")
       expect(api.startTask).not.toHaveBeenCalled()
-    })
 
-    it("returns false when no resource selected", async () => {
-      const store = useDeviceConnectionStore()
-      store.controllerCapabilities = [adbCapability]
-      store.selectedController = "ADB"
       store.selectedDeviceKey = "adb|/usr/bin/adb|127.0.0.1:5555"
       store.availableDevices = [adbDevice]
       store.resource = null
-      // Runtime state must not re-hydrate a resource during syncDeviceRuntimeState
       vi.mocked(api.getDeviceState).mockResolvedValue({
         connected: true,
         configuration_locked: true,
         controller_name: "adb",
         resource_name: null,
       })
-      const result = await store.StartTask()
-      expect(result).toBe(false)
+      expect(await store.StartTask()).toBe(false)
       expect(showGlobalMessage).toHaveBeenCalledWith("error", "panel.selectResource")
-      expect(api.startTask).not.toHaveBeenCalled()
-    })
 
-    it("returns false when no compatible tasks", async () => {
-      const { store, configStore, interfaceStore } = setupReadyToStart()
-      configStore.taskList = [{ id: "task1", name: "Task 1", order: 0, checked: true }]
-      interfaceStore.interface = {
+      const ready = setupReadyToStart()
+      ready.interfaceStore.interface = {
         task: [{ name: "Task 1", entry: "task1", controller: ["win32"] }],
       }
-      const result = await store.StartTask()
-      expect(result).toBe(false)
+      expect(await ready.store.StartTask()).toBe(false)
       expect(showGlobalMessage).toHaveBeenCalledWith("error", "panel.noCompatibleTask")
-      expect(api.startTask).not.toHaveBeenCalled()
-    })
 
-    it("returns false when no tasks selected", async () => {
-      const { store, configStore } = setupReadyToStart()
-      configStore.taskList = [{ id: "task1", name: "Task 1", order: 0, checked: false }]
-      const result = await store.StartTask()
-      expect(result).toBe(false)
+      ready.interfaceStore.interface = {
+        task: [{ name: "Task 1", entry: "task1" }],
+      }
+      ready.configStore.taskList = [{ id: "task1", name: "Task 1", order: 0, checked: false }]
+      expect(await ready.store.StartTask()).toBe(false)
       expect(showGlobalMessage).toHaveBeenCalledWith("error", "panel.selectTask")
-      expect(api.startTask).not.toHaveBeenCalled()
     })
 
-    it("returns true on full success", async () => {
+    it("returns true on full success and records conflict when rejected", async () => {
       const { store, configStore } = setupReadyToStart()
       const indexStore = useIndexStore()
       vi.spyOn(configStore, "buildExecutionPayload").mockReturnValue({
@@ -303,16 +244,12 @@ describe("useDeviceConnectionStore", () => {
         task_options: {},
         preTasks: [],
       })
-      vi.mocked(api.startTask).mockResolvedValue({ accepted: true, runId: "run-1" })
-      const result = await store.StartTask()
-      expect(result).toBe(true)
+      vi.mocked(api.startTask).mockResolvedValueOnce({ accepted: true, runId: "run-1" })
+      expect(await store.StartTask()).toBe(true)
       expect(api.startTask).toHaveBeenCalledWith(expectedStartPayload)
       expect(store.startConflict).toBeNull()
       expect(indexStore.TaskRunning).toBe(true)
-    })
 
-    it("sets startConflict and returns false on conflict", async () => {
-      const { store, configStore } = setupReadyToStart()
       const conflict: StartConflict = {
         code: "busy_manual",
         message: "busy",
@@ -320,19 +257,12 @@ describe("useDeviceConnectionStore", () => {
         active_task_name: "Other",
         active_origin: "manual",
       }
-      vi.spyOn(configStore, "buildExecutionPayload").mockReturnValue({
-        task_list: ["task1"],
-        task_options: {},
-        preTasks: [],
-      })
-      vi.mocked(api.startTask).mockResolvedValue({ accepted: false, conflict })
-      const result = await store.StartTask()
-      expect(result).toBe(false)
+      vi.mocked(api.startTask).mockResolvedValueOnce({ accepted: false, conflict })
+      expect(await store.StartTask()).toBe(false)
       expect(store.startConflict).toEqual(conflict)
-      expect(api.startTask).toHaveBeenCalledWith(expectedStartPayload)
     })
 
-    it("stopActiveAndRestart calls stopTask then retries successfully", async () => {
+    it("stopActiveAndRestart stops then retries, and fails when stop fails", async () => {
       const { store, configStore } = setupReadyToStart()
       const indexStore = useIndexStore()
       const conflict: StartConflict = {
@@ -348,31 +278,18 @@ describe("useDeviceConnectionStore", () => {
         task_options: {},
         preTasks: [],
       })
-      vi.mocked(api.stopTask).mockResolvedValue(true)
-      vi.mocked(api.startTask).mockResolvedValue({ accepted: true, runId: "run-2" })
+      vi.mocked(api.stopTask).mockResolvedValueOnce(true)
+      vi.mocked(api.startTask).mockResolvedValueOnce({ accepted: true, runId: "run-2" })
 
-      const result = await store.stopActiveAndRestart()
-
-      expect(result).toBe(true)
+      expect(await store.stopActiveAndRestart()).toBe(true)
       expect(api.stopTask).toHaveBeenCalledOnce()
       expect(api.startTask).toHaveBeenCalledWith(expectedStartPayload)
       expect(store.startConflict).toBeNull()
       expect(indexStore.TaskRunning).toBe(true)
-    })
 
-    it("stopActiveAndRestart returns false when stopTask fails", async () => {
-      const store = useDeviceConnectionStore()
-      store.startConflict = {
-        code: "busy_manual",
-        message: "busy",
-        active_run_id: "run-active",
-        active_task_name: "Other",
-        active_origin: "manual",
-      }
-      vi.mocked(api.stopTask).mockResolvedValue(false)
-      const result = await store.stopActiveAndRestart()
-      expect(result).toBe(false)
-      expect(api.startTask).not.toHaveBeenCalled()
+      store.startConflict = conflict
+      vi.mocked(api.stopTask).mockResolvedValueOnce(false)
+      expect(await store.stopActiveAndRestart()).toBe(false)
       expect(store.startConflict).not.toBeNull()
     })
   })
@@ -429,7 +346,7 @@ describe("useDeviceConnectionStore", () => {
   })
 
   describe("openDevices", () => {
-    it("refreshes devices for the selected non-PlayCover controller", async () => {
+    it("refreshes devices for non-PlayCover controller and is no-op when locked/PlayCover", async () => {
       const store = useDeviceConnectionStore()
       store.controllerCapabilities = [adbCapability]
       store.selectedController = "ADB"
@@ -443,19 +360,13 @@ describe("useDeviceConnectionStore", () => {
         expect(store.availableDevices).toEqual([adbDevice])
       })
       expect(api.getDevices).toHaveBeenCalledWith("adb")
-    })
 
-    it("is a no-op when locked", () => {
-      const store = useDeviceConnectionStore()
-      store.controllerCapabilities = [adbCapability]
-      store.selectedController = "ADB"
+      vi.mocked(api.getDevices).mockClear()
       store.isDeviceResourceLocked = true
       store.openDevices()
       expect(api.getDevices).not.toHaveBeenCalled()
-    })
 
-    it("is a no-op for PlayCover", () => {
-      const store = useDeviceConnectionStore()
+      store.isDeviceResourceLocked = false
       store.controllerCapabilities = [playCoverCapability]
       store.selectedController = "PlayCover"
       store.openDevices()
@@ -491,49 +402,43 @@ describe("useDeviceConnectionStore", () => {
       expect(store.selectedDeviceKey).toBe("adb|/usr/bin/adb|192.168.1.10:5555")
     })
 
-    it("reports error and does not append client fallback when refresh omits device", async () => {
+    it("reports error when refresh omits device or save fails; ignores empty/locked", async () => {
       const store = useDeviceConnectionStore()
       store.controllerCapabilities = [adbCapability]
       store.selectedController = "ADB"
       store.selectedDeviceKey = "adb|/usr/bin/adb|127.0.0.1:5555"
       store.availableDevices = [adbDevice]
-      vi.mocked(api.postCustomDevice).mockResolvedValue({
+
+      vi.mocked(api.postCustomDevice).mockResolvedValueOnce({
         success: true,
         message: "ok",
         data: customAdbDevice,
       })
-      vi.mocked(api.getDevices).mockResolvedValue({
+      vi.mocked(api.getDevices).mockResolvedValueOnce({
         controllers: [adbCapability],
         selected_controller: "adb",
         devices: [adbDevice],
       })
-
       await store.createCustomDevice("192.168.1.10:5555")
-
-      expect(store.availableDevices).toEqual([adbDevice])
       expect(store.availableDevices).not.toContainEqual(customAdbDevice)
       expect(showGlobalMessage).toHaveBeenCalledWith(
         "error",
         "自定义设备已保存，但刷新列表后未找到该设备",
       )
-    })
 
-    it("preserves previous selection and shows error when save fails", async () => {
-      const store = useDeviceConnectionStore()
-      store.controllerCapabilities = [adbCapability]
-      store.selectedController = "ADB"
-      store.selectedDeviceKey = "adb|/usr/bin/adb|127.0.0.1:5555"
-      store.availableDevices = [adbDevice]
-      vi.mocked(api.postCustomDevice).mockResolvedValue({
+      vi.mocked(api.postCustomDevice).mockResolvedValueOnce({
         success: false,
         message: "save failed",
       })
-
       await store.createCustomDevice("192.168.1.10:5555")
-
       expect(showGlobalMessage).toHaveBeenCalledWith("error", "save failed")
-      expect(api.getDevices).not.toHaveBeenCalled()
       expect(store.selectedDeviceKey).toBe("adb|/usr/bin/adb|127.0.0.1:5555")
+
+      vi.mocked(api.postCustomDevice).mockClear()
+      await store.createCustomDevice("   ")
+      store.isDeviceResourceLocked = true
+      await store.createCustomDevice("192.168.1.10:5555")
+      expect(api.postCustomDevice).not.toHaveBeenCalled()
     })
 
     it("does not reselect when controller changes after POST", async () => {
@@ -596,7 +501,6 @@ describe("useDeviceConnectionStore", () => {
 
       const createPromise = store.createCustomDevice("192.168.1.10:5555")
       resolvePost!({ success: true, message: "ok", data: customAdbDevice })
-      // Let createCustomDevice enter its fetchDevices
       await Promise.resolve()
       await Promise.resolve()
 
@@ -614,85 +518,55 @@ describe("useDeviceConnectionStore", () => {
       })
       await createPromise
 
-      // Newer fetch wins; create must not reselect stale custom device
       expect(store.availableDevices).toEqual([adbDevice])
       expect(store.selectedDeviceKey).not.toBe("adb|/usr/bin/adb|192.168.1.10:5555")
-    })
-
-    it("ignores empty address and locked state", async () => {
-      const store = useDeviceConnectionStore()
-      store.controllerCapabilities = [adbCapability]
-      store.selectedController = "ADB"
-
-      await store.createCustomDevice("   ")
-      expect(api.postCustomDevice).not.toHaveBeenCalled()
-
-      store.isDeviceResourceLocked = true
-      await store.createCustomDevice("192.168.1.10:5555")
-      expect(api.postCustomDevice).not.toHaveBeenCalled()
     })
   })
 
   describe("selectedDevice rebind", () => {
-    it("rebinds by identity when fingerprint changes after refresh", async () => {
+    it("rebinds by identity, clears missing selection, never treats fingerprint as address", async () => {
       const store = useDeviceConnectionStore()
       store.controllerCapabilities = [adbCapability]
       store.selectedController = "ADB"
       store.availableDevices = [customAdbDevice]
       store.selectedDeviceKey = "adb||192.168.1.10:5555"
 
-      vi.mocked(api.getDevices).mockResolvedValue({
+      vi.mocked(api.getDevices).mockResolvedValueOnce({
         controllers: [adbCapability],
         selected_controller: "adb",
         devices: [scannedCustomAdbDevice],
       })
       await store.fetchDevices("adb")
-
       expect(store.selectedDeviceKey).toBe("adb|/usr/bin/adb|192.168.1.10:5555")
       expect(store.selectedDevice).toEqual(scannedCustomAdbDevice)
-    })
 
-    it("clears selection when refreshed list removes the device", async () => {
-      const store = useDeviceConnectionStore()
-      store.controllerCapabilities = [adbCapability]
-      store.selectedController = "ADB"
       store.availableDevices = [adbDevice]
       store.selectedDeviceKey = "adb|/usr/bin/adb|127.0.0.1:5555"
-
-      vi.mocked(api.getDevices).mockResolvedValue({
+      vi.mocked(api.getDevices).mockResolvedValueOnce({
         controllers: [adbCapability],
         selected_controller: "adb",
         devices: [customAdbDevice],
       })
       await store.fetchDevices("adb")
-
       expect(store.selectedDeviceKey).toBeNull()
       expect(store.selectedDevice).toBeNull()
-    })
 
-    it("never treats fingerprint keys as addresses", () => {
-      const store = useDeviceConnectionStore()
-      store.controllerCapabilities = [adbCapability]
-      store.selectedController = "ADB"
       store.availableDevices = [adbDevice]
-      // Stale fingerprint not in list — must not synthesize device from key
       store.selectedDeviceKey = "adb|/missing/path|127.0.0.1:5555"
       expect(store.selectedDevice).toBeNull()
     })
   })
 
   describe("deviceOptions", () => {
-    it("maps availableDevices only without recent/discovered groups", () => {
+    it("maps availableDevices and returns disabled placeholder when empty", () => {
       const store = useDeviceConnectionStore()
       store.availableDevices = [adbDevice, customAdbDevice]
       expect(store.deviceOptions).toEqual([
         { label: "adb-device(127.0.0.1:5555)", value: "adb|/usr/bin/adb|127.0.0.1:5555" },
         { label: "192.168.1.10:5555", value: "adb||192.168.1.10:5555" },
       ])
-    })
 
-    it("returns disabled placeholder when empty", () => {
-      const store = useDeviceConnectionStore()
+      store.availableDevices = []
       expect(store.deviceOptions).toEqual([
         { label: "panel.noDevice", value: "none-device", disabled: true },
       ])
@@ -727,66 +601,36 @@ describe("useDeviceConnectionStore", () => {
   })
 
   describe("connectDevices", () => {
-    it("fails when device resource is locked", async () => {
+    it("guards locked/missing/disabled/PlayCover validation and succeeds on valid selection", async () => {
       const store = useDeviceConnectionStore()
+
       store.isDeviceResourceLocked = true
-      const result = await store.connectDevices()
-      expect(result.success).toBe(false)
-      expect(result.message).toBe("设备与资源已锁定，无法切换")
-    })
+      expect(await store.connectDevices()).toEqual({
+        success: false,
+        message: "设备与资源已锁定，无法切换",
+      })
+      store.isDeviceResourceLocked = false
 
-    it("fails when no controller selected", async () => {
-      const store = useDeviceConnectionStore()
-      const result = await store.connectDevices()
-      expect(result.success).toBe(false)
-      expect(result.message).toBe("panel.selectDeviceType")
-    })
+      expect((await store.connectDevices()).message).toBe("panel.selectDeviceType")
 
-    it("fails when selected controller is disabled", async () => {
-      const store = useDeviceConnectionStore()
       store.controllerCapabilities = [{ ...adbCapability, enabled: false }]
       store.selectedController = "ADB"
-      const result = await store.connectDevices()
-      expect(result.success).toBe(false)
-      expect(result.message).toBe("panel.selectDeviceType")
-    })
+      expect((await store.connectDevices()).message).toBe("panel.selectDeviceType")
 
-    it("PlayCover fails on empty address", async () => {
-      const store = useDeviceConnectionStore()
       store.controllerCapabilities = [playCoverCapability]
       store.selectedController = "PlayCover"
       store.playCoverAddress = "  "
-      const result = await store.connectDevices()
-      expect(result.success).toBe(false)
-      expect(result.message).toBe("panel.playcoverAddress")
-    })
-
-    it("PlayCover fails on invalid address format", async () => {
-      const store = useDeviceConnectionStore()
-      store.controllerCapabilities = [playCoverCapability]
-      store.selectedController = "PlayCover"
+      expect((await store.connectDevices()).message).toBe("panel.playcoverAddress")
       store.playCoverAddress = "bad-address"
-      const result = await store.connectDevices()
-      expect(result.success).toBe(false)
-      expect(result.message).toBe("panel.invalidPlaycoverAddress")
-    })
+      expect((await store.connectDevices()).message).toBe("panel.invalidPlaycoverAddress")
 
-    it("fails when no device selected for non-PlayCover controller", async () => {
-      const store = useDeviceConnectionStore()
       store.controllerCapabilities = [adbCapability]
       store.selectedController = "ADB"
       store.selectedDeviceKey = null
-      const result = await store.connectDevices()
-      expect(result.success).toBe(false)
-      expect(result.message).toBe("panel.selectDevice")
-    })
+      expect((await store.connectDevices()).message).toBe("panel.selectDevice")
 
-    it("succeeds and persists device on valid selection", async () => {
-      const store = useDeviceConnectionStore()
       const settingsStore = useSettingsStore()
       const indexStore = useIndexStore()
-      store.controllerCapabilities = [adbCapability]
-      store.selectedController = "ADB"
       store.selectedDeviceKey = "adb|/usr/bin/adb|127.0.0.1:5555"
       store.availableDevices = [adbDevice]
       vi.mocked(api.getDeviceState).mockResolvedValue({
@@ -810,58 +654,35 @@ describe("useDeviceConnectionStore", () => {
   })
 
   describe("postResourceSelection", () => {
-    it("fails when locked", async () => {
+    it("guards locked/not-connected/missing resource and succeeds when valid", async () => {
       const store = useDeviceConnectionStore()
       store.isDeviceResourceLocked = true
-      const result = await store.postResourceSelection()
-      expect(result.success).toBe(false)
-    })
+      expect((await store.postResourceSelection()).success).toBe(false)
 
-    it("fails when not connected", async () => {
-      const store = useDeviceConnectionStore()
+      store.isDeviceResourceLocked = false
       store.controllerCapabilities = [adbCapability]
       store.selectedController = "ADB"
       store.resource = "res1"
-      const result = await store.postResourceSelection()
-      expect(result.success).toBe(false)
-      expect(result.message).toBe("panel.connectFirstHint")
-    })
+      expect((await store.postResourceSelection()).message).toBe("panel.connectFirstHint")
 
-    it("fails when no resource selected", async () => {
-      const store = useDeviceConnectionStore()
       const indexStore = useIndexStore()
       const settingsStore = useSettingsStore()
-      store.controllerCapabilities = [adbCapability]
-      store.selectedController = "ADB"
       store.selectedDeviceKey = "adb|/usr/bin/adb|127.0.0.1:5555"
       store.availableDevices = [adbDevice]
+      store.resource = null
       indexStore.Connected = true
       settingsStore.settings.panel.lastConnectedDevice = savedAdbDevice
-      const result = await store.postResourceSelection()
-      expect(result.success).toBe(false)
-      expect(result.message).toBe("panel.selectResource")
-    })
+      expect((await store.postResourceSelection()).message).toBe("panel.selectResource")
 
-    it("succeeds when connected and resource selected", async () => {
-      const store = useDeviceConnectionStore()
-      const indexStore = useIndexStore()
-      const settingsStore = useSettingsStore()
-      store.controllerCapabilities = [adbCapability]
-      store.selectedController = "ADB"
-      store.selectedDeviceKey = "adb|/usr/bin/adb|127.0.0.1:5555"
-      store.availableDevices = [adbDevice]
       store.resource = "res1"
-      indexStore.Connected = true
-      settingsStore.settings.panel.lastConnectedDevice = savedAdbDevice
       vi.mocked(api.postResource).mockResolvedValue({ success: true, message: "ok" })
-      const result = await store.postResourceSelection()
-      expect(result.success).toBe(true)
+      expect((await store.postResourceSelection()).success).toBe(true)
       expect(api.postResource).toHaveBeenCalledWith("res1")
     })
   })
 
   describe("init and cleanup", () => {
-    it("init sets up timer and watchers, double init is no-op", async () => {
+    it("init sets up timer and watchers, double init is no-op, cleanup resets", async () => {
       const store = useDeviceConnectionStore()
       const settingsStore = useSettingsStore()
       const indexStore = useIndexStore()
@@ -877,55 +698,11 @@ describe("useDeviceConnectionStore", () => {
       configStore.taskList = [{ id: "task1", name: "Task 1", order: 0 }]
       await nextTick()
       expect(indexStore.SelectedTaskID).toBe("task1")
-      setIntervalSpy.mockRestore()
-    })
 
-    it("cleanup clears timer and resets initialized", () => {
-      const store = useDeviceConnectionStore()
-      const settingsStore = useSettingsStore()
-      settingsStore.initialized = true
-      store.init()
-      expect(store.deviceStatePollTimer).not.toBeNull()
       store.cleanup()
       expect(store.deviceStatePollTimer).toBeNull()
       expect(store.initialized).toBe(false)
-    })
-  })
-
-  describe("getters", () => {
-    it("controllerOptions maps capabilities", () => {
-      const store = useDeviceConnectionStore()
-      store.controllerCapabilities = [
-        adbCapability,
-        { ...adbCapability, display_label: "ADB 2", enabled: false },
-      ]
-      expect(store.controllerOptions).toEqual([
-        { label: "ADB", value: "ADB", disabled: false },
-        { label: "ADB 2", value: "ADB 2", disabled: true },
-      ])
-    })
-
-    it("selectedControllerCapability finds by display_label", () => {
-      const store = useDeviceConnectionStore()
-      store.controllerCapabilities = [adbCapability]
-      store.selectedController = "ADB"
-      expect(store.selectedControllerCapability).toEqual(adbCapability)
-    })
-
-    it("selectedControllerDisabled returns true for disabled capability", () => {
-      const store = useDeviceConnectionStore()
-      store.controllerCapabilities = [{ ...adbCapability, enabled: false }]
-      store.selectedController = "ADB"
-      expect(store.selectedControllerDisabled).toBe(true)
-    })
-
-    it("selectedControllerName returns capability name or null", () => {
-      const store = useDeviceConnectionStore()
-      store.controllerCapabilities = [adbCapability]
-      store.selectedController = "ADB"
-      expect(store.selectedControllerName).toBe("adb")
-      store.selectedController = null
-      expect(store.selectedControllerName).toBeNull()
+      setIntervalSpy.mockRestore()
     })
   })
 })

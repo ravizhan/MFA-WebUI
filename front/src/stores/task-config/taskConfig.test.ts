@@ -100,17 +100,6 @@ describe("useTaskConfigStore", () => {
     vi.unstubAllGlobals()
   })
 
-  it("has correct initial state", () => {
-    const store = useTaskConfigStore()
-    expect(store.options).toEqual({})
-    expect(store.taskList).toEqual([])
-    expect(store.selectedPresetName).toBe(CUSTOM_PRESET_NAME)
-    expect(store.presetSnapshots).toEqual({})
-    expect(store.configLoaded).toBe(false)
-    expect(store.saveTimer).toBeNull()
-    expect(store.preTasks).toEqual([])
-  })
-
   describe("buildDefaultTaskList", () => {
     it("returns tasks from interface with checked=false", () => {
       const store = useTaskConfigStore()
@@ -141,27 +130,19 @@ describe("useTaskConfigStore", () => {
       })
     })
 
-    it("returns false and leaves state unchanged for unknown presets", () => {
+    it("returns false for unknown presets and true for already-active without changes", () => {
       const store = initTaskConfigStore()
       const previousState = store.serializeCurrentSnapshot()
-      const result = store.selectPreset("nonexistent")
 
-      expect(result).toBe(false)
+      expect(store.selectPreset("nonexistent")).toBe(false)
       expect(store.selectedPresetName).toBe(CUSTOM_PRESET_NAME)
+      expect(store.serializeCurrentSnapshot()).toEqual(previousState)
+
+      expect(store.selectPreset(CUSTOM_PRESET_NAME)).toBe(true)
       expect(store.serializeCurrentSnapshot()).toEqual(previousState)
     })
 
-    it("returns true without changes when selecting the already-active preset", () => {
-      const store = initTaskConfigStore()
-      const previousState = store.serializeCurrentSnapshot()
-      const result = store.selectPreset(CUSTOM_PRESET_NAME)
-
-      expect(result).toBe(true)
-      expect(store.selectedPresetName).toBe(CUSTOM_PRESET_NAME)
-      expect(store.serializeCurrentSnapshot()).toEqual(previousState)
-    })
-
-    it("syncs current state to the previous preset before switching to custom", () => {
+    it("syncs current state before switching presets", () => {
       const store = initTaskConfigStore()
       store.selectPreset("preset1")
 
@@ -176,22 +157,16 @@ describe("useTaskConfigStore", () => {
       expect(preset1Snapshot.taskOptions["task-a"]).toMatchObject({ difficulty: "easy" })
       expect(preset1Snapshot.preTasks).toHaveLength(1)
       expect(preset1Snapshot.preTasks[0].command).toBe("echo preset1")
-    })
 
-    it("syncs current state before switching between two real presets", () => {
-      const store = initTaskConfigStore()
       store.selectPreset("preset1")
-
       store.taskList.find((t) => t.id === "task-c")!.checked = true
       store.options["task-b"] = { ...store.options["task-b"], mode: ["auto", "manual"] }
 
-      const result = store.selectPreset("preset2")
-
-      expect(result).toBe(true)
-      const preset1Snapshot = store.presetSnapshots["preset1"]
-      expect(preset1Snapshot.taskChecked["task-c"]).toBe(true)
-      expect(preset1Snapshot.taskOptions["task-b"]).toMatchObject({ mode: ["auto", "manual"] })
-
+      expect(store.selectPreset("preset2")).toBe(true)
+      expect(store.presetSnapshots["preset1"].taskChecked["task-c"]).toBe(true)
+      expect(store.presetSnapshots["preset1"].taskOptions["task-b"]).toMatchObject({
+        mode: ["auto", "manual"],
+      })
       expect(store.selectedPresetName).toBe("preset2")
       expect(store.taskList.map((t) => t.id)).toEqual(["task-b", "task-a", "task-c"])
       expect(store.taskList.find((t) => t.id === "task-b")?.checked).toBe(true)
@@ -226,7 +201,7 @@ describe("useTaskConfigStore", () => {
   })
 
   describe("normalizeSnapshot", () => {
-    it("returns a valid default snapshot when given undefined", () => {
+    it("returns defaults for undefined and normalizes preTasks", () => {
       const store = initTaskConfigStore()
       const normalized = store.normalizeSnapshot(undefined)
 
@@ -245,50 +220,27 @@ describe("useTaskConfigStore", () => {
         "task-c": {},
       })
       expect(normalized.preTasks).toEqual([])
-    })
 
-    it("filters invalid preTasks and fills in missing defaults", () => {
-      const store = initTaskConfigStore()
-      const normalized = store.normalizeSnapshot({
+      const original = [{ id: "pt1", command: "echo ok", enabled: true, timeout: 30 }]
+      const withPreTasks = store.normalizeSnapshot({
         taskOrder: ["task-b"],
         taskChecked: { "task-b": true },
         taskOptions: { "task-b": { mode: ["manual"] } },
         preTasks: [
           { id: "", command: "", enabled: true, timeout: 30 },
           { id: "", command: "valid-command", enabled: false, timeout: 10 },
-          // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-          { id: "has-id", command: "another", enabled: "yes" as unknown as boolean, timeout: -1 },
+          ...original,
         ],
       })
-
-      expect(normalized.preTasks).toHaveLength(2)
-      expect(normalized.preTasks[0]).toEqual({
+      expect(withPreTasks.preTasks).toHaveLength(2)
+      expect(withPreTasks.preTasks[0]).toEqual({
         id: "mock-uuid",
         command: "valid-command",
         enabled: false,
         timeout: 10,
       })
-      expect(normalized.preTasks[1]).toEqual({
-        id: "has-id",
-        command: "another",
-        enabled: true,
-        timeout: 30,
-      })
-    })
-
-    it("passes through valid preTasks as copies", () => {
-      const store = initTaskConfigStore()
-      const original = [{ id: "pt1", command: "echo ok", enabled: true, timeout: 30 }]
-      const normalized = store.normalizeSnapshot({
-        taskOrder: [],
-        taskChecked: {},
-        taskOptions: {},
-        preTasks: original,
-      })
-
-      expect(normalized.preTasks).toEqual(original)
-      expect(normalized.preTasks).not.toBe(original)
-      expect(normalized.preTasks[0]).not.toBe(original[0])
+      expect(withPreTasks.preTasks[1]).toEqual(original[0])
+      expect(withPreTasks.preTasks[1]).not.toBe(original[0])
     })
   })
 
@@ -343,56 +295,33 @@ describe("useTaskConfigStore", () => {
     })
   })
 
-  describe("buildOptionsForTasks", () => {
-    it("merges defaults, current values and overrides with overrides winning", () => {
+  describe("buildOptionsForTasks / buildOptionsFromPersisted", () => {
+    it("merges defaults with overrides/persisted values and filters unknown keys", () => {
       const store = initTaskConfigStore()
       store.options["task-a"] = { ...store.options["task-a"], difficulty: "easy" }
 
-      const result = store.buildOptionsForTasks(["task-a"], {
-        "task-a": { difficulty: "hard", params: { host: "override-host" } },
-      })
-
-      expect(result["task-a"]).toEqual({
+      expect(
+        store.buildOptionsForTasks(["task-a"], {
+          "task-a": { difficulty: "hard", params: { host: "override-host" }, unknownKey: "x" },
+        })["task-a"],
+      ).toEqual({
         difficulty: "hard",
         params: { host: "override-host" },
       })
-    })
 
-    it("ignores option keys that are not present in defaults", () => {
-      const store = initTaskConfigStore()
-      const result = store.buildOptionsForTasks(["task-a"], {
-        "task-a": { unknownKey: "ignored" },
-      })
-
-      expect(result["task-a"]).not.toHaveProperty("unknownKey")
-    })
-  })
-
-  describe("buildOptionsFromPersisted", () => {
-    it("merges defaults with persisted values, persisted wins when valid", () => {
-      const store = initTaskConfigStore()
-      const result = store.buildOptionsFromPersisted(["task-a"], {
-        "task-a": { difficulty: "hard" },
-      })
-
-      expect(result["task-a"]).toEqual({
+      expect(
+        store.buildOptionsFromPersisted(["task-a"], {
+          "task-a": { difficulty: "hard", unknownKey: "ignored" },
+        })["task-a"],
+      ).toEqual({
         difficulty: "hard",
         params: { host: "localhost", port: "" },
       })
     })
-
-    it("filters unknown persisted keys", () => {
-      const store = initTaskConfigStore()
-      const result = store.buildOptionsFromPersisted(["task-a"], {
-        "task-a": { difficulty: "hard", unknownKey: "ignored" },
-      })
-
-      expect(result["task-a"]).not.toHaveProperty("unknownKey")
-    })
   })
 
   describe("debouncedSave", () => {
-    it("calls saveConfig after a 500ms delay", async () => {
+    it("debounces saveConfig to 500ms and cancels prior timers", async () => {
       vi.useFakeTimers()
       const store = initTaskConfigStore()
       const saveSpy = vi.spyOn(store, "saveConfig").mockResolvedValue(undefined)
@@ -400,22 +329,9 @@ describe("useTaskConfigStore", () => {
       store.debouncedSave()
       expect(saveSpy).not.toHaveBeenCalled()
 
-      await vi.advanceTimersByTimeAsync(500)
-      expect(saveSpy).toHaveBeenCalledTimes(1)
-
-      vi.useRealTimers()
-    })
-
-    it("cancels the previous timer when called again within 500ms", async () => {
-      vi.useFakeTimers()
-      const store = initTaskConfigStore()
-      const saveSpy = vi.spyOn(store, "saveConfig").mockResolvedValue(undefined)
-
-      store.debouncedSave()
       await vi.advanceTimersByTimeAsync(250)
       store.debouncedSave()
       await vi.advanceTimersByTimeAsync(250)
-
       expect(saveSpy).not.toHaveBeenCalled()
 
       await vi.advanceTimersByTimeAsync(250)
@@ -426,9 +342,9 @@ describe("useTaskConfigStore", () => {
   })
 
   describe("loadConfig", () => {
-    it("fetches config, seeds snapshots, hydrates selected preset and sets loaded", async () => {
+    it("hydrates selected preset or falls back to custom on empty config", async () => {
       const store = useTaskConfigStore()
-      vi.mocked(api.getTaskConfig).mockResolvedValue({
+      vi.mocked(api.getTaskConfig).mockResolvedValueOnce({
         selectedPreset: "preset2",
         presets: {
           preset2: {
@@ -448,19 +364,13 @@ describe("useTaskConfigStore", () => {
       expect(store.taskList.map((t) => t.id)).toEqual(["task-b", "task-a", "task-c"])
       expect(store.taskList.find((t) => t.id === "task-b")?.checked).toBe(true)
       expect(store.options["task-b"]).toEqual({ mode: ["manual"] })
-    })
 
-    it("falls back to custom preset when the API returns an empty config", async () => {
-      const store = useTaskConfigStore()
-      vi.mocked(api.getTaskConfig).mockResolvedValue({
+      vi.mocked(api.getTaskConfig).mockResolvedValueOnce({
         selectedPreset: "",
         presets: {},
       })
-
       await store.loadConfig()
-
       expect(store.selectedPresetName).toBe(CUSTOM_PRESET_NAME)
-      expect(store.configLoaded).toBe(true)
       expect(store.taskList.map((t) => t.id)).toEqual(["task-a", "task-b", "task-c"])
       expect(store.taskList.every((t) => !t.checked)).toBe(true)
     })

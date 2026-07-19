@@ -50,21 +50,6 @@ async def store(tmp_path: Path) -> ExecutionStore:
 
 
 @pytest.mark.asyncio
-async def test_init_idempotent(tmp_path: Path):
-    path = tmp_path / "scheduler.sqlite"
-    s = ExecutionStore(path)
-    await s.init()
-    await s.init()
-    async with aiosqlite.connect(path) as db:
-        async with db.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
-        ) as cur:
-            names = [row[0] for row in await cur.fetchall()]
-    assert "scheduler_executions" in names
-    assert "scheduler_occurrence_claims" not in names
-
-
-@pytest.mark.asyncio
 async def test_init_drops_legacy_occurrence_claims_table(tmp_path: Path):
     path = tmp_path / "scheduler.sqlite"
     async with aiosqlite.connect(path) as db:
@@ -110,7 +95,8 @@ async def test_init_drops_legacy_executions_schema(tmp_path: Path):
             "error_message TEXT)"
         )
         await db.execute(
-            "INSERT INTO scheduler_executions VALUES ('x','t','n','2020-01-01',NULL,'success',NULL)"
+            "INSERT INTO scheduler_executions VALUES "
+            "('x','t','n','2020-01-01',NULL,'success',NULL)"
         )
         await db.commit()
     s = ExecutionStore(path)

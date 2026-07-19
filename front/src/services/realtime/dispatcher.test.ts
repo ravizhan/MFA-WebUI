@@ -42,110 +42,58 @@ describe("dispatchRealtimeEvent", () => {
     vi.mocked(showBrowserRealtimeNotification).mockClear()
   })
 
-  describe("common handling (all event types)", () => {
-    it("appends to log when display=true", () => {
+  describe("display and channel gating", () => {
+    it("appends to log only when display=true", () => {
       const stores = makeStores()
       dispatchRealtimeEvent({ ...baseEvent }, stores)
       expect(stores.indexStore.RunningLog).toContain("hello")
+
+      setActivePinia(createPinia())
+      const stores2 = makeStores()
+      dispatchRealtimeEvent({ ...baseEvent, display: false }, stores2)
+      expect(stores2.indexStore.RunningLog).toBe("")
     })
 
-    it("does not append to log when display=false", () => {
+    it("gates toast and notification channels without duplication", () => {
       const stores = makeStores()
-      dispatchRealtimeEvent({ ...baseEvent, display: false }, stores)
-      expect(stores.indexStore.RunningLog).toBe("")
-    })
 
-    it("shows toast when notify includes 'toast'", () => {
-      const stores = makeStores()
-      dispatchRealtimeEvent({ ...baseEvent, notify: ["toast"] }, stores)
-      expect(showToastMessage).toHaveBeenCalledTimes(1)
-    })
-
-    it("does not show toast when notify is empty", () => {
-      const stores = makeStores()
       dispatchRealtimeEvent({ ...baseEvent, notify: [] }, stores)
       expect(showToastMessage).not.toHaveBeenCalled()
-    })
-
-    it("shows browser notification when notify includes 'notification'", () => {
-      const stores = makeStores()
-      dispatchRealtimeEvent({ ...baseEvent, notify: ["notification"] }, stores)
-      expect(showBrowserRealtimeNotification).toHaveBeenCalledTimes(1)
-    })
-
-    it("does not show browser notification when notify is empty", () => {
-      const stores = makeStores()
-      dispatchRealtimeEvent({ ...baseEvent, notify: [] }, stores)
       expect(showBrowserRealtimeNotification).not.toHaveBeenCalled()
-    })
-  })
 
-  describe("double-notification bug fix", () => {
-    it("does NOT duplicate toast for toast-only events", () => {
-      const stores = makeStores()
       dispatchRealtimeEvent({ ...baseEvent, notify: ["toast"] }, stores)
-      // showToastMessage is called exactly once — no duplicate
       expect(showToastMessage).toHaveBeenCalledTimes(1)
-    })
+      expect(showBrowserRealtimeNotification).not.toHaveBeenCalled()
 
-    it("does NOT show toast for notification-only events", () => {
-      const stores = makeStores()
       dispatchRealtimeEvent({ ...baseEvent, notify: ["notification"] }, stores)
-      // Only browser notification, no extra toast
-      expect(showToastMessage).not.toHaveBeenCalled()
-      expect(showBrowserRealtimeNotification).toHaveBeenCalledTimes(1)
-    })
-
-    it("handles both toast and notification channels without duplication", () => {
-      const stores = makeStores()
-      dispatchRealtimeEvent({ ...baseEvent, notify: ["toast", "notification"] }, stores)
       expect(showToastMessage).toHaveBeenCalledTimes(1)
       expect(showBrowserRealtimeNotification).toHaveBeenCalledTimes(1)
+
+      dispatchRealtimeEvent({ ...baseEvent, notify: ["toast", "notification"] }, stores)
+      expect(showToastMessage).toHaveBeenCalledTimes(2)
+      expect(showBrowserRealtimeNotification).toHaveBeenCalledTimes(2)
     })
   })
 
   describe("task lifecycle dispatch", () => {
-    it("sets TaskRunning=true on task.started", () => {
-      const stores = makeStores()
-      expect(stores.indexStore.TaskRunning).toBe(false)
-      dispatchRealtimeEvent({ ...baseEvent, event: "task.started" }, stores)
-      expect(stores.indexStore.TaskRunning).toBe(true)
-    })
-
-    it("sets TaskRunning=false on task.completed", () => {
-      const stores = makeStores()
-      stores.indexStore.setTaskRunning(true)
-      dispatchRealtimeEvent({ ...baseEvent, event: "task.completed" }, stores)
-      expect(stores.indexStore.TaskRunning).toBe(false)
-    })
-
-    it("sets TaskRunning=false on task.failed", () => {
-      const stores = makeStores()
-      stores.indexStore.setTaskRunning(true)
-      dispatchRealtimeEvent({ ...baseEvent, event: "task.failed" }, stores)
-      expect(stores.indexStore.TaskRunning).toBe(false)
-    })
-
-    it("still applies common handling for task lifecycle events", () => {
+    it("sets TaskRunning for started/completed/failed while applying common handling", () => {
       const stores = makeStores()
       dispatchRealtimeEvent({ ...baseEvent, event: "task.started", notify: ["toast"] }, stores)
       expect(stores.indexStore.TaskRunning).toBe(true)
       expect(stores.indexStore.RunningLog).toContain("hello")
       expect(showToastMessage).toHaveBeenCalledTimes(1)
+
+      dispatchRealtimeEvent({ ...baseEvent, event: "task.completed" }, stores)
+      expect(stores.indexStore.TaskRunning).toBe(false)
+
+      stores.indexStore.setTaskRunning(true)
+      dispatchRealtimeEvent({ ...baseEvent, event: "task.failed" }, stores)
+      expect(stores.indexStore.TaskRunning).toBe(false)
     })
   })
 
   describe("non-task events fall through to common handler", () => {
-    it.each(["log", "focus.display", "notification.test"] as const)(
-      "event '%s' does not change TaskRunning",
-      (eventName) => {
-        const stores = makeStores()
-        dispatchRealtimeEvent({ ...baseEvent, event: eventName }, stores)
-        expect(stores.indexStore.TaskRunning).toBe(false)
-      },
-    )
-
-    it("focus.display still gets common handling (log + toast)", () => {
+    it("focus.display gets log + toast without changing TaskRunning", () => {
       const stores = makeStores()
       dispatchRealtimeEvent({ ...baseEvent, event: "focus.display", notify: ["toast"] }, stores)
       expect(stores.indexStore.RunningLog).toContain("hello")

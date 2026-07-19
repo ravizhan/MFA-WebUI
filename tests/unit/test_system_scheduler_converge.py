@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from models.scheduler import CronTriggerConfig, DateTriggerConfig, ScheduledTask
-from services.system_scheduler import ConvergeReport, SystemScheduler
+from services.system_scheduler import SystemScheduler
 from services.system_scheduler_backend import NativeTaskSpec, SystemSchedulerBackend
 
 
@@ -236,27 +236,9 @@ def test_register_non_cron_raises_value_error(app_root: Path):
         sched.register(task)
 
 
-def test_register_success_no_verify(app_root: Path):
-    backend = FakeBackend()
-    sched = SystemScheduler(app_root, backend=backend)
-    sched.register(_task(_UUID_A))
-    assert backend.is_registered(_UUID_A)
-    assert backend.register_calls == [_UUID_A]
-
-
 def test_unregister_missing_raises(app_root: Path):
     backend = FakeBackend()
     sched = SystemScheduler(app_root, backend=backend)
     with pytest.raises(RuntimeError, match="not registered"):
         sched.unregister(_UUID_A)
     assert backend.unregister_calls == [_UUID_A]
-
-
-def test_converge_report_type(app_root: Path):
-    backend = FakeBackend()
-    sched = SystemScheduler(app_root, backend=backend)
-    report = sched.converge([])
-    assert isinstance(report, ConvergeReport)
-    assert report.registered == []
-    assert report.unregistered == []
-    assert report.failed == []

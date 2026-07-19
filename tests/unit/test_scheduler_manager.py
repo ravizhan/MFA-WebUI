@@ -99,25 +99,21 @@ async def test_scheduled_job_fired_dispatches_non_wakeup_task(main_module):
 
 
 @pytest.mark.asyncio
-async def test_delete_plain_task_no_native(manager: SchedulerManager):
+@pytest.mark.parametrize(
+    ("wakeup_enabled", "enabled"),
+    [
+        (False, True),  # plain task: desired_wakeup false
+        (True, False),  # paused wakeup: desired_wakeup false
+    ],
+)
+async def test_delete_when_desired_wakeup_false_skips_native(
+    manager: SchedulerManager, wakeup_enabled: bool, enabled: bool
+):
     sys_sched = MagicMock()
     manager.set_system_scheduler(sys_sched)
-    created = await manager.create_task(_create(wakeup_enabled=False, enabled=True))
-
-    ok = await manager.delete_task(created.id)
-
-    assert ok is True
-    assert manager.scheduler.get_job(created.id) is None
-    sys_sched.unregister.assert_not_called()
-    sys_sched.register.assert_not_called()
-
-
-@pytest.mark.asyncio
-async def test_delete_paused_wakeup_no_native(manager: SchedulerManager):
-    sys_sched = MagicMock()
-    manager.set_system_scheduler(sys_sched)
-    # enabled=False → desired_wakeup False → create does not register native
-    created = await manager.create_task(_create(wakeup_enabled=True, enabled=False))
+    created = await manager.create_task(
+        _create(wakeup_enabled=wakeup_enabled, enabled=enabled)
+    )
     sys_sched.reset_mock()
 
     ok = await manager.delete_task(created.id)

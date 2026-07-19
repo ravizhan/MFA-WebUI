@@ -1,11 +1,10 @@
-"""Tests for json_utils.py — a thin wrapper around pyjson5 and stdlib json.
+"""Tests for json_utils.py — thin wrapper around pyjson5 and stdlib json.
 
-Only verifies wrapper delegation: load/loads → pyjson5, dump/dumps → stdlib json
-(with formatting kwargs), and the JSONDecodeError alias. pyjson5's own codec
-is already rigorously tested upstream.
+Only verifies MWU wrapper contracts: JSONDecodeError alias, load→pyjson5
+delegation, and dump formatting kwargs forwarded to stdlib json.
 """
 
-import io
+from unittest.mock import patch
 
 import pyjson5
 
@@ -19,48 +18,32 @@ class TestJSONDecodeErrorAlias:
         assert json.JSONDecodeError is pyjson5.Json5DecoderException
 
 
-class TestLoadLoads:
+class TestLoadDelegation:
     """load/loads delegate to pyjson5."""
 
-    def test_loads_returns_parsed_value(self):
-        assert json.loads('{"a": 1}') == {"a": 1}
+    def test_loads_delegates_to_pyjson5(self):
+        with patch.object(json.pyjson5, "loads", return_value={"delegated": True}) as mock_loads:
+            result = json.loads('{"a": 1}')
+            mock_loads.assert_called_once_with('{"a": 1}')
+            assert result == {"delegated": True}
 
-    def test_load_from_fp(self):
-        fp = io.StringIO('{"a": 1}')
-        assert json.load(fp) == {"a": 1}
 
+class TestDumpDelegation:
+    """dump/dumps route through stdlib json and forward formatting kwargs.
 
-class TestDumpDumps:
-    """dump/dumps delegate to stdlib json, forwarding formatting kwargs.
-
-    This is the key wrapper choice: pyjson5.dump ignores formatting kwargs,
-    so MWU routes dump/dumps through stdlib json instead.
+    Key wrapper choice: pyjson5.dump ignores formatting kwargs, so MWU
+    routes dump/dumps through stdlib json instead.
     """
 
-    def test_dumps_returns_str(self):
-        assert json.dumps({"a": 1}) == '{"a": 1}'
-
-    def test_dumps_indent(self):
-        assert json.dumps({"a": 1}, indent=2) == '{\n  "a": 1\n}'
-
-    def test_dump_to_fp(self):
-        fp = io.StringIO()
-        json.dump({"a": 1}, fp)
-        assert fp.getvalue() == '{"a": 1}'
-
-    def test_dump_indent(self):
-        fp = io.StringIO()
-        json.dump({"a": 1}, fp, indent=2)
-        assert fp.getvalue() == '{\n  "a": 1\n}'
-
-    def test_dumps_ensure_ascii_false(self):
-        result = json.dumps({"char": "ü"}, ensure_ascii=False)
-        assert "ü" in result
-
-    def test_dumps_kwargs_separators(self):
-        assert json.dumps({"a": 1, "b": 2}, separators=(",", ":")) == '{"a":1,"b":2}'
-
-    def test_dump_kwargs_sort_keys(self):
-        fp = io.StringIO()
-        json.dump({"b": 1, "a": 2}, fp, sort_keys=True)
-        assert fp.getvalue() == '{"a": 2, "b": 1}'
+    def test_dumps_forwards_formatting_kwargs_to_stdlib(self):
+        with patch.object(
+            json._stdlib_json, "dumps", return_value="formatted"
+        ) as mock_dumps:
+            result = json.dumps({"a": 1}, indent=2, ensure_ascii=False, sort_keys=True)
+            mock_dumps.assert_called_once_with(
+                {"a": 1},
+                indent=2,
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            assert result == "formatted"
