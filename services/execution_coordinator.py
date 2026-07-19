@@ -1,13 +1,15 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
+from app_state import ActiveRun
 from maa_worker.event_service import load_settings
 from models.scheduler import (
-    ExecutionOrigin,
     ExecutionStatus,
     ManualStartPayload,
     ScheduledTask,
@@ -18,7 +20,10 @@ from models.scheduler import (
 )
 from models.task_config import normalize_task_execution_payload
 from scheduler_job_codec import compute_occurrence
-from services.execution_store import ExecutionStore
+
+if TYPE_CHECKING:
+    from app_state import AppState
+    from services.execution_store import ExecutionStore
 
 logger = logging.getLogger(__name__)
 
@@ -55,14 +60,6 @@ def _device_as_dict(
 
 
 @dataclass
-class ActiveRun:
-    run_id: str
-    origin: ExecutionOrigin
-    task_name: str
-    occurrence_id: str | None
-
-
-@dataclass
 class Admission:
     accepted: bool
     run_id: str | None = None
@@ -72,31 +69,22 @@ class Admission:
 
 
 class ExecutionCoordinator:
-    """asyncio.Lock admission gate + shared prepare/run path."""
-
-    def __init__(self, store: ExecutionStore) -> None:
+    def __init__(self, state: AppState, store: ExecutionStore) -> None:
+        self._state = state
         self._store = store
-        self._worker = None
-        self._lock = asyncio.Lock()
-        self._active: ActiveRun | None = None
-        self._update_in_progress = False
-
-    def set_worker(self, worker) -> None:
-        self._worker = worker
 
     def active_run(self) -> ActiveRun | None:
-        return self._active
+        return self._state.active_run
 
     def set_update_in_progress(self) -> None:
-        """One-way gate: after set, all admission is rejected (update → shutdown)."""
-        self._update_in_progress = True
+        self._state.update_in_progress = True
 
     def _conflict_for_active(self, active: ActiveRun) -> StartConflict:
         if active.origin == "manual":
-            code: Literal["busy_manual", "busy_scheduled"] = "busy_manual"
+            code: Literal["busy_manual"] = "busy_manual"
             message = f"当前有手动任务「{active.task_name}」正在执行"
         else:
-            code = "busy_scheduled"
+            code: Literal["busy_scheduled"] = "busy_scheduled"
             message = f"当前有定时任务「{active.task_name}」正在执行"
         return StartConflict(
             code=code,
@@ -107,7 +95,7 @@ class ExecutionCoordinator:
         )
 
     def _update_conflict(self) -> StartConflict:
-        active = self._active
+        active = self._state.active_run
         return StartConflict(
             code="update_in_progress",
             message="系统正在更新，无法启动任务",
@@ -118,19 +106,19 @@ class ExecutionCoordinator:
 
     async def submit_manual(self, payload: ManualStartPayload) -> Admission:
         run_id = str(uuid.uuid4())
-        async with self._lock:
-            if self._update_in_progress:
-                return Admission(accepted=False, conflict=self._update_conflict())
-            if self._active is not None:
-                return Admission(
-                    accepted=False, conflict=self._conflict_for_active(self._active)
-                )
-            self._active = ActiveRun(
-                run_id=run_id,
-                origin="manual",
-                task_name=MANUAL_TASK_NAME,
-                occurrence_id=None,
+        if self._state.update_in_progress:
+            return Admission(accepted=False, conflict=self._update_conflict())
+        if self._state.active_run is not None:
+            return Admission(
+                accepted=False,
+                conflict=self._conflict_for_active(self._state.active_run),
             )
+        self._state.active_run = ActiveRun(
+            run_id=run_id,
+            origin="manual",
+            task_name=MANUAL_TASK_NAME,
+            occurrence_id=None,
+        )
 
         now = _utc_now()
         await self._store.add(
@@ -157,9 +145,8 @@ class ExecutionCoordinator:
             await self._store.finish(run_id, status, error)
             return Admission(accepted=True, run_id=run_id)
         finally:
-            async with self._lock:
-                if self._active and self._active.run_id == run_id:
-                    self._active = None
+            if self._state.active_run and self._state.active_run.run_id == run_id:
+                self._state.active_run = None
 
     async def submit_scheduled(
         self,
@@ -209,23 +196,22 @@ class ExecutionCoordinator:
         skip_status: ExecutionStatus | None = None
         blocker: ActiveRun | None = None
 
-        async with self._lock:
-            if self._update_in_progress:
-                skip_status = "skipped_update_in_progress"
-                blocker = self._active
-            elif self._active is not None:
-                if self._active.origin == "manual":
-                    skip_status = "skipped_busy_manual"
-                else:
-                    skip_status = "skipped_busy_scheduled"
-                blocker = self._active
+        if self._state.update_in_progress:
+            skip_status = "skipped_update_in_progress"
+            blocker = self._state.active_run
+        elif self._state.active_run is not None:
+            if self._state.active_run.origin == "manual":
+                skip_status = "skipped_busy_manual"
             else:
-                self._active = ActiveRun(
-                    run_id=run_id,
-                    origin=origin,
-                    task_name=task.name,
-                    occurrence_id=occurrence_id,
-                )
+                skip_status = "skipped_busy_scheduled"
+            blocker = self._state.active_run
+        else:
+            self._state.active_run = ActiveRun(
+                run_id=run_id,
+                origin=origin,
+                task_name=task.name,
+                occurrence_id=occurrence_id,
+            )
 
         if skip_status is not None:
             skip_now = _utc_now()
@@ -282,14 +268,13 @@ class ExecutionCoordinator:
             await self._store.finish_claim(occurrence_id, abandoned=True)
             raise
         finally:
-            async with self._lock:
-                if self._active and self._active.run_id == run_id:
-                    self._active = None
+            if self._state.active_run and self._state.active_run.run_id == run_id:
+                self._state.active_run = None
 
     async def stop_active(self) -> bool:
-        if self._active is None:
+        if self._state.active_run is None:
             return False
-        worker = self._worker
+        worker = self._state.worker
         if worker is None:
             return False
         worker.tasks.stop()
@@ -301,7 +286,7 @@ class ExecutionCoordinator:
         task_options: Any,
         pre_tasks: Any = None,
     ) -> tuple[list[str], TaskOptionsByTask, list]:
-        worker = self._worker
+        worker = self._state.worker
         if not worker or not getattr(worker, "interface", None):
             normalized_task_list: list[str] = []
             if isinstance(task_list, list):
@@ -339,12 +324,14 @@ class ExecutionCoordinator:
         Returns ``(status, error_message)``. Does not touch ActiveRun or claims.
         """
         del run_id  # reserved for future correlation / logging
-        worker = self._worker
+        worker = self._state.worker
         if not worker:
             logger.error("Worker 未就绪，无法执行任务 %s", log_label)
             return "failed", "Worker 未就绪"
 
         device_dict = _device_as_dict(device)
+        device_state = self._state.device
+        task_state = self._state.task
 
         try:
             # Device/resource required for prepare path
@@ -362,7 +349,6 @@ class ExecutionCoordinator:
                 return "failed", "设备或资源配置缺失"
 
             # Connection match / reuse
-            device_state = worker.device_state
             device_controller_name = (
                 device_dict.get("controller_name") or controller_name
             )
@@ -443,11 +429,11 @@ class ExecutionCoordinator:
                 worker.events.send_log(f"任务 {log_label} 已被跳过：任务已在运行")
                 return "stopped", "任务已在运行"
 
-            while worker and worker.task_state.running:
+            while worker and task_state.running:
                 await asyncio.sleep(1)
 
-            task_status = getattr(worker.task_state, "last_status", "failed")
-            task_error = getattr(worker.task_state, "last_error", None)
+            task_status = getattr(task_state, "last_status", "failed")
+            task_error = getattr(task_state, "last_error", None)
 
             if task_status == "success":
                 logger.info("任务 %s 执行成功", log_label)

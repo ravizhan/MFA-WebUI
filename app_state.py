@@ -1,20 +1,79 @@
+from __future__ import annotations
+
 import asyncio
 import subprocess
+import threading
 import time
 from collections import deque
+from dataclasses import dataclass, field
+from pathlib import Path
 from queue import SimpleQueue
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from maa_utils import MaaWorker
 from models.api import RealtimeEvent, RealtimeEventLevel
+from models.scheduler import ExecutionOrigin
 from models.settings import SettingsModel
-from scheduler_manager import SchedulerManager
-from services.execution_coordinator import ExecutionCoordinator
-from services.execution_store import ExecutionStore
-from services.system_scheduler import SystemScheduler
+
+if TYPE_CHECKING:
+    from maa.agent_client import AgentClient
+    from maa_utils import MaaWorker
+    from scheduler_manager import SchedulerManager
+    from services.execution_coordinator import ExecutionCoordinator
+    from services.execution_store import ExecutionStore
+    from services.system_scheduler import SystemScheduler
 
 
 _HISTORY_MAXLEN = 2000
+
+
+@dataclass
+class WorkerContext:
+    interface_base_dir: Path
+    i18n_text_mapping: dict[str, Any] | None = None
+
+
+@dataclass
+class DeviceRuntimeState:
+    controller: Any = None
+    controller_type: str | None = None
+    controller_name: str | None = None
+    current_resource_name: str | None = None
+    connected: bool = False
+    configuration_locked: bool = False
+    last_device_error: str | None = None
+    last_resource_error: str | None = None
+
+
+@dataclass
+class TaskRuntimeState:
+    stop_flag: bool = False
+    running: bool = False
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    thread: threading.Thread | None = None
+    last_status: str = "idle"
+    last_error: str | None = None
+    current_task_name: str | None = None
+    pre_tasks: list | None = None
+    current_pre_task_process: subprocess.Popen | None = None
+
+
+@dataclass
+class AgentRuntimeState:
+    start_lock: threading.Lock = field(default_factory=threading.Lock)
+    started_once: bool = False
+    start_succeeded: bool = False
+    start_error: str | None = None
+    pi_env: dict[str, str] | None = None
+    processes: list[subprocess.Popen] = field(default_factory=list)
+    agent_client: AgentClient | None = None
+
+
+@dataclass
+class ActiveRun:
+    run_id: str
+    origin: ExecutionOrigin
+    task_name: str
+    occurrence_id: str | None
 
 
 class LogBroadcaster:
@@ -62,12 +121,11 @@ def normalize_event(payload: RealtimeEvent | dict[str, Any] | str) -> RealtimeEv
 
 
 class AppState:
-    def __init__(self):
-        self.message_conn = SimpleQueue()
+    def __init__(self, app_root_dir: Path):
+        self.message_conn: SimpleQueue = SimpleQueue()
         self.worker: MaaWorker | None = None
         self.is_shutting_down = False
         self.history_message: deque[RealtimeEvent] = deque(maxlen=_HISTORY_MAXLEN)
-        self.current_status = None
         self.broadcaster: LogBroadcaster | None = None
         self.scheduler_manager: SchedulerManager | None = None
         self.system_scheduler: SystemScheduler | None = None
@@ -75,13 +133,19 @@ class AppState:
         self.execution_coordinator: ExecutionCoordinator | None = None
         self.native_token: str | None = None
         self.settings: SettingsModel | None = None
-        self.subprocess_pipe: subprocess.Popen | None = None
         self.update_status: dict | None = None
         self.update_info: dict | None = None
         # Runtime ownership (kernel advisory lock); only for real CLI process lifetime
         self.runtime_ownership: Any | None = None
         # CLI: --scheduled-task uuid (set before uvicorn starts)
         self.pending_scheduled_task_id: str | None = None
+
+        self.context = WorkerContext(interface_base_dir=app_root_dir.resolve())
+        self.device = DeviceRuntimeState()
+        self.task = TaskRuntimeState()
+        self.agent = AgentRuntimeState()
+        self.active_run: ActiveRun | None = None
+        self.update_in_progress = False
 
     def send_event(self, event: RealtimeEvent):
         self.message_conn.put(event)

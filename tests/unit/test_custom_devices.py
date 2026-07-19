@@ -13,12 +13,12 @@ from unittest.mock import patch
 import pytest
 from pydantic import ValidationError
 
+from app_state import WorkerContext
 from maa_worker.device_service import (
     DeviceService,
     canonicalize_custom_address,
     custom_record_to_device,
 )
-from maa_worker.runtime import WorkerContext
 from models.api import CustomDeviceCreate
 
 
@@ -28,7 +28,7 @@ def _controller(name: str, type_: str) -> SimpleNamespace:
 
 class _FakeWorker:
     def __init__(self, base_dir: Path, controllers: list[Any] | None = None):
-        self.context = WorkerContext(interface_base_dir=base_dir)
+        self.state = SimpleNamespace(context=WorkerContext(interface_base_dir=base_dir))
         self.interface = SimpleNamespace(
             controller=controllers
             or [

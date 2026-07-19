@@ -45,7 +45,7 @@ class PipelineOverrideService:
     def _is_option_active_for_context(self, option, controller_names: set[str]) -> bool:
         if option.controller and not controller_names.intersection(option.controller):
             return False
-        current_resource_name = self.worker.device_state.current_resource_name
+        current_resource_name = self.worker.state.device.current_resource_name
         if option.resource and (
             current_resource_name is None
             or current_resource_name not in option.resource

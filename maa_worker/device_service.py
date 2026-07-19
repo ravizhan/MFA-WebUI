@@ -149,7 +149,7 @@ class DeviceService:
         self.worker = worker
 
     def _settings_path(self) -> Path:
-        return self.worker.context.interface_base_dir / "config" / "settings.json"
+        return self.worker.state.context.interface_base_dir / "config" / "settings.json"
 
     def _load_custom_devices(self) -> list[dict[str, Any]]:
         with SETTINGS_LOCK:
@@ -308,7 +308,7 @@ class DeviceService:
         )
 
     def get_current_resource_definition(self):
-        resource_name = self.worker.device_state.current_resource_name
+        resource_name = self.worker.state.device.current_resource_name
         if resource_name is None:
             return None
         return next(
@@ -322,7 +322,7 @@ class DeviceService:
 
     def get_active_controller_definitions(self) -> list[Any]:
         controller = self.get_controller_definition(
-            self.worker.device_state.controller_name
+            self.worker.state.device.controller_name
         )
         return [controller] if controller is not None else []
 
@@ -487,13 +487,13 @@ class DeviceService:
         }
 
     def is_connection_alive(self) -> bool:
-        controller = self.worker.device_state.controller
-        if not self.worker.device_state.connected or controller is None:
+        controller = self.worker.state.device.controller
+        if not self.worker.state.device.connected or controller is None:
             return False
         return bool(getattr(controller, "connected", False))
 
     def reset_connection_state(self, reason: str | None = None):
-        state = self.worker.device_state
+        state = self.worker.state.device
         state_changed = (
             state.connected
             or state.configuration_locked
@@ -598,7 +598,7 @@ class DeviceService:
             raise ValueError(f"不支持的设备类型: {device_type}")
 
     def connect(self, device_config: DeviceModel) -> bool:
-        state = self.worker.device_state
+        state = self.worker.state.device
         if state.configuration_locked:
             if not self.is_connection_alive():
                 self.reset_connection_state(
@@ -689,7 +689,7 @@ class DeviceService:
         return False
 
     def set_resource(self, resource_name: str) -> bool:
-        state = self.worker.device_state
+        state = self.worker.state.device
         if state.configuration_locked:
             if not self.is_connection_alive():
                 self.reset_connection_state(

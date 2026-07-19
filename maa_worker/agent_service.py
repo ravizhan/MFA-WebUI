@@ -24,7 +24,7 @@ class AgentService:
         return [self.worker.interface.agent]
 
     def _load_i18n_mapping(self) -> dict[str, Any]:
-        context = self.worker.context
+        context = self.worker.state.context
         if context.i18n_text_mapping is not None:
             return context.i18n_text_mapping
 
@@ -84,7 +84,7 @@ class AgentService:
 
     def _get_selected_controller_payload(self) -> dict[str, Any]:
         controller = self.worker.device.get_controller_definition(
-            self.worker.device_state.controller_name
+            self.worker.state.device.controller_name
         )
         if controller is None:
             return {}
@@ -107,7 +107,7 @@ class AgentService:
     def build_pi_env(self) -> dict[str, str]:
         controller_payload = self._get_selected_controller_payload()
         resource_payload = self._get_selected_resource_payload()
-        version_path = self.worker.context.interface_base_dir / "version"
+        version_path = self.worker.state.context.interface_base_dir / "version"
         try:
             client_version = version_path.read_text(encoding="utf-8").strip()
         except OSError:
@@ -133,14 +133,14 @@ class AgentService:
             self.worker,
             pi_env=pi_env,
         )
-        self.worker.agent_state.processes = processes
+        self.worker.state.agent.processes = processes
 
     def ensure_started_once(self) -> bool:
         configs = self._get_agent_configs()
         if not configs:
             return True
 
-        state = self.worker.agent_state
+        state = self.worker.state.agent
         if state.started_once:
             return state.start_succeeded
 

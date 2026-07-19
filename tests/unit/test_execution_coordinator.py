@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from app_state import ActiveRun, AppState
 from models.scheduler import (
     CronTriggerConfig,
     ManualStartPayload,
@@ -57,18 +58,7 @@ def _scheduled(
     )
 
 
-def _fake_worker(*, running: bool = False, last_status: str = "success"):
-    task_state = SimpleNamespace(
-        running=running,
-        last_status=last_status,
-        last_error=None,
-    )
-    device_state = SimpleNamespace(
-        connected=True,
-        configuration_locked=True,
-        controller_name="ADB",
-        current_resource_name="Official",
-    )
+def _fake_worker():
     tasks = SimpleNamespace(
         start=MagicMock(return_value=True),
         stop=MagicMock(),
@@ -84,15 +74,10 @@ def _fake_worker(*, running: bool = False, last_status: str = "success"):
         send_notification=MagicMock(),
     )
     return SimpleNamespace(
-        task_state=task_state,
-        device_state=device_state,
         tasks=tasks,
         device=device,
         events=events,
         interface=None,
-        settings=SimpleNamespace(
-            runtime=SimpleNamespace(maxRetryCount=1, retryInterval=0)
-        ),
     )
 
 
@@ -105,21 +90,33 @@ async def store(tmp_path: Path) -> ExecutionStore:
 
 @pytest.fixture
 def worker():
-    return _fake_worker(running=False, last_status="success")
+    return _fake_worker()
 
 
 @pytest.fixture
-async def coord(store: ExecutionStore, worker) -> ExecutionCoordinator:
-    c = ExecutionCoordinator(store)
-    c.set_worker(worker)
-    return c
+def state(tmp_path: Path, worker) -> AppState:
+    s = AppState(tmp_path)
+    s.worker = worker
+    s.device.connected = True
+    s.device.configuration_locked = True
+    s.device.controller_name = "ADB"
+    s.device.current_resource_name = "Official"
+    s.task.running = False
+    s.task.last_status = "success"
+    s.task.last_error = None
+    return s
+
+
+@pytest.fixture
+async def coord(store: ExecutionStore, state: AppState) -> ExecutionCoordinator:
+    return ExecutionCoordinator(state, store)
 
 
 @pytest.mark.asyncio
-async def test_manual_manual_conflict_busy_manual(coord: ExecutionCoordinator, store):
-    from services.execution_coordinator import ActiveRun
-
-    coord._active = ActiveRun(
+async def test_manual_manual_conflict_busy_manual(
+    coord: ExecutionCoordinator, state: AppState, store
+):
+    state.active_run = ActiveRun(
         run_id="active-manual",
         origin="manual",
         task_name=MANUAL_TASK_NAME,
@@ -137,11 +134,9 @@ async def test_manual_manual_conflict_busy_manual(coord: ExecutionCoordinator, s
 
 @pytest.mark.asyncio
 async def test_scheduled_while_manual_skipped_busy_manual(
-    coord: ExecutionCoordinator, store: ExecutionStore
+    coord: ExecutionCoordinator, state: AppState, store: ExecutionStore
 ):
-    from services.execution_coordinator import ActiveRun
-
-    coord._active = ActiveRun(
+    state.active_run = ActiveRun(
         run_id="m1",
         origin="manual",
         task_name=MANUAL_TASK_NAME,
@@ -160,11 +155,9 @@ async def test_scheduled_while_manual_skipped_busy_manual(
 
 @pytest.mark.asyncio
 async def test_manual_while_scheduled_conflict_busy_scheduled(
-    coord: ExecutionCoordinator,
+    coord: ExecutionCoordinator, state: AppState
 ):
-    from services.execution_coordinator import ActiveRun
-
-    coord._active = ActiveRun(
+    state.active_run = ActiveRun(
         run_id="s1",
         origin="in_app",
         task_name="定时甲",
@@ -180,11 +173,9 @@ async def test_manual_while_scheduled_conflict_busy_scheduled(
 
 @pytest.mark.asyncio
 async def test_two_scheduled_different_tasks_skipped_busy_scheduled(
-    coord: ExecutionCoordinator, store: ExecutionStore
+    coord: ExecutionCoordinator, state: AppState, store: ExecutionStore
 ):
-    from services.execution_coordinator import ActiveRun
-
-    coord._active = ActiveRun(
+    state.active_run = ActiveRun(
         run_id="s1",
         origin="in_app",
         task_name="任务A",
@@ -311,13 +302,13 @@ async def test_native_late_missed_deadline(
 
 
 @pytest.mark.asyncio
-async def test_stop_active_calls_worker_stop(coord: ExecutionCoordinator, worker):
+async def test_stop_active_calls_worker_stop(
+    coord: ExecutionCoordinator, state: AppState, worker
+):
     assert await coord.stop_active() is False
     worker.tasks.stop.assert_not_called()
 
-    from services.execution_coordinator import ActiveRun
-
-    coord._active = ActiveRun(
+    state.active_run = ActiveRun(
         run_id="r1", origin="manual", task_name=MANUAL_TASK_NAME, occurrence_id=None
     )
     assert await coord.stop_active() is True

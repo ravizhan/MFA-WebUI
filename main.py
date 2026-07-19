@@ -1,7 +1,6 @@
 import argparse
 import asyncio
 import hashlib
-import logging
 import os
 import secrets
 import signal
@@ -124,7 +123,7 @@ if not CONFIG_DIR.exists():
         json.dump(TaskConfigModel().model_dump(), f, indent=4, ensure_ascii=False)
 
 
-app_state = AppState()
+app_state = AppState(APP_ROOT_DIR)
 
 
 async def log_monitor():
@@ -205,7 +204,7 @@ def delegate_native_dispatch(task_id: str) -> int:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app_state.is_shutting_down = False
-    app_state.worker = MaaWorker(app_state.message_conn, interface, APP_ROOT_DIR)
+    app_state.worker = MaaWorker(app_state, interface)
     app_state.broadcaster = LogBroadcaster()
     app_state.native_token = ensure_native_token()
 
@@ -220,8 +219,9 @@ async def lifespan(app: FastAPI):
     # Execution store + coordinator (admission gate)
     app_state.execution_store = ExecutionStore(SCHEDULER_DB_PATH)
     await app_state.execution_store.init()
-    app_state.execution_coordinator = ExecutionCoordinator(app_state.execution_store)
-    app_state.execution_coordinator.set_worker(app_state.worker)
+    app_state.execution_coordinator = ExecutionCoordinator(
+        app_state, app_state.execution_store
+    )
 
     # Native wakeup adapter (stateless)
     app_state.system_scheduler = SystemScheduler(APP_ROOT_DIR)
@@ -385,7 +385,7 @@ async def video_stream_generator(fps: int = 15):
     interval = 1.0 / fps
 
     while not app_state.is_shutting_down:
-        if app_state.worker and app_state.worker.device_state.connected:
+        if app_state.worker and app_state.device.connected:
             frame_bytes = await asyncio.to_thread(app_state.worker.get_screencap_bytes)
             if frame_bytes:
                 yield (
@@ -421,7 +421,7 @@ async def connect_device(device: DeviceModel):
         return {"status": "failed", "message": msg}
     if await asyncio.to_thread(app_state.worker.device.connect, device):
         return {"status": "success"}
-    msg = app_state.worker.device_state.last_device_error or "设备连接失败"
+    msg = app_state.device.last_device_error or "设备连接失败"
     return {"status": "failed", "message": msg}
 
 
@@ -442,10 +442,7 @@ def add_custom_device(payload: CustomDeviceCreate):
 def get_device_state():
     if app_state.worker is None:
         return {"status": "failed", "message": "Worker未初始化"}
-    if (
-        app_state.worker.device_state.connected
-        and not app_state.worker.device.is_connection_alive()
-    ):
+    if app_state.device.connected and not app_state.worker.device.is_connection_alive():
         app_state.worker.device.reset_connection_state(
             "检测到设备连接已断开，已解除设备与资源锁定"
         )
@@ -453,10 +450,10 @@ def get_device_state():
     return {
         "status": "success",
         "state": {
-            "connected": app_state.worker.device_state.connected,
-            "configuration_locked": app_state.worker.device_state.configuration_locked,
-            "controller_name": app_state.worker.device_state.controller_name,
-            "resource_name": app_state.worker.device_state.current_resource_name,
+            "connected": app_state.device.connected,
+            "configuration_locked": app_state.device.configuration_locked,
+            "controller_name": app_state.device.controller_name,
+            "resource_name": app_state.device.current_resource_name,
         },
     }
 
@@ -490,14 +487,14 @@ async def set_resource(name: str):
         msg = "Worker未初始化"
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
-    if not app_state.worker.device_state.connected:
+    if not app_state.device.connected:
         msg = "请先连接设备后再选择资源"
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
     try:
         ok = await asyncio.to_thread(app_state.worker.device.set_resource, name)
         if not ok:
-            msg = app_state.worker.device_state.last_resource_error or "设置资源失败"
+            msg = app_state.device.last_resource_error or "设置资源失败"
             return {"status": "failed", "message": msg}
     except Exception as e:
         app_state.send_log(f"设置资源失败: {e}")
@@ -660,7 +657,6 @@ async def perform_update():
             app_state.send_log(msg)
             return {"status": "failed", "message": msg}
 
-        # One-way gate: no more admissions once update download begins.
         if coordinator is not None:
             coordinator.set_update_in_progress()
 

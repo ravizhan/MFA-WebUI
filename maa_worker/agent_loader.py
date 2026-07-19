@@ -339,7 +339,7 @@ def run_black_magic(agent_config: Any, maa_worker: "MaaWorker"):
     动态加载并注册自定义 Action、Recognition 以及 EventSink 子类
     """
     tasker = maa_worker.tasker
-    controller = maa_worker.device_state.controller
+    controller = maa_worker.state.device.controller
     resource = maa_worker.resource
     runtime_root = _resolve_runtime_root()
     agent_index_path = _resolve_agent_index_path(agent_config, runtime_root)
@@ -579,7 +579,7 @@ def load_agents(
             agent_client.bind(maa_worker.resource)
             agent_client.register_sink(
                 maa_worker.resource,
-                maa_worker.device_state.controller,
+                maa_worker.state.device.controller,
                 maa_worker.tasker,
             )
             socket_id = agent_client.identifier
@@ -595,7 +595,7 @@ def load_agents(
                 if not agent_client.connect():
                     raise RuntimeError("Agent连接失败")
                 agent_processes.append(agent_process)
-                maa_worker.agent_state.agent_client = agent_client
+                maa_worker.state.agent.agent_client = agent_client
             except Exception as e:
                 maa_worker.events.send_log(f"Agent进程启动失败: {e}")
                 errors.append(f"Agent进程启动失败: {e}")

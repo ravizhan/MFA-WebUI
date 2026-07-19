@@ -30,7 +30,7 @@ class EventService:
         self.worker = worker
 
     def _publish_event(self, event: RealtimeEvent):
-        self.worker.message_conn.put(event)
+        self.worker.state.message_conn.put(event)
         time.sleep(0.05)
 
     def show_system_notification(self, title: str, message: str):
@@ -164,8 +164,8 @@ class EventService:
         )
 
     def _build_task_subject(self, task_list: list[str]) -> str:
-        if self.worker.task_state.current_task_name:
-            return self.worker.task_state.current_task_name
+        if self.worker.state.task.current_task_name:
+            return self.worker.state.task.current_task_name
         if len(task_list) == 1:
             return task_list[0]
         return f"{len(task_list)} 个任务"

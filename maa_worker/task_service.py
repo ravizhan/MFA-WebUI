@@ -61,16 +61,16 @@ class TaskService:
         task_name: str | None = None,
         pre_tasks: list[PreTaskCommand] | None = None,
     ) -> bool:
-        self.worker.task_state.last_error = None
-        if not self.worker.device_state.connected:
+        self.worker.state.task.last_error = None
+        if not self.worker.state.device.connected:
             return False
-        if not self.worker.device_state.current_resource_name:
-            self.worker.device_state.last_resource_error = "请先设置资源"
-            self.worker.events.send_log(self.worker.device_state.last_resource_error)
+        if not self.worker.state.device.current_resource_name:
+            self.worker.state.device.last_resource_error = "请先设置资源"
+            self.worker.events.send_log(self.worker.state.device.last_resource_error)
             return False
 
         controller_names = self.worker.device.get_active_controller_names()
-        current_resource_name = self.worker.device_state.current_resource_name
+        current_resource_name = self.worker.state.device.current_resource_name
 
         filtered_task_list: list[str] = []
         for task_entry in task_list:
@@ -92,8 +92,8 @@ class TaskService:
             self.worker.events.send_log(f"跳过任务 {task_display_name}: {reason}")
 
         if not filtered_task_list:
-            self.worker.task_state.last_error = "当前资源/控制器下无可执行任务"
-            self.worker.events.send_log(self.worker.task_state.last_error)
+            self.worker.state.task.last_error = "当前资源/控制器下无可执行任务"
+            self.worker.events.send_log(self.worker.state.task.last_error)
             return False
 
         if not self.worker.agents.ensure_started_once():
@@ -125,7 +125,7 @@ class TaskService:
 
             cleaned_options[task_id] = cleaned_task_options
 
-        state = self.worker.task_state
+        state = self.worker.state.task
         if not state.lock.acquire(blocking=False):
             return False
         try:
@@ -151,7 +151,7 @@ class TaskService:
             state.lock.release()
 
     def stop(self) -> bool:
-        state = self.worker.task_state
+        state = self.worker.state.task
         if not state.running:
             return False
         state.stop_flag = True
@@ -185,7 +185,7 @@ class TaskService:
                     pass
 
     def _run_pre_tasks(self, pre_tasks: list[PreTaskCommand]) -> bool:
-        state = self.worker.task_state
+        state = self.worker.state.task
         enabled = [
             t
             for t in pre_tasks
@@ -316,7 +316,7 @@ class TaskService:
         options: TaskOptionsByTask,
         pre_tasks: list[PreTaskCommand] | None = None,
     ):
-        state = self.worker.task_state
+        state = self.worker.state.task
         state.pre_tasks = pre_tasks or []
         try:
             self.worker.events.emit_task_started(task_list)

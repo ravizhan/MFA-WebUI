@@ -5,7 +5,7 @@ from typing import Any
 def _get_app_state():
     """Access the AppState instance from the entry-point module.
 
-    ``main.py`` creates ``app_state = AppState()`` at module level;
+    ``main.py`` creates ``app_state = AppState(APP_ROOT_DIR)`` at module level;
     this helper retrieves it via ``sys.modules`` to avoid circular
     imports or duplicating the singleton in ``app_state.py``.
 
