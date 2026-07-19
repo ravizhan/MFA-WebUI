@@ -250,7 +250,9 @@ class WindowsBackend(SystemSchedulerBackend):
         stderr = proc.stderr or ""
         if _windows_is_not_found(stderr):
             return False
-        raise RuntimeError(f"schtasks query failed: {stderr.strip() or proc.returncode}")
+        raise RuntimeError(
+            f"schtasks query failed: {stderr.strip() or proc.returncode}"
+        )
 
     def verify_registration(self, spec: NativeTaskSpec) -> tuple[bool, str]:
         task_path = self.build_identifier(spec.task_id)

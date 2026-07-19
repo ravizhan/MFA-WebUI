@@ -110,7 +110,9 @@ class SchedulerManager:
         try:
             self.scheduler.get_jobs()
         except Exception:
-            logger.warning("检测到旧格式调度任务，已清空（请重建计划任务）", exc_info=True)
+            logger.warning(
+                "检测到旧格式调度任务，已清空（请重建计划任务）", exc_info=True
+            )
             self.scheduler.remove_all_jobs()
         if paused:
             logger.info("调度器已启动（paused）")

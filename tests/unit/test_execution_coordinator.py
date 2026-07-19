@@ -159,7 +159,9 @@ async def test_scheduled_while_manual_skipped_busy_manual(
 
 
 @pytest.mark.asyncio
-async def test_manual_while_scheduled_conflict_busy_scheduled(coord: ExecutionCoordinator):
+async def test_manual_while_scheduled_conflict_busy_scheduled(
+    coord: ExecutionCoordinator,
+):
     from services.execution_coordinator import ActiveRun
 
     coord._active = ActiveRun(
@@ -323,7 +325,9 @@ async def test_stop_active_calls_worker_stop(coord: ExecutionCoordinator, worker
 
 
 @pytest.mark.asyncio
-async def test_in_app_success_path(coord: ExecutionCoordinator, store: ExecutionStore, monkeypatch):
+async def test_in_app_success_path(
+    coord: ExecutionCoordinator, store: ExecutionStore, monkeypatch
+):
     fixed = datetime(2026, 7, 19, 9, 2, 0, tzinfo=timezone.utc)
     monkeypatch.setattr(
         "services.execution_coordinator._local_now",

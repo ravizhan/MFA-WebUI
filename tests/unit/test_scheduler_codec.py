@@ -235,7 +235,9 @@ def test_decode_job_to_scheduled_task_no_trigger_type_field():
     )
     task = decode_job_to_scheduled_task(job, normalize=_identity_normalize)
     assert task.id == "job-1"
-    assert not hasattr(task, "trigger_type") or "trigger_type" not in task.model_fields_set
+    assert (
+        not hasattr(task, "trigger_type") or "trigger_type" not in task.model_fields_set
+    )
     assert isinstance(task.trigger_config, CronTriggerConfig)
     assert task.trigger_config.cron == "0 9 * * *"
     assert task.wakeup_enabled is False

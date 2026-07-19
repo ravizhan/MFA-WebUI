@@ -102,7 +102,9 @@ class ExecutionStore:
             cursor = await db.execute("PRAGMA table_info(scheduler_executions)")
             columns = {row[1] for row in await cursor.fetchall()}
             if columns and "origin" not in columns:
-                logger.warning("检测到旧版 executions 表，已按新 schema 重建（历史记录清空）")
+                logger.warning(
+                    "检测到旧版 executions 表，已按新 schema 重建（历史记录清空）"
+                )
                 await db.execute("DROP TABLE scheduler_executions")
             await db.execute(_CREATE_EXECUTIONS)
             await db.execute(_CREATE_CLAIMS)
@@ -201,9 +203,7 @@ class ExecutionStore:
             )
             await db.commit()
 
-    async def finish(
-        self, run_id: str, status: str, error: str | None = None
-    ) -> None:
+    async def finish(self, run_id: str, status: str, error: str | None = None) -> None:
         finished_at = _to_iso(_utc_now())
         async with aiosqlite.connect(self._db_path) as db:
             if error is None:
@@ -283,9 +283,7 @@ class ExecutionStore:
             )
             await db.commit()
 
-    async def finish_claim(
-        self, occurrence_id: str, abandoned: bool = False
-    ) -> None:
+    async def finish_claim(self, occurrence_id: str, abandoned: bool = False) -> None:
         state = "abandoned" if abandoned else "done"
         async with aiosqlite.connect(self._db_path) as db:
             await db.execute(

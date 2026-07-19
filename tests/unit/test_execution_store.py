@@ -99,7 +99,9 @@ async def test_try_claim_second_same_occurrence_false(store: ExecutionStore):
 
 
 @pytest.mark.asyncio
-async def test_mark_running_and_finish_claim_state(store: ExecutionStore, tmp_path: Path):
+async def test_mark_running_and_finish_claim_state(
+    store: ExecutionStore, tmp_path: Path
+):
     now = _utc()
     await store.try_claim("occ-x", "task-1", now, "in_app", "run-1")
     await store.mark_running("occ-x")

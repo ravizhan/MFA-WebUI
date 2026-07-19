@@ -201,7 +201,7 @@ def _resolve_import_path(import_path: str, base_dir: Path) -> Path:
         import_path,
         field_name="import",
     )
-    resolved_path = (base_dir / normalized_import_path)
+    resolved_path = base_dir / normalized_import_path
     try:
         resolved_path.relative_to(base_dir)
     except ValueError as exc:

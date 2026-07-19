@@ -1,7 +1,3 @@
-"""Single admission + execution entry for manual / in-app / native starts."""
-
-from __future__ import annotations
-
 import asyncio
 import logging
 import uuid

@@ -26,7 +26,10 @@ from services.native_cron import (
         ("0 9 * * *", NativeCron(minute=0, hour=9, day=None, month=None, dow=None)),
         ("30 8 1 * *", NativeCron(minute=30, hour=8, day=1, month=None, dow=None)),
         ("0 9 * * 1", NativeCron(minute=0, hour=9, day=None, month=None, dow=1)),
-        ("45 * * * *", NativeCron(minute=45, hour=None, day=None, month=None, dow=None)),
+        (
+            "45 * * * *",
+            NativeCron(minute=45, hour=None, day=None, month=None, dow=None),
+        ),
         ("0 0 1 1 *", NativeCron(minute=0, hour=0, day=1, month=1, dow=None)),
         ("0 12 * * 0", NativeCron(minute=0, hour=12, day=None, month=None, dow=0)),
         ("0 12 * * 7", NativeCron(minute=0, hour=12, day=None, month=None, dow=0)),

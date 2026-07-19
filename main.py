@@ -240,9 +240,7 @@ async def lifespan(app: FastAPI):
         desired = [t for t in all_tasks if t.wakeup_enabled and t.enabled]
         report = app_state.system_scheduler.converge(desired)
         if report.failed:
-            app_state.send_log(
-                f"系统任务 converge 有失败: {report.failed}"
-            )
+            app_state.send_log(f"系统任务 converge 有失败: {report.failed}")
         if report.registered or report.unregistered:
             app_state.send_log(
                 f"系统任务 converge: 注册 {len(report.registered)}, "

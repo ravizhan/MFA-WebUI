@@ -97,9 +97,7 @@ def test_native_dispatch_task_not_found_404(client):
     main.app_state.scheduler_manager = SimpleNamespace(
         get_task=AsyncMock(return_value=None)
     )
-    main.app_state.execution_coordinator = SimpleNamespace(
-        submit_scheduled=AsyncMock()
-    )
+    main.app_state.execution_coordinator = SimpleNamespace(submit_scheduled=AsyncMock())
 
     resp = c.post(
         "/api/internal/scheduler/native-dispatch",
@@ -220,9 +218,7 @@ def test_get_executions_from_store(client):
 def test_start_success_returns_run_id(client):
     c, main = client
     coord = SimpleNamespace(
-        submit_manual=AsyncMock(
-            return_value=Admission(accepted=True, run_id="run-ok")
-        )
+        submit_manual=AsyncMock(return_value=Admission(accepted=True, run_id="run-ok"))
     )
     main.app_state.execution_coordinator = coord
     resp = c.post("/api/start", json=_manual_body())

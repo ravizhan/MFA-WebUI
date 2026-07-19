@@ -98,7 +98,9 @@ def _task(
     )
 
 
-def _seed_registry(backend: FakeBackend, *task_ids: str, cron: str = "0 9 * * *") -> None:
+def _seed_registry(
+    backend: FakeBackend, *task_ids: str, cron: str = "0 9 * * *"
+) -> None:
     from services.native_cron import parse_native_cron
 
     for tid in task_ids:
