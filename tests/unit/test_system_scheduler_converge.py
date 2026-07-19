@@ -9,7 +9,6 @@ from pathlib import Path
 import pytest
 
 from models.scheduler import CronTriggerConfig, DateTriggerConfig, ScheduledTask
-from services.native_cron import NativeCron
 from services.system_scheduler import ConvergeReport, SystemScheduler
 from services.system_scheduler_backend import NativeTaskSpec, SystemSchedulerBackend
 
@@ -21,10 +20,9 @@ from services.system_scheduler_backend import NativeTaskSpec, SystemSchedulerBac
 
 @dataclass
 class FakeBackend(SystemSchedulerBackend):
-    """In-memory registry; inject verify failures / register exceptions."""
+    """In-memory registry; inject register exceptions."""
 
     registry: dict[str, NativeTaskSpec] = field(default_factory=dict)
-    verify_fail_ids: set[str] = field(default_factory=set)
     register_error_ids: dict[str, Exception] = field(default_factory=dict)
     unregister_error_ids: dict[str, Exception] = field(default_factory=dict)
     register_calls: list[str] = field(default_factory=list)
@@ -43,28 +41,18 @@ class FakeBackend(SystemSchedulerBackend):
         if err is not None:
             raise err
         self.registry[spec.task_id] = spec
-        # successful re-register clears sticky verify fail unless re-set by test
-        self.verify_fail_ids.discard(spec.task_id)
 
     def unregister(self, task_id: str) -> None:
         self.unregister_calls.append(task_id)
         err = self.unregister_error_ids.get(task_id)
         if err is not None:
             raise err
-        self.registry.pop(task_id, None)
+        if task_id not in self.registry:
+            raise RuntimeError(f"task not registered: {task_id}")
+        del self.registry[task_id]
 
     def is_registered(self, task_id: str) -> bool:
         return task_id in self.registry
-
-    def verify_registration(self, spec: NativeTaskSpec) -> tuple[bool, str]:
-        if spec.task_id not in self.registry:
-            return False, "not registered"
-        if spec.task_id in self.verify_fail_ids:
-            return False, "injected verify failure"
-        stored = self.registry[spec.task_id]
-        if stored.cron != spec.cron or stored.exe_path != spec.exe_path:
-            return False, "spec drift"
-        return True, "ok"
 
     def list_registered_task_ids(self) -> list[str]:
         return list(self.registry.keys())
@@ -152,39 +140,20 @@ def test_converge_registers_missing(app_root: Path):
     assert _UUID_A in backend.register_calls
 
 
-def test_converge_noop_when_registered_and_verified(app_root: Path):
-    backend = FakeBackend()
-    # Pre-seed with the same cron; register() will rebuild spec from task.
-    # First register via real path so registry matches build_native_command paths.
-    sched = SystemScheduler(app_root, backend=backend)
-    task = _task(_UUID_A)
-    sched.register(task)
-    backend.register_calls.clear()
-
-    report = sched.converge([task])
-
-    assert report.registered == []
-    assert report.unregistered == []
-    assert report.failed == []
-    assert backend.register_calls == []  # noop — no re-register
-
-
-def test_converge_reregisters_when_verify_fails(app_root: Path):
+def test_converge_always_registers_desired(app_root: Path):
+    """create-or-update: already-registered desired tasks are re-registered."""
     backend = FakeBackend()
     sched = SystemScheduler(app_root, backend=backend)
     task = _task(_UUID_A)
     sched.register(task)
     backend.register_calls.clear()
-    backend.verify_fail_ids.add(_UUID_A)
 
     report = sched.converge([task])
 
     assert report.registered == [_UUID_A]
+    assert report.unregistered == []
     assert report.failed == []
     assert backend.register_calls == [_UUID_A]
-    # after re-register, verify_fail cleared by FakeBackend.register
-    ok, _ = backend.verify_registration(backend.registry[_UUID_A])
-    assert ok
 
 
 def test_converge_register_exception_collected(app_root: Path):
@@ -202,24 +171,19 @@ def test_converge_register_exception_collected(app_root: Path):
 
 
 def test_converge_mixed_scenario(app_root: Path):
-    """Orphan removed, missing registered, verified noop, verify-fail re-registered, error collected."""
+    """Orphan removed, all desired re-registered, register error collected."""
     backend = FakeBackend()
     sched = SystemScheduler(app_root, backend=backend)
 
-    # A: already registered & will verify ok
     task_a = _task(_UUID_A, cron="0 9 * * *")
     sched.register(task_a)
 
-    # B: already registered but verify will fail → re-register
     task_b = _task(_UUID_B, cron="30 8 * * *")
     sched.register(task_b)
-    backend.verify_fail_ids.add(_UUID_B)
 
-    # C: not registered, register will fail
     task_c = _task(_UUID_C, cron="0 12 * * 1")
     backend.register_error_ids[_UUID_C] = RuntimeError("c-fail")
 
-    # Orphan in OS but not desired
     _seed_registry(backend, _UUID_ORPHAN)
 
     backend.register_calls.clear()
@@ -227,7 +191,7 @@ def test_converge_mixed_scenario(app_root: Path):
 
     report = sched.converge([task_a, task_b, task_c])
 
-    assert _UUID_A not in report.registered  # noop
+    assert _UUID_A in report.registered
     assert _UUID_B in report.registered
     assert _UUID_C not in report.registered
     assert _UUID_ORPHAN in report.unregistered
@@ -272,26 +236,19 @@ def test_register_non_cron_raises_value_error(app_root: Path):
         sched.register(task)
 
 
-def test_register_verify_failure_raises_runtime_error(app_root: Path):
-    backend = FakeBackend()
-    # After register, force verify to fail by keeping id in verify_fail_ids
-    # FakeBackend.register discards verify_fail — so inject via subclass:
-
-    class AlwaysFailVerify(FakeBackend):
-        def verify_registration(self, spec: NativeTaskSpec) -> tuple[bool, str]:
-            return False, "always fail"
-
-    backend = AlwaysFailVerify()
-    sched = SystemScheduler(app_root, backend=backend)
-
-    with pytest.raises(RuntimeError, match="verify failed"):
-        sched.register(_task(_UUID_A))
-
-
-def test_unregister_idempotent(app_root: Path):
+def test_register_success_no_verify(app_root: Path):
     backend = FakeBackend()
     sched = SystemScheduler(app_root, backend=backend)
-    sched.unregister(_UUID_A)  # not present — no error
+    sched.register(_task(_UUID_A))
+    assert backend.is_registered(_UUID_A)
+    assert backend.register_calls == [_UUID_A]
+
+
+def test_unregister_missing_raises(app_root: Path):
+    backend = FakeBackend()
+    sched = SystemScheduler(app_root, backend=backend)
+    with pytest.raises(RuntimeError, match="not registered"):
+        sched.unregister(_UUID_A)
     assert backend.unregister_calls == [_UUID_A]
 
 

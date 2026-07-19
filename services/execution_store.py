@@ -1,9 +1,9 @@
-"""SQLite persistence for scheduler executions and occurrence claims."""
+"""SQLite persistence for scheduler execution history."""
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List
 
@@ -14,9 +14,6 @@ from models.scheduler import TaskExecution
 logger = logging.getLogger(__name__)
 
 EXECUTIONS_MAX_RECORDS = 1000
-CLAIM_GRACE = timedelta(minutes=15)
-CLAIM_RETENTION = timedelta(days=35)
-CLAIM_LEASE = timedelta(seconds=30)
 
 _CREATE_EXECUTIONS = """
 CREATE TABLE IF NOT EXISTS scheduler_executions (
@@ -31,20 +28,6 @@ CREATE TABLE IF NOT EXISTS scheduler_executions (
     blocker_task_name TEXT,
     error_message TEXT,
     started_at TEXT NOT NULL,
-    finished_at TEXT
-)
-"""
-
-_CREATE_CLAIMS = """
-CREATE TABLE IF NOT EXISTS scheduler_occurrence_claims (
-    occurrence_id TEXT PRIMARY KEY,
-    task_id TEXT NOT NULL,
-    scheduled_for TEXT NOT NULL,
-    origin TEXT NOT NULL,
-    state TEXT NOT NULL,
-    run_id TEXT NOT NULL,
-    claimed_at TEXT NOT NULL,
-    lease_until TEXT,
     finished_at TEXT
 )
 """
@@ -89,13 +72,13 @@ def _row_to_execution(row: aiosqlite.Row) -> TaskExecution:
 
 
 class ExecutionStore:
-    """Owns scheduler.sqlite tables: executions + occurrence_claims."""
+    """Owns scheduler.sqlite executions table."""
 
     def __init__(self, db_path: Path) -> None:
         self._db_path = Path(db_path)
 
     async def init(self) -> None:
-        """Create tables/indexes, recover incomplete claims, prune old terminal claims."""
+        """Create tables/indexes."""
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         async with aiosqlite.connect(self._db_path) as db:
             # 旧 schema 重置：缺 origin 列的 executions 表直接丢弃（无迁移层，历史清空）
@@ -107,7 +90,6 @@ class ExecutionStore:
                 )
                 await db.execute("DROP TABLE scheduler_executions")
             await db.execute(_CREATE_EXECUTIONS)
-            await db.execute(_CREATE_CLAIMS)
             await db.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_scheduler_executions_started_at
@@ -120,50 +102,9 @@ class ExecutionStore:
                 ON scheduler_executions(task_id)
                 """
             )
-            await self._recover_claims(db)
-            await self._cleanup_old_claims(db)
+            # Drop legacy occurrence-claim table if present (claim mechanism removed)
+            await db.execute("DROP TABLE IF EXISTS scheduler_occurrence_claims")
             await db.commit()
-
-    async def _recover_claims(self, db: aiosqlite.Connection) -> None:
-        now = _utc_now()
-        db.row_factory = aiosqlite.Row
-        async with db.execute(
-            """
-            SELECT occurrence_id, scheduled_for
-            FROM scheduler_occurrence_claims
-            WHERE state IN ('claimed', 'running') AND finished_at IS NULL
-            """
-        ) as cursor:
-            rows = await cursor.fetchall()
-
-        for row in rows:
-            scheduled_for = _from_iso(row["scheduled_for"])
-            if scheduled_for is not None and now - scheduled_for <= CLAIM_GRACE:
-                await db.execute(
-                    "DELETE FROM scheduler_occurrence_claims WHERE occurrence_id = ?",
-                    (row["occurrence_id"],),
-                )
-            else:
-                await db.execute(
-                    """
-                    UPDATE scheduler_occurrence_claims
-                    SET state = 'abandoned', finished_at = ?
-                    WHERE occurrence_id = ?
-                    """,
-                    (_to_iso(now), row["occurrence_id"]),
-                )
-
-    async def _cleanup_old_claims(self, db: aiosqlite.Connection) -> None:
-        cutoff = _to_iso(_utc_now() - CLAIM_RETENTION)
-        await db.execute(
-            """
-            DELETE FROM scheduler_occurrence_claims
-            WHERE state IN ('done', 'abandoned')
-              AND finished_at IS NOT NULL
-              AND finished_at < ?
-            """,
-            (cutoff,),
-        )
 
     async def add(self, execution: TaskExecution) -> None:
         async with aiosqlite.connect(self._db_path) as db:
@@ -240,58 +181,3 @@ class ExecutionStore:
             ) as cursor:
                 rows = await cursor.fetchall()
         return [_row_to_execution(row) for row in rows]
-
-    async def try_claim(
-        self,
-        occurrence_id: str,
-        task_id: str,
-        scheduled_for: datetime,
-        origin: str,
-        run_id: str,
-    ) -> bool:
-        now = _utc_now()
-        async with aiosqlite.connect(self._db_path) as db:
-            cursor = await db.execute(
-                """
-                INSERT OR IGNORE INTO scheduler_occurrence_claims (
-                    occurrence_id, task_id, scheduled_for, origin, state,
-                    run_id, claimed_at, lease_until, finished_at
-                ) VALUES (?, ?, ?, ?, 'claimed', ?, ?, ?, NULL)
-                """,
-                (
-                    occurrence_id,
-                    task_id,
-                    _to_iso(scheduled_for),
-                    origin,
-                    run_id,
-                    _to_iso(now),
-                    _to_iso(now + CLAIM_LEASE),
-                ),
-            )
-            await db.commit()
-            return cursor.rowcount > 0
-
-    async def mark_running(self, occurrence_id: str) -> None:
-        async with aiosqlite.connect(self._db_path) as db:
-            await db.execute(
-                """
-                UPDATE scheduler_occurrence_claims
-                SET state = 'running', lease_until = NULL
-                WHERE occurrence_id = ?
-                """,
-                (occurrence_id,),
-            )
-            await db.commit()
-
-    async def finish_claim(self, occurrence_id: str, abandoned: bool = False) -> None:
-        state = "abandoned" if abandoned else "done"
-        async with aiosqlite.connect(self._db_path) as db:
-            await db.execute(
-                """
-                UPDATE scheduler_occurrence_claims
-                SET state = ?, finished_at = ?, lease_until = NULL
-                WHERE occurrence_id = ?
-                """,
-                (state, _to_iso(_utc_now()), occurrence_id),
-            )
-            await db.commit()

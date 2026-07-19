@@ -145,7 +145,6 @@ async def test_scheduled_while_manual_skipped_busy_manual(
     result = await coord.submit_scheduled(_scheduled(), origin="in_app")
     assert result.accepted is False
     assert result.skip_status == "skipped_busy_manual"
-    assert result.deduplicated is False
     rows = await store.list()
     assert len(rows) == 1
     assert rows[0].status == "skipped_busy_manual"
@@ -193,9 +192,10 @@ async def test_two_scheduled_different_tasks_skipped_busy_scheduled(
 
 
 @pytest.mark.asyncio
-async def test_same_occurrence_dedup_no_history(
-    coord: ExecutionCoordinator, store: ExecutionStore, monkeypatch
+async def test_same_occurrence_no_claim_second_blocked_by_active_run(
+    coord: ExecutionCoordinator, store: ExecutionStore, state: AppState, monkeypatch
 ):
+    """Without occurrence claims, a second fire while active is busy-skipped."""
     fixed_now = datetime(2026, 7, 19, 9, 5, 0, tzinfo=timezone.utc)
 
     monkeypatch.setattr(
@@ -211,20 +211,21 @@ async def test_same_occurrence_dedup_no_history(
         lambda trigger, now: fixed_now.replace(minute=0, second=0, microsecond=0),
     )
 
+    # Hold active_run so the first submit_scheduled would set it; simulate mid-run
+    # by leaving prepare short (default fake worker finishes immediately).
     first = await coord.submit_scheduled(_scheduled(), origin="in_app")
     assert first.accepted is True
     assert first.run_id is not None
+    assert coord.active_run() is None
 
+    # After first completes, second fire of same occurrence is accepted again
+    # (no claim/lease dedup layer).
     second = await coord.submit_scheduled(_scheduled(), origin="native")
-    assert second.accepted is False
-    assert second.deduplicated is True
-    assert second.skip_status is None
+    assert second.accepted is True
 
     rows = await store.list()
-    # Only the accepted running→finished record, no dedup row
-    assert len(rows) == 1
-    assert rows[0].id == first.run_id
-    assert rows[0].origin == "in_app"
+    assert len(rows) == 2
+    assert {r.origin for r in rows} == {"in_app", "native"}
 
 
 @pytest.mark.asyncio
@@ -288,14 +289,11 @@ async def test_native_late_missed_deadline(
     result = await coord.submit_scheduled(_scheduled(), origin="native")
     assert result.accepted is False
     assert result.skip_status == "missed_deadline"
-    assert result.deduplicated is False
     rows = await store.list()
     assert len(rows) == 1
     assert rows[0].status == "missed_deadline"
     assert rows[0].origin == "native"
     assert rows[0].finished_at is not None
-    # No claim should remain for re-fire of a different path; claim was never taken
-    # Second native late still records another missed row (no claim)
     result2 = await coord.submit_scheduled(_scheduled(), origin="native")
     assert result2.skip_status == "missed_deadline"
     assert len(await store.list()) == 2

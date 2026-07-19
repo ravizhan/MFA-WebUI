@@ -1058,7 +1058,6 @@ async def native_dispatch(body: NativeDispatchRequest):
         "status": "success",
         "accepted": admission.accepted,
         "run_id": admission.run_id,
-        "deduplicated": admission.deduplicated,
         "skip_status": admission.skip_status,
     }
 

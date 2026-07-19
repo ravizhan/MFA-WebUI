@@ -48,25 +48,21 @@ class SystemScheduler:
         return self._backend
 
     def register(self, task: ScheduledTask) -> None:
-        """Parse cron, register with OS, verify. Raises ValueError / RuntimeError."""
+        """Parse cron and register with OS (create-or-update). Raises ValueError / RuntimeError."""
         spec = self._build_spec(task)
         self._backend.register(spec)
-        ok, detail = self._backend.verify_registration(spec)
-        if not ok:
-            raise RuntimeError(
-                f"native registration verify failed for {task.id}: {detail}"
-            )
         logger.info("native register ok: %s", task.id)
 
     def unregister(self, task_id: str) -> None:
-        """Idempotent OS unregister."""
+        """Unregister OS native task. Propagates backend errors."""
         self._backend.unregister(task_id)
         logger.info("native unregister ok: %s", task_id)
 
     def converge(self, desired: list[ScheduledTask]) -> ConvergeReport:
-        """Diff desired set vs observed OS registrations; register/unregister as needed.
+        """Materialize desired set: register each desired, unregister observed orphans.
 
-        Exceptions are collected into report.failed; one failure does not abort the rest.
+        Backend register is create-or-update. Exceptions are collected into
+        report.failed so one bad task does not abort the rest of startup converge.
         """
         report = ConvergeReport()
         desired_by_id = {t.id: t for t in desired}
@@ -82,11 +78,6 @@ class SystemScheduler:
 
         for task_id, task in desired_by_id.items():
             try:
-                if self._backend.is_registered(task_id):
-                    spec = self._build_spec(task)
-                    ok, _detail = self._backend.verify_registration(spec)
-                    if ok:
-                        continue  # noop
                 self.register(task)
                 report.registered.append(task_id)
             except Exception as e:

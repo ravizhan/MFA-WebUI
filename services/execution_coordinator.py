@@ -65,7 +65,6 @@ class Admission:
     run_id: str | None = None
     conflict: StartConflict | None = None
     skip_status: ExecutionStatus | None = None
-    deduplicated: bool = False
 
 
 class ExecutionCoordinator:
@@ -159,7 +158,7 @@ class ExecutionCoordinator:
         scheduled_for_utc = _to_utc(scheduled_for)
         occurrence_id = _occurrence_id(task.id, scheduled_for_utc)
 
-        # Native late window: beyond 15min → missed_deadline, no claim.
+        # Native late window: beyond 15min → missed_deadline.
         if origin == "native" and now_utc - scheduled_for_utc > MISFIRE_GRACE:
             run_id = str(uuid.uuid4())
             await self._store.add(
@@ -183,16 +182,6 @@ class ExecutionCoordinator:
             )
 
         run_id = str(uuid.uuid4())
-        claimed = await self._store.try_claim(
-            occurrence_id=occurrence_id,
-            task_id=task.id,
-            scheduled_for=scheduled_for_utc,
-            origin=origin,
-            run_id=run_id,
-        )
-        if not claimed:
-            return Admission(accepted=False, deduplicated=True)
-
         skip_status: ExecutionStatus | None = None
         blocker: ActiveRun | None = None
 
@@ -230,7 +219,6 @@ class ExecutionCoordinator:
                     finished_at=skip_now,
                 )
             )
-            await self._store.finish_claim(occurrence_id, abandoned=False)
             return Admission(
                 accepted=False,
                 run_id=run_id,
@@ -249,7 +237,6 @@ class ExecutionCoordinator:
                 started_at=_utc_now(),
             )
         )
-        await self._store.mark_running(occurrence_id)
         try:
             status, error = await self._prepare_and_run(
                 task_list=task.task_list,
@@ -262,11 +249,7 @@ class ExecutionCoordinator:
                 log_label=task.id,
             )
             await self._store.finish(run_id, status, error)
-            await self._store.finish_claim(occurrence_id, abandoned=False)
             return Admission(accepted=True, run_id=run_id)
-        except Exception:
-            await self._store.finish_claim(occurrence_id, abandoned=True)
-            raise
         finally:
             if self._state.active_run and self._state.active_run.run_id == run_id:
                 self._state.active_run = None
@@ -321,7 +304,7 @@ class ExecutionCoordinator:
     ) -> tuple[str, str | None]:
         """Port of SchedulerManager._execute_task body (connect → start → poll).
 
-        Returns ``(status, error_message)``. Does not touch ActiveRun or claims.
+        Returns ``(status, error_message)``. Does not touch ActiveRun.
         """
         del run_id  # reserved for future correlation / logging
         worker = self._state.worker

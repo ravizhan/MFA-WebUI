@@ -34,7 +34,11 @@ logger = logging.getLogger(__name__)
 
 
 async def scheduled_job_fired(**kwargs: Any) -> None:
-    """APS job entry: decode task and hand off to ExecutionCoordinator."""
+    """APS job entry: decode task and hand off to ExecutionCoordinator.
+
+    Wakeup tasks (``wakeup_enabled``) are owned by OS native cold-start /
+    native-dispatch only; APS in-app fire is a no-op for them.
+    """
     try:
         import main as main_mod
     except Exception:
@@ -65,6 +69,14 @@ async def scheduled_job_fired(**kwargs: Any) -> None:
 
     if task is None:
         logger.error("scheduled_job_fired: 任务不存在 %s", task_id)
+        return
+
+    if task.wakeup_enabled:
+        logger.info(
+            "scheduled_job_fired: skip in-app dispatch for wakeup task %s "
+            "(native owns execution)",
+            task_id,
+        )
         return
 
     try:
@@ -101,7 +113,6 @@ class SchedulerManager:
             job_defaults={
                 "misfire_grace_time": 900,
                 "coalesce": True,
-                "max_instances": 1,
             },
             timezone=tzlocal.get_localzone(),
         )
@@ -171,16 +182,10 @@ class SchedulerManager:
             return
         self._system_scheduler.register(task)
 
-    def _unregister_native(self, task_id: str, *, warn_only: bool = False) -> None:
+    def _unregister_native(self, task_id: str) -> None:
         if self._system_scheduler is None:
             return
-        try:
-            self._system_scheduler.unregister(task_id)
-        except Exception as e:
-            if warn_only:
-                logger.warning("native unregister 失败 %s: %s", task_id, e)
-            else:
-                raise
+        self._system_scheduler.unregister(task_id)
 
     async def create_task(self, task_create: ScheduledTaskCreate) -> ScheduledTask:
         if not self.scheduler:
@@ -215,7 +220,7 @@ class SchedulerManager:
             updated_at=now,
         )
 
-        # Native first so APS is untouched on register failure.
+        # Native before APS when desired wakeup is on.
         if self._desired_wakeup(task.wakeup_enabled, task.enabled):
             self._register_native(task)
 
@@ -390,10 +395,10 @@ class SchedulerManager:
 
             if native_relevant and self._system_scheduler is not None:
                 if new_desired and (not old_desired or trigger_changed):
-                    # register / re-register before APS mutation
+                    # Native before APS mutation (register / re-register).
                     self._register_native(tentative)
                 elif old_desired and not new_desired:
-                    self._unregister_native(task_id, warn_only=False)
+                    self._unregister_native(task_id)
 
             trigger = build_trigger(new_trigger_config)
             self.scheduler.modify_job(
@@ -432,28 +437,27 @@ class SchedulerManager:
             return None
 
     async def delete_task(self, task_id: str) -> bool:
-        """Remove APS job, then best-effort native unregister."""
+        """Delete task: native unregister first when desired, then remove APS job."""
         if not self.scheduler:
             return False
         try:
-            existing = self.scheduler.get_job(task_id)
-            if existing is None:
-                self._unregister_native(task_id, warn_only=True)
-                return True
+            job = self.scheduler.get_job(task_id)
+            if job is None:
+                return False
+            task = self._decode_job(job)
+            if self._desired_wakeup(task.wakeup_enabled, task.enabled):
+                self._unregister_native(task_id)
             self.scheduler.remove_job(task_id)
+            logger.info("删除定时任务: %s", task_id)
+            return True
         except Exception as e:
             name = type(e).__name__
             if name == "JobLookupError" or "JobLookupError" in name:
-                self._unregister_native(task_id, warn_only=True)
-                return True
+                return False
             logger.error("删除任务失败: %s", e)
             if self._worker:
                 self._worker.events.send_log(f"删除任务失败: {e}")
             return False
-
-        self._unregister_native(task_id, warn_only=True)
-        logger.info("删除定时任务: %s", task_id)
-        return True
 
     async def pause_task(self, task_id: str) -> bool:
         if not self.scheduler:
@@ -463,9 +467,10 @@ class SchedulerManager:
             if job is None:
                 return False
             task = self._decode_job(job)
+            # Native before APS pause when wakeup is currently desired.
+            if self._desired_wakeup(task.wakeup_enabled, task.enabled):
+                self._unregister_native(task_id)
             self.scheduler.pause_job(task_id)
-            if task.wakeup_enabled:
-                self._unregister_native(task_id, warn_only=True)
             logger.info("暂停定时任务: %s", task_id)
             return True
         except Exception as e:
@@ -482,8 +487,8 @@ class SchedulerManager:
             if job is None:
                 return False
             task = self._decode_job(job)
+            # Native before APS resume when wakeup is requested.
             if task.wakeup_enabled:
-                # Fail closed: do not resume APS if native register fails
                 self._register_native(task)
             self.scheduler.resume_job(task_id)
             logger.info("恢复定时任务: %s", task_id)

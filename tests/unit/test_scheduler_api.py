@@ -134,7 +134,7 @@ def test_native_dispatch_ok_calls_submit_scheduled(client):
     assert data["status"] == "success"
     assert data["accepted"] is True
     assert data["run_id"] == "run-n1"
-    assert data["deduplicated"] is False
+    assert "deduplicated" not in data
     coord.submit_scheduled.assert_awaited_once()
     args, kwargs = coord.submit_scheduled.await_args
     assert args[0].id == "task-1"
