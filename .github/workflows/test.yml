@@ -99,7 +99,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15, windows-2025]
+        include:
+          - os: ubuntu-24.04
+          - os: ubuntu-24.04-arm
+          - os: macos-15-intel
+          - os: macos-15
+          - os: windows-2025
+          - os: windows-11-arm
     runs-on: ${{ matrix.os }}
     name: Updater Tests (${{ matrix.os }})
     defaults:
