@@ -2,9 +2,6 @@ import type {
   ScheduledTaskCreate,
   ScheduledTaskUpdate,
   SchedulerApiResponse,
-  SystemTaskRegistration,
-  SystemTaskRepairResult,
-  SystemTaskStatus,
 } from "@/types/schedulerModel"
 
 export function getSchedulerTasks(): Promise<SchedulerApiResponse> {
@@ -65,28 +62,4 @@ export function getSchedulerExecutions(limit: number = 50): Promise<SchedulerApi
   return fetch(`/api/scheduler/executions?limit=${limit}`, { method: "GET" }).then((res) =>
     res.json(),
   )
-}
-
-export function getSystemTaskStatus(
-  taskId: string,
-): Promise<{ status: string; data?: SystemTaskStatus; message?: string }> {
-  return fetch(`/api/scheduler/tasks/${taskId}/system-status`, {
-    method: "GET",
-  }).then((res) => res.json())
-}
-
-export function getSystemTasks(): Promise<{
-  status: string
-  registrations?: SystemTaskRegistration[]
-  message?: string
-}> {
-  return fetch("/api/scheduler/system-tasks", { method: "GET" }).then((res) => res.json())
-}
-
-export function repairSystemTasks(): Promise<{
-  status: string
-  data?: SystemTaskRepairResult
-  message?: string
-}> {
-  return fetch("/api/scheduler/system-tasks/repair", { method: "POST" }).then((res) => res.json())
 }

@@ -107,10 +107,10 @@
                 class="border-base-300 hover:border-primary/40 has-[:checked]:border-primary has-[:checked]:bg-primary/5 flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors"
               >
                 <input
-                  v-model="formData.trigger_type"
                   type="radio"
                   class="radio radio-primary radio-sm"
-                  :value="option.value"
+                  :checked="currentTriggerType === option.value"
+                  @change="setTriggerType(option.value)"
                 />
                 <Icon :icon="option.icon" class="text-base opacity-70" aria-hidden="true" />
                 <span class="text-sm">{{ option.label }}</span>
@@ -120,7 +120,7 @@
 
           <!-- Schedule: cron -->
           <fieldset
-            v-if="activeSection === 'schedule' && formData.trigger_type === 'cron'"
+            v-if="activeSection === 'schedule' && currentTriggerType === 'cron'"
             class="fieldset p-0"
           >
             <legend class="fieldset-legend">
@@ -136,7 +136,7 @@
             />
           </fieldset>
           <div
-            v-if="activeSection === 'schedule' && formData.trigger_type === 'cron'"
+            v-if="activeSection === 'schedule' && currentTriggerType === 'cron'"
             class="flex flex-wrap gap-2"
           >
             <span class="text-base-content/50 self-center text-xs">
@@ -156,9 +156,30 @@
             </button>
           </div>
 
+          <div
+            v-if="activeSection === 'schedule' && currentTriggerType === 'cron'"
+            class="flex flex-col gap-1"
+          >
+            <label class="flex cursor-pointer items-center gap-2">
+              <input
+                v-model="wakeupEnabled"
+                type="checkbox"
+                class="checkbox checkbox-primary checkbox-sm"
+                :disabled="!isNativeCronEligible(cronConfig.cron)"
+              />
+              <span class="text-sm">{{ t("settings.scheduler.dialog.runWhenClosed") }}</span>
+            </label>
+            <p
+              v-if="!isNativeCronEligible(cronConfig.cron)"
+              class="text-xs text-warning"
+            >
+              {{ t("settings.scheduler.dialog.runWhenClosedIneligible") }}
+            </p>
+          </div>
+
           <!-- Schedule: date -->
           <fieldset
-            v-if="activeSection === 'schedule' && formData.trigger_type === 'date'"
+            v-if="activeSection === 'schedule' && currentTriggerType === 'date'"
             class="fieldset p-0"
           >
             <legend class="fieldset-legend">
@@ -178,7 +199,7 @@
 
           <!-- Schedule: interval duration -->
           <fieldset
-            v-if="activeSection === 'schedule' && formData.trigger_type === 'interval'"
+            v-if="activeSection === 'schedule' && currentTriggerType === 'interval'"
             class="fieldset p-0"
           >
             <legend class="fieldset-legend">
@@ -264,7 +285,7 @@
 
           <!-- Schedule: interval start/end -->
           <div
-            v-if="activeSection === 'schedule' && formData.trigger_type === 'interval'"
+            v-if="activeSection === 'schedule' && currentTriggerType === 'interval'"
             class="grid grid-cols-1 gap-3 sm:grid-cols-2"
           >
             <fieldset class="fieldset p-0">
@@ -358,25 +379,6 @@
                 {{ opt.label }}
               </option>
             </select>
-          </fieldset>
-
-          <!-- System Scheduling (user-level OS wakeup) -->
-          <fieldset v-if="activeSection === 'system'" class="fieldset p-0">
-            <legend class="fieldset-legend flex items-center gap-1.5">
-              <Icon icon="mdi:monitor-shimmer" class="text-base opacity-70" aria-hidden="true" />
-              {{ t("settings.scheduler.dialog.systemScheduling") }}
-            </legend>
-
-            <label class="flex cursor-pointer items-center gap-3">
-              <input
-                v-model="systemSchedulingEnabled"
-                type="checkbox"
-                class="toggle toggle-primary"
-              />
-              <span class="text-sm">{{
-                t("settings.scheduler.dialog.enableSystemScheduling")
-              }}</span>
-            </label>
           </fieldset>
 
           <!-- Content: tasks -->
@@ -520,7 +522,7 @@ interface Emits {
   (e: "saved"): void
 }
 
-type DialogSection = "basic" | "schedule" | "environment" | "system" | "content"
+type DialogSection = "basic" | "schedule" | "environment" | "content"
 
 const { show, task } = defineProps<Props>()
 const emit = defineEmits<Emits>()
@@ -545,7 +547,25 @@ const availableResources = ref<Array<{ name: string; label?: string; controller?
 const loadingDevices = ref(false)
 const loadingResources = ref(false)
 
-const systemSchedulingEnabled = ref(false)
+const wakeupEnabled = ref(false)
+
+const currentTriggerType = computed(() => formData.value.trigger_config.type)
+
+function setTriggerType(type: TriggerType) {
+  formData.value.trigger_config = getTriggerConfigByType(type)
+}
+
+function isNativeCronEligible(cron: string): boolean {
+  const parts = cron.trim().split(/\s+/)
+  if (parts.length !== 5) return false
+  for (const part of parts) {
+    if (part !== "*" && !/^\d+$/.test(part)) return false
+  }
+  if (parts[0] === "*") return false
+  if (parts[2] !== "*" && parts[4] !== "*") return false
+  if (parts[4] !== "*" && (parts[2] !== "*" || parts[3] !== "*")) return false
+  return true
+}
 
 const sections = computed(() => [
   {
@@ -562,11 +582,6 @@ const sections = computed(() => [
     id: "environment" as const,
     label: t("settings.scheduler.dialog.sections.environment"),
     icon: "mdi:devices",
-  },
-  {
-    id: "system" as const,
-    label: t("settings.scheduler.dialog.systemScheduling"),
-    icon: "mdi:monitor-shimmer",
   },
   {
     id: "content" as const,
@@ -754,7 +769,7 @@ watch(
       return
     }
     activeSection.value = "basic"
-    systemSchedulingEnabled.value = task?.wakeup_enabled === true
+    wakeupEnabled.value = task?.wakeup_enabled === true
   },
 )
 
@@ -763,13 +778,6 @@ onMounted(() => {
     syncDialogVisibility(true)
   }
 })
-
-watch(
-  () => formData.value.trigger_type,
-  (newType) => {
-    formData.value.trigger_config = getTriggerConfigByType(newType)
-  },
-)
 
 watch(
   () => task,
@@ -854,7 +862,7 @@ function resetForm() {
   currentSettingTaskId.value = null
   activeTab.value = "task-list"
   activeSection.value = "basic"
-  systemSchedulingEnabled.value = false
+  wakeupEnabled.value = false
 }
 
 function syncTaskListData(preferredOrder: string[]) {
@@ -896,21 +904,20 @@ function initFormData(task?: ScheduledTask | null): ScheduledTaskCreate {
       name: task.name,
       description: task.description || "",
       enabled: task.enabled,
-      trigger_type: task.trigger_type,
-      trigger_config: getTriggerConfigByType(task.trigger_type, task.trigger_config),
+      trigger_config: getTriggerConfigByType(task.trigger_config.type, task.trigger_config),
       task_list,
       task_options: configStore.buildOptionsForTasks(task_list, task.task_options),
       preTasks: Array.isArray(task.preTasks) ? task.preTasks.map((pt) => ({ ...pt })) : [],
       controller_name: task.controller_name,
       device: task.device ? { ...task.device } : null,
       resource_name: task.resource_name,
+      wakeup_enabled: task.wakeup_enabled === true,
     }
   }
   return {
     name: "",
     description: "",
     enabled: true,
-    trigger_type: "cron",
     trigger_config: getTriggerConfigByType("cron"),
     task_list: [],
     task_options: configStore.buildOptionsForTasks([]),
@@ -918,6 +925,7 @@ function initFormData(task?: ScheduledTask | null): ScheduledTaskCreate {
     controller_name: null,
     device: null,
     resource_name: null,
+    wakeup_enabled: false,
   }
 }
 
@@ -1181,7 +1189,7 @@ function validateForm(): boolean {
   if (!validateName()) {
     return false
   }
-  const { trigger_type } = formData.value
+  const trigger_type = formData.value.trigger_config.type
   if (trigger_type === "cron" && !validateCron()) {
     return false
   }
@@ -1199,7 +1207,7 @@ async function saveTaskPayload(): Promise<{ taskId: string; success: boolean }> 
     ...formData.value,
     ...configStore.buildExecutionPayload(formData.value.task_list, formData.value.task_options),
     preTasks: formData.value.preTasks ?? [],
-    wakeup_enabled: systemSchedulingEnabled.value,
+    wakeup_enabled: wakeupEnabled.value,
   }
 
   if (isEditMode.value && task) {

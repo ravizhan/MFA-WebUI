@@ -17,7 +17,7 @@
         <div class="flex-1 min-w-0">
           <div class="text-sm font-medium truncate">{{ task.name }}</div>
           <div class="text-xs opacity-60">
-            {{ formatTriggerText(task.trigger_type, task.trigger_config) }}
+            {{ formatTriggerText(task.trigger_config.type, task.trigger_config) }}
           </div>
         </div>
         <div class="text-xs opacity-60 shrink-0">

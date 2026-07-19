@@ -7,7 +7,9 @@ Does not import SchedulerManager or runtime/worker state.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from typing import Any, Literal, Optional
+from datetime import datetime, timedelta
+from typing import Any, Literal
+from zoneinfo import ZoneInfo
 
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
@@ -23,12 +25,15 @@ from models.scheduler import (
     TaskOptionsByTask,
     TriggerConfig,
 )
+from services.native_cron import aps_dow_to_unix, unix_dow_to_aps
 
 TriggerType = Literal["cron", "date", "interval"]
 NormalizePayload = Callable[
     [Any, Any, Any],
     tuple[list[str], TaskOptionsByTask, list[Any]],
 ]
+
+_MISFIRE_GRACE = timedelta(minutes=15)
 
 
 class SchedulerJobDecodeError(Exception):
@@ -38,8 +43,8 @@ class SchedulerJobDecodeError(Exception):
         self,
         message: str,
         *,
-        job_id: Optional[str] = None,
-        cause: Optional[BaseException] = None,
+        job_id: str | None = None,
+        cause: BaseException | None = None,
     ):
         self.job_id = job_id
         self.cause = cause
@@ -47,7 +52,7 @@ class SchedulerJobDecodeError(Exception):
         super().__init__(f"{prefix}{message}")
 
 
-def decode_wakeup_enabled(raw: Any, *, job_id: Optional[str] = None) -> bool:
+def decode_wakeup_enabled(raw: Any, *, job_id: str | None = None) -> bool:
     """Decode APS wakeup_enabled: missing/None → False; bool only otherwise."""
     if raw is None:
         return False
@@ -59,20 +64,52 @@ def decode_wakeup_enabled(raw: Any, *, job_id: Optional[str] = None) -> bool:
     )
 
 
-def build_trigger(trigger_config: TriggerConfig) -> CronTrigger | DateTrigger | IntervalTrigger:
-    """Build an APScheduler trigger from TriggerConfig."""
+def _map_dow_expr(expr: str, mapper: Callable[[int], int]) -> str:
+    """Map numeric day-of-week tokens in a cron field expression.
+
+    Preserves ``*``, steps (``/N``), lists, and ranges. Name tokens pass through.
+    """
+    if expr == "*":
+        return "*"
+    if "/" in expr:
+        base, step = expr.split("/", 1)
+        return f"{_map_dow_expr(base, mapper)}/{step}"
+    if "," in expr:
+        return ",".join(_map_dow_expr(part, mapper) for part in expr.split(","))
+    if "-" in expr:
+        left, right = expr.split("-", 1)
+        if left.isdigit() and right.isdigit():
+            return f"{mapper(int(left))}-{mapper(int(right))}"
+        return expr
+    if expr.isdigit():
+        return str(mapper(int(expr)))
+    return expr
+
+
+def build_trigger(
+    trigger_config: TriggerConfig,
+    *,
+    timezone: Any = None,
+) -> CronTrigger | DateTrigger | IntervalTrigger:
+    """Build an APScheduler trigger from TriggerConfig.
+
+    Cron day-of-week uses Unix semantics (0/7=Sunday); mapped to APS (0=Monday).
+    """
     if isinstance(trigger_config, CronTriggerConfig):
         parts = trigger_config.cron.split()
         if len(parts) != 5:
             raise ValueError(f"无效的 Cron 表达式: {trigger_config.cron}")
         minute, hour, day, month, day_of_week = parts
-        return CronTrigger(
-            minute=minute,
-            hour=hour,
-            day=day,
-            month=month,
-            day_of_week=day_of_week,
-        )
+        kwargs: dict[str, Any] = {
+            "minute": minute,
+            "hour": hour,
+            "day": day,
+            "month": month,
+            "day_of_week": _map_dow_expr(day_of_week, unix_dow_to_aps),
+        }
+        if timezone is not None:
+            kwargs["timezone"] = timezone
+        return CronTrigger(**kwargs)
     if isinstance(trigger_config, DateTriggerConfig):
         return DateTrigger(run_date=trigger_config.run_date)
     if isinstance(trigger_config, IntervalTriggerConfig):
@@ -92,6 +129,7 @@ def decode_trigger(trigger: Any) -> tuple[TriggerType, TriggerConfig]:
     """Rebuild (trigger_type, TriggerConfig) from an APScheduler trigger.
 
     Raises ValueError for unknown/corrupt triggers. Never invents a default cron.
+    Cron day-of-week is reverse-mapped from APS (0=Monday) to Unix (0=Sunday).
     """
     if isinstance(trigger, CronTrigger):
         required_fields = ("minute", "hour", "day", "month", "day_of_week")
@@ -101,7 +139,16 @@ def decode_trigger(trigger: Any) -> tuple[TriggerType, TriggerConfig]:
             raise ValueError(
                 f"CronTrigger missing required field(s): {', '.join(missing)}"
             )
-        cron = " ".join(field_map[name] for name in required_fields)
+        dow_unix = _map_dow_expr(field_map["day_of_week"], aps_dow_to_unix)
+        cron = " ".join(
+            [
+                field_map["minute"],
+                field_map["hour"],
+                field_map["day"],
+                field_map["month"],
+                dow_unix,
+            ]
+        )
         return "cron", CronTriggerConfig(cron=cron)
 
     if isinstance(trigger, DateTrigger):
@@ -139,6 +186,7 @@ def decode_pre_tasks_from_job_kwargs(kwargs: Mapping[str, Any]) -> Any:
     """Decode persisted pre-tasks from job kwargs.
 
     Reads only the ``pre_tasks`` key. Missing key returns ``[]``.
+    No legacy ``preTasks`` fallback.
     """
     if "pre_tasks" in kwargs:
         return kwargs["pre_tasks"]
@@ -157,7 +205,7 @@ def _dump_pre_tasks(pre_tasks: Sequence[Any]) -> list[dict[str, Any]]:
     return dumped
 
 
-def _dump_device(device: Any) -> Optional[dict[str, Any]]:
+def _dump_device(device: Any) -> dict[str, Any] | None:
     if device is None:
         return None
     if isinstance(device, BaseModel):
@@ -171,23 +219,25 @@ def encode_execution_kwargs(
     *,
     task_id: str,
     task_name: str,
-    task_description: Optional[str],
+    task_description: str | None,
     task_list: list[str],
     task_options: TaskOptionsByTask,
     pre_tasks: Sequence[Any],
-    controller_name: Optional[str],
+    controller_name: str | None,
     device: Any,
-    resource_name: Optional[str],
+    resource_name: str | None,
     wakeup_enabled: bool = False,
+    trigger_config: TriggerConfig | None = None,
 ) -> dict[str, Any]:
     """Encode complete APS job kwargs for add_job / modify_job.
 
     Writes ``pre_tasks`` and always includes ``wakeup_enabled`` bool.
-    Callers must pass the full kwargs dict to modify_job so the store fully
-    replaces the previous kwargs payload.
+    ``wakeup_enabled=True`` requires a ``CronTriggerConfig`` trigger.
     """
     if not isinstance(wakeup_enabled, bool):
         raise ValueError(f"invalid wakeup_enabled: {wakeup_enabled!r}")
+    if wakeup_enabled and not isinstance(trigger_config, CronTriggerConfig):
+        raise ValueError("wakeup_enabled 仅支持 cron 触发器")
     return {
         "task_id": task_id,
         "task_name": task_name,
@@ -200,6 +250,56 @@ def encode_execution_kwargs(
         "resource_name": resource_name,
         "wakeup_enabled": wakeup_enabled,
     }
+
+
+def _last_fire_leq(
+    trigger: CronTrigger,
+    start: datetime,
+    now: datetime,
+) -> datetime | None:
+    """Iterate get_next_fire_time from start to the last fire time <= now."""
+    last: datetime | None = None
+    current = trigger.get_next_fire_time(None, start)
+    while current is not None and current <= now:
+        last = current
+        current = trigger.get_next_fire_time(last, last)
+    return last
+
+
+def compute_occurrence(trigger: TriggerConfig, now: datetime) -> datetime:
+    """Compute the occurrence timestamp for a scheduled fire at ``now``.
+
+    - cron: last fire time <= now via CronTrigger.get_next_fire_time
+      (primary window now-15min; extended lookback if empty)
+    - date: run_date
+    - interval: now truncated to the minute
+
+    ``now`` should be timezone-aware (local). Return value stays aware.
+    """
+    if isinstance(trigger, DateTriggerConfig):
+        return trigger.run_date
+
+    if isinstance(trigger, IntervalTriggerConfig):
+        return now.replace(second=0, microsecond=0)
+
+    if isinstance(trigger, CronTriggerConfig):
+        tz = now.tzinfo
+        if tz is None:
+            # Fall back to local zone name if a naive datetime slips through
+            tz = ZoneInfo("UTC")
+        built = build_trigger(trigger, timezone=tz)
+        assert isinstance(built, CronTrigger)
+        last = _last_fire_leq(built, now - _MISFIRE_GRACE, now)
+        if last is not None:
+            return last
+        # Extended lookback (e.g. 8:55 for daily 09:00 → previous day 09:00).
+        # Caller normally only invokes this inside grace; tests cover pre-fire.
+        last = _last_fire_leq(built, now - timedelta(days=8), now)
+        if last is not None:
+            return last
+        return now.replace(second=0, microsecond=0)
+
+    raise ValueError(f"未知的触发器类型: {type(trigger)}")
 
 
 def decode_job_to_scheduled_task(
@@ -219,7 +319,7 @@ def decode_job_to_scheduled_task(
         raise SchedulerJobDecodeError("job kwargs is not a mapping", job_id=job_id)
 
     try:
-        trigger_type, trigger_config = decode_trigger(getattr(job, "trigger", None))
+        _trigger_type, trigger_config = decode_trigger(getattr(job, "trigger", None))
     except Exception as exc:
         raise SchedulerJobDecodeError(
             f"trigger decode failed: {exc}",
@@ -254,7 +354,6 @@ def decode_job_to_scheduled_task(
         name=kwargs.get("task_name", "") or "",
         description=description,
         enabled=getattr(job, "next_run_time", None) is not None,
-        trigger_type=trigger_type,
         trigger_config=trigger_config,
         task_list=task_list,
         task_options=task_options,

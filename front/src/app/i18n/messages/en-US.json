@@ -117,9 +117,10 @@
         "running": "Running",
         "stopped": "Stopped",
         "inProcess": "In-Process",
-        "systemUser": "System·User",
-        "systemSystem": "System·System",
-        "needsRepair": "Needs Repair"
+        "skipped_busy_manual": "Skipped (manual running)",
+        "skipped_busy_scheduled": "Skipped (scheduled running)",
+        "skipped_update_in_progress": "Skipped (updating)",
+        "missed_deadline": "Missed deadline"
       },
       "dialog": {
         "editTitle": "Edit Task",
@@ -172,23 +173,8 @@
           "environment": "Environment",
           "content": "Tasks"
         },
-        "systemScheduling": "System Scheduling",
-        "enableSystemScheduling": "Enable system-level scheduling",
-        "scope": {
-          "label": "Scope",
-          "user": "User",
-          "system": "System",
-          "userWarning": "User-level tasks will not run after user logout",
-          "systemWarning": "System-level tasks run as SYSTEM account and may not access ADB devices. If the task depends on ADB, use user-level."
-        },
-        "systemRegisterSuccess": "System registration successful",
-        "systemRegisterFail": "System registration failed",
-        "systemUnregisterSuccess": "System registration removed",
-        "systemUnregisterFail": "Failed to remove system registration",
-        "capabilityDisabled": "System scheduling unavailable for this trigger: {reason}",
-        "partialFailure": "Task saved, but system registration failed: {message}",
-        "orphaned": "Orphaned",
-        "repair": "Repair"
+        "runWhenClosed": "Run when MWU is closed",
+        "runWhenClosedIneligible": "Only available for single-value 5-field cron. Minute must be a number; day and day-of-week cannot both be restricted."
       },
       "rules": {
         "nameRequired": "Please enter task name",
@@ -201,10 +187,24 @@
         "endBeforeStart": "End time cannot be earlier than start time",
         "taskListRequired": "Please select at least one task"
       },
-      "systemLevel": "Scheduling",
-      "repairAll": "Repair All",
-      "repairSuccess": "Repair completed",
-      "repairFail": "Repair failed"
+      "origin": {
+        "manual": "Manual",
+        "in_app": "In-app",
+        "native": "Native"
+      },
+      "list": {
+        "runsWhenClosed": "Runs when closed"
+      },
+      "history": {
+        "skippedBy": "Skipped: {origin} task '{name}' running"
+      },
+      "conflict": {
+        "title": "Task already running",
+        "message": "Cannot start now. \"{taskName}\" ({origin}) is currently running.",
+        "messageUpdate": "Cannot start now. An update is in progress. Please wait and try again.",
+        "stopAndStart": "Stop active & start",
+        "cancel": "Cancel"
+      }
     },
     "ui": {
       "title": "UI Settings",

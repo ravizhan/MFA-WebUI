@@ -5,10 +5,12 @@ import {
   getStatusType,
   getStatusIcon,
   getStatusLabel,
+  getOriginLabel,
 } from "@/utils/scheduler/display"
 import type {
   CronTriggerConfig,
   DateTriggerConfig,
+  ExecutionOrigin,
   ExecutionStatus,
   IntervalTriggerConfig,
 } from "@/types/schedulerModel"
@@ -116,6 +118,10 @@ describe("getStatusType", () => {
     ["failed", "error"],
     ["running", "info"],
     ["stopped", "warning"],
+    ["skipped_busy_manual", "warning"],
+    ["skipped_busy_scheduled", "warning"],
+    ["skipped_update_in_progress", "warning"],
+    ["missed_deadline", "warning"],
   ] satisfies [ExecutionStatus, ReturnType<typeof getStatusType>][])(
     "maps %s to %s",
     (status, expected) => {
@@ -135,6 +141,10 @@ describe("getStatusIcon", () => {
     ["failed", "i-mdi-close-circle"],
     ["running", "i-mdi-loading"],
     ["stopped", "i-mdi-pause-circle"],
+    ["skipped_busy_manual", "i-mdi-account-alert"],
+    ["skipped_busy_scheduled", "i-mdi-calendar-alert"],
+    ["skipped_update_in_progress", "i-mdi-update"],
+    ["missed_deadline", "i-mdi-clock-alert"],
   ] satisfies [ExecutionStatus, string][])("maps %s to %s", (status, expected) => {
     expect(getStatusIcon(status)).toBe(expected)
   })
@@ -153,6 +163,10 @@ describe("getStatusLabel", () => {
     ["failed", "settings.scheduler.status.failed"],
     ["running", "settings.scheduler.status.running"],
     ["stopped", "settings.scheduler.status.stopped"],
+    ["skipped_busy_manual", "settings.scheduler.status.skipped_busy_manual"],
+    ["skipped_busy_scheduled", "settings.scheduler.status.skipped_busy_scheduled"],
+    ["skipped_update_in_progress", "settings.scheduler.status.skipped_update_in_progress"],
+    ["missed_deadline", "settings.scheduler.status.missed_deadline"],
   ] satisfies [ExecutionStatus, string][])("maps %s to %s", (status, expected) => {
     expect(getStatusLabel(t, status)).toBe(expected)
   })
@@ -160,5 +174,22 @@ describe("getStatusLabel", () => {
   it("returns unknown for unknown status", () => {
     // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
     expect(getStatusLabel(t, "unknown" as ExecutionStatus)).toBe("common.unknown")
+  })
+})
+
+describe("getOriginLabel", () => {
+  const t = vi.fn<(key: string) => string>((key: string) => key)
+
+  it.each([
+    ["manual", "settings.scheduler.origin.manual"],
+    ["in_app", "settings.scheduler.origin.in_app"],
+    ["native", "settings.scheduler.origin.native"],
+  ] satisfies [ExecutionOrigin, string][])("maps %s to %s", (origin, expected) => {
+    expect(getOriginLabel(t, origin)).toBe(expected)
+  })
+
+  it("returns unknown for unknown origin", () => {
+    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+    expect(getOriginLabel(t, "unknown" as ExecutionOrigin)).toBe("common.unknown")
   })
 })

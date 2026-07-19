@@ -107,8 +107,11 @@ class AgentService:
     def build_pi_env(self) -> dict[str, str]:
         controller_payload = self._get_selected_controller_payload()
         resource_payload = self._get_selected_resource_payload()
-        with open("version", "r", encoding="utf-8") as f:
-            client_version = f.read().strip()
+        version_path = self.worker.context.interface_base_dir / "version"
+        try:
+            client_version = version_path.read_text(encoding="utf-8").strip()
+        except OSError:
+            client_version = "unknown"
         return {
             "PI_INTERFACE_VERSION": PI_INTERFACE_VERSION,
             "PI_CLIENT_NAME": "MWU",

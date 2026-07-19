@@ -55,7 +55,6 @@ describe("scheduler API module", () => {
         task_list: [],
         task_options: {},
         preTasks: [],
-        trigger_type: "cron",
         trigger_config: { type: "cron", cron: "0 0 * * *" },
       }
       const response = await createSchedulerTask(task)

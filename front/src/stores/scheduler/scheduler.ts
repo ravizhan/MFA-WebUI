@@ -6,8 +6,6 @@ import type {
   ScheduledTaskCreate,
   ScheduledTaskUpdate,
   TaskExecution,
-  SystemTaskStatus,
-  SystemTaskRegistration,
 } from "@/types/schedulerModel"
 import {
   getSchedulerTasks,
@@ -17,9 +15,6 @@ import {
   pauseSchedulerTask,
   resumeSchedulerTask,
   getSchedulerExecutions,
-  getSystemTaskStatus,
-  getSystemTasks,
-  repairSystemTasks,
 } from "@/services/api"
 
 export const useSchedulerStore = defineStore("scheduler", () => {
@@ -28,8 +23,6 @@ export const useSchedulerStore = defineStore("scheduler", () => {
   const executions = ref<TaskExecution[]>([])
   const loading = ref(false)
   const error = ref<string | null>(null)
-  const systemTaskStatuses = ref<Record<string, SystemTaskStatus>>({})
-  const systemRegistrations = ref<SystemTaskRegistration[]>([])
 
   // Computed
   const enabledTasks = computed(() => tasks.value.filter((t) => t.enabled))
@@ -88,17 +81,6 @@ export const useSchedulerStore = defineStore("scheduler", () => {
       const index = tasks.value.findIndex((t) => t.id === taskId)
       if (index !== -1) {
         tasks.value[index] = response.task
-      }
-      if (response.native_status) {
-        systemTaskStatuses.value[taskId] = response.native_status
-      } else if (response.native_error) {
-        systemTaskStatuses.value[taskId] = {
-          task_id: taskId,
-          registered: false,
-          path_valid: false,
-          state: "error",
-          last_error: response.native_error,
-        }
       }
       loading.value = false
       return true
@@ -172,69 +154,6 @@ export const useSchedulerStore = defineStore("scheduler", () => {
     loading.value = false
   }
 
-  // System-level scheduling actions
-  async function fetchSystemTaskStatus(taskId: string) {
-    const [response, err] = await tryCatch(() => getSystemTaskStatus(taskId))
-    if (err) {
-      console.error("Failed to fetch system task status:", err)
-      return
-    }
-    if (response.status === "success" && response.data) {
-      systemTaskStatuses.value[taskId] = response.data
-    }
-  }
-
-  async function fetchSystemRegistrations() {
-    const [response, err] = await tryCatch(() => getSystemTasks())
-    if (err) {
-      console.error("Failed to fetch system registrations:", err)
-      return
-    }
-    if (response.status === "success" && response.registrations) {
-      systemRegistrations.value = response.registrations
-    }
-  }
-
-  async function fetchAllSystemStatuses() {
-    const [response, err] = await tryCatch(() => getSystemTasks())
-    if (err) {
-      console.error("Failed to fetch system statuses:", err)
-      return
-    }
-    if (response.status === "success" && response.registrations) {
-      const statuses: Record<string, SystemTaskStatus> = {}
-      for (const reg of response.registrations) {
-        statuses[reg.task_id] = toSystemTaskStatus(reg)
-      }
-      systemTaskStatuses.value = statuses
-    }
-  }
-
-  async function repairSystemTasksAll() {
-    loading.value = true
-    error.value = null
-    const [response, err] = await tryCatch(() => repairSystemTasks())
-    if (err) {
-      error.value = "网络错误，请稍后重试"
-      console.error("Failed to repair system tasks:", err)
-      loading.value = false
-      return false
-    }
-    if (response.status === "success") {
-      await fetchSystemRegistrations()
-      await fetchAllSystemStatuses()
-      loading.value = false
-      return true
-    }
-    error.value = response.message || "修复失败"
-    loading.value = false
-    return false
-  }
-
-  function getSystemStatus(taskId: string): SystemTaskStatus | undefined {
-    return systemTaskStatuses.value[taskId]
-  }
-
   function getTaskById(taskId: string): ScheduledTask | undefined {
     return tasks.value.find((t) => t.id === taskId)
   }
@@ -243,32 +162,12 @@ export const useSchedulerStore = defineStore("scheduler", () => {
     error.value = null
   }
 
-  function toSystemTaskStatus(reg: SystemTaskRegistration): SystemTaskStatus {
-    return {
-      task_id: reg.task_id,
-      task_name: reg.task_name,
-      platform: reg.platform,
-      state: reg.state,
-      registered: reg.registered,
-      enabled: reg.enabled,
-      verified: reg.verified,
-      path_valid: reg.path_valid,
-      registered_exe_path: reg.registered_exe_path,
-      next_run_time: reg.next_run_time,
-      last_error: reg.last_error,
-      reason: reg.reason,
-      trigger: reg.trigger,
-    }
-  }
-
   return {
     // State
     tasks,
     executions,
     loading,
     error,
-    systemTaskStatuses,
-    systemRegistrations,
     // Computed
     enabledTasks,
     // Actions
@@ -278,11 +177,6 @@ export const useSchedulerStore = defineStore("scheduler", () => {
     deleteTask,
     toggleTask,
     fetchExecutions,
-    fetchSystemTaskStatus,
-    fetchSystemRegistrations,
-    fetchAllSystemStatuses,
-    repairSystemTasksAll,
-    getSystemStatus,
     getTaskById,
     clearError,
   }

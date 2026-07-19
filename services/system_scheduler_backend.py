@@ -2,22 +2,14 @@
 OS 级调度器后端 —— 策略模式实现。
 支持 Windows (schtasks)、macOS (launchd)、Linux (user crontab)。
 
-仅用户级原生唤醒；无 SYSTEM/root 提权路径，无 scope 参数。
-
-Normative trigger contract (no silent approximation):
-  Windows date: future timezone-aware TimeTrigger only
-  Windows interval: whole minutes 1..44640, no start/end modifiers
-  Windows cron: numeric fixed daily M H * * * only
-  macOS date: rejected
-  macOS interval: positive StartInterval, no start/end; sleep/overlap warning
-  macOS cron: numeric fixed daily M H * * * only
-  Linux date/interval: rejected
-  Linux cron: numeric five-field with DOW *; names/extensions/restricted DOW rejected
+仅用户级原生唤醒；无 SYSTEM/root 提权路径。
+cron 翻译消费 services.native_cron 纯函数；无 date/interval 分支。
 """
 
 from __future__ import annotations
 
-import asyncio
+import csv
+import io
 import logging
 import os
 import platform
@@ -28,19 +20,17 @@ import subprocess
 import tempfile
 import xml.etree.ElementTree as ET
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import cast
 
-from apscheduler.triggers.cron import CronTrigger
-
-from models.scheduler import (
-    CronTriggerConfig,
-    DateTriggerConfig,
-    IntervalTriggerConfig,
-    OSTriggerSpec,
-    SystemTaskSpec,
-    TriggerConfig,
+from services.native_cron import (
+    NativeCron,
+    SchtasksSpec,
+    to_crontab_line,
+    to_launchd_calendar,
+    to_schtasks,
 )
 
 logger = logging.getLogger(__name__)
@@ -51,9 +41,49 @@ logger = logging.getLogger(__name__)
 
 _TASK_ID_RE = re.compile(r"^[a-f0-9-]{36}$")
 _XML_NS = "http://schemas.microsoft.com/windows/2004/02/mit/task"
-# Numeric fixed daily: M H * * *
-_FIXED_DAILY_CRON_RE = re.compile(r"^(\d{1,2})\s+(\d{1,2})\s+\*\s+\*\s+\*$")
-_MAX_INTERVAL_MINUTES = 44640  # 31 days
+_MWU_CRON_MARKER_RE = re.compile(r"#\s*MWU:([a-f0-9-]{36})")
+
+_SCHTASKS_DOW_TO_XML = {
+    "SUN": "Sunday",
+    "MON": "Monday",
+    "TUE": "Tuesday",
+    "WED": "Wednesday",
+    "THU": "Thursday",
+    "FRI": "Friday",
+    "SAT": "Saturday",
+}
+_SCHTASKS_MONTH_TO_XML = {
+    "JAN": "January",
+    "FEB": "February",
+    "MAR": "March",
+    "APR": "April",
+    "MAY": "May",
+    "JUN": "June",
+    "JUL": "July",
+    "AUG": "August",
+    "SEP": "September",
+    "OCT": "October",
+    "NOV": "November",
+    "DEC": "December",
+}
+_ALL_MONTHS_XML = list(_SCHTASKS_MONTH_TO_XML.values())
+
+
+# ---------------------------------------------------------------------------
+# Spec
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class NativeTaskSpec:
+    """OS registration payload (no pydantic)."""
+
+    task_id: str
+    task_name: str
+    exe_path: str
+    cli_args: list[str]
+    cron: NativeCron
+    working_dir: str
 
 
 # ---------------------------------------------------------------------------
@@ -73,81 +103,20 @@ def validate_task_id(task_id: str) -> None:
         )
 
 
-def parse_fixed_daily_cron(expr: str) -> tuple[int, int]:
-    """Parse numeric fixed daily M H * * *. Returns (minute, hour)."""
-    m = _FIXED_DAILY_CRON_RE.match(expr.strip())
-    if not m:
-        raise ValueError(f"仅支持数值固定每日 cron 'M H * * *'，收到: {expr!r}")
-    minute = int(m.group(1))
-    hour = int(m.group(2))
-    if not (0 <= minute <= 59):
-        raise ValueError(f"cron 分钟越界: {minute}")
-    if not (0 <= hour <= 23):
-        raise ValueError(f"cron 小时越界: {hour}")
-    return minute, hour
-
-
-def validate_linux_cron_expression(expr: str) -> str:
-    """Validate Linux cron: numeric five-field with bounds; DOW must be *.
-
-    Delegates syntax/bounds/range/step/descending-range/zero-step validation
-    to APScheduler's ``CronTrigger.from_crontab`` (already a project dep),
-    layered with MWU's strict policy: numeric-only tokens (no ``MON``/``JAN``/``L``/
-    ``W``/``#``/``@``) and day-of-week must be ``*`` (DOM+DOW restricted translation
-    has no safe APScheduler→cron mapping and is rejected pre-emptively).
-    """
-    expr = expr.strip()
-    fields = expr.split()
-    if len(fields) != 5:
-        raise ValueError(f"无效的 cron 表达式（需要 5 个字段）: {expr!r}")
-    field_names = ("minute", "hour", "day", "month", "weekday")
-    for name, value in zip(field_names, fields):
-        if re.search(r"[A-Za-z@]", value):
-            raise ValueError(f"Linux cron 拒绝名称/扩展字段 {name}={value!r}")
-    if fields[4] != "*":
-        raise ValueError(
-            "Linux cron 暂不支持受限 day-of-week（需 DOW=*）；"
-            "DOM+DOW 同时限制在 APScheduler→cron 星期翻译验证前被拒绝"
-        )
-    try:
-        CronTrigger.from_crontab(expr)
-    except ValueError as e:
-        raise ValueError(f"Linux cron 越界或语法错误: {e}") from e
-    return expr
-
-
 def windows_quote_argument(arg: str) -> str:
-    """Windows CreateProcess command-line quoting (MSDN rules).
-
-    Delegates to ``subprocess.list2cmdline``, which implements the same
-    backslash-doubling + space/tab/quote-driven quoting rules used by
-    CreateProcess on Windows (CPython's own implementation of list2cmdline is
-    the canonical reference for the rules documented at
-    https://learn.microsoft.com/windows/win32/api/processthreadapi/nf-processthreadapi-createprocessw).
-    """
+    """Windows CreateProcess command-line quoting (MSDN rules)."""
     return subprocess.list2cmdline([arg])
 
 
 def windows_join_args(args: list[str]) -> str:
-    """Join argv into a single Windows command-line string (MSDN rules).
-
-    Equivalent to ``subprocess.list2cmdline(args)``; kept as a named helper
-    for site readability and to mirror the symmetric single-arg form above.
-    """
+    """Join argv into a single Windows command-line string (MSDN rules)."""
     return subprocess.list2cmdline(args)
 
 
 def _run_text(
     args: list[str], *, check: bool = False
 ) -> subprocess.CompletedProcess[str]:
-    """Run a subprocess capturing stdout/stderr as UTF-8 str.
-
-    Standardizes encoding (utf-8) and error handling (errors=replace) so every
-    caller can treat ``proc.stderr`` / ``proc.stdout`` directly as ``str``.
-    Use :func:`subprocess.run` directly with ``capture_output=True`` (no
-    ``text=``) when raw bytes are required (e.g. Windows Task Scheduler XML
-    which may be UTF-16 encoded).
-    """
+    """Run a subprocess capturing stdout/stderr as UTF-8 str."""
     return subprocess.run(
         args,
         capture_output=True,
@@ -158,126 +127,21 @@ def _run_text(
     )
 
 
-def ensure_timezone_aware(dt: datetime) -> datetime:
-    if dt.tzinfo is None:
-        # Local timezone attachment for Windows StartBoundary
-        local = datetime.now().astimezone().tzinfo
-        return dt.replace(tzinfo=local)
-    return dt
+def _parse_hhmm(start_time: str) -> tuple[int, int]:
+    hour_s, minute_s = start_time.split(":", 1)
+    return int(hour_s), int(minute_s)
 
 
-def interval_total_minutes_strict(config: IntervalTriggerConfig) -> int:
-    """Whole-minute intervals only; reject seconds and start/end modifiers."""
-    if config.seconds and config.seconds != 0:
-        raise ValueError("interval 不支持秒级精度；仅接受整分钟 1..44640")
-    if config.start_date is not None or config.end_date is not None:
-        raise ValueError("interval 不支持 start_date/end_date 修饰符")
-    weeks = config.weeks or 0
-    days = config.days or 0
-    hours = config.hours or 0
-    minutes = config.minutes or 0
-    total = weeks * 7 * 24 * 60 + days * 24 * 60 + hours * 60 + minutes
-    if total < 1 or total > _MAX_INTERVAL_MINUTES:
-        raise ValueError(
-            f"interval 必须为整分钟 1..{_MAX_INTERVAL_MINUTES}，收到 {total}"
-        )
-    return total
+def _next_start_boundary(hour: int, minute: int) -> datetime:
+    now = datetime.now().astimezone()
+    start = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if start <= now:
+        start = start + timedelta(days=1)
+    return start
 
 
 # ---------------------------------------------------------------------------
-# Trigger 映射（platform-agnostic raw mapping + validation helpers）
-# ---------------------------------------------------------------------------
-
-
-def map_trigger_to_os_spec(trigger_config: TriggerConfig) -> OSTriggerSpec:
-    """Map APScheduler trigger to OSTriggerSpec with strict semantics.
-
-    Note: platform-specific acceptance is enforced by validate_trigger_for_platform.
-    """
-    if isinstance(trigger_config, CronTriggerConfig):
-        return OSTriggerSpec(
-            trigger_type="cron",
-            cron_expression=trigger_config.cron.strip(),
-        )
-    if isinstance(trigger_config, DateTriggerConfig):
-        run_date = ensure_timezone_aware(trigger_config.run_date)
-        now = datetime.now(run_date.tzinfo)
-        if run_date <= now:
-            raise ValueError("DateTrigger 已过期，无法注册")
-        return OSTriggerSpec(trigger_type="date", run_date=run_date)
-    if isinstance(trigger_config, IntervalTriggerConfig):
-        total = interval_total_minutes_strict(trigger_config)
-        return OSTriggerSpec(trigger_type="interval", interval_minutes=total)
-    raise TypeError(f"未知的触发器类型: {type(trigger_config)}")
-
-
-def validate_trigger_for_platform(
-    platform_name: str, trigger: OSTriggerSpec
-) -> list[str]:
-    """Validate trigger against normative platform matrix. Returns warnings.
-
-    Raises ValueError on rejection (normalized failure).
-    """
-    warnings: list[str] = []
-    t = trigger.trigger_type
-
-    if platform_name == "windows":
-        if t == "date":
-            if trigger.run_date is None:
-                raise ValueError("Windows date 需要 run_date")
-            if trigger.run_date.tzinfo is None:
-                raise ValueError("Windows date 需要 timezone-aware run_date")
-            if trigger.run_date <= datetime.now(trigger.run_date.tzinfo):
-                raise ValueError("Windows date 必须是未来时间")
-            return warnings
-        if t == "interval":
-            mins = trigger.interval_minutes
-            if mins is None or mins < 1 or mins > _MAX_INTERVAL_MINUTES:
-                raise ValueError(
-                    f"Windows interval 仅支持整分钟 1..{_MAX_INTERVAL_MINUTES}"
-                )
-            return warnings
-        if t == "cron":
-            if not trigger.cron_expression:
-                raise ValueError("cron 缺少表达式")
-            parse_fixed_daily_cron(trigger.cron_expression)
-            return warnings
-        raise ValueError(f"Windows 不支持触发器类型: {t}")
-
-    if platform_name == "macos":
-        if t == "date":
-            raise ValueError("macOS launchd 拒绝 date 触发器（无安全 Year 语义）")
-        if t == "interval":
-            mins = trigger.interval_minutes
-            if mins is None or mins < 1:
-                raise ValueError("macOS interval 需要正整分钟")
-            warnings.append("macOS StartInterval 在睡眠期间或作业仍在运行时可能漏触发")
-            return warnings
-        if t == "cron":
-            if not trigger.cron_expression:
-                raise ValueError("cron 缺少表达式")
-            parse_fixed_daily_cron(trigger.cron_expression)
-            return warnings
-        raise ValueError(f"macOS 不支持触发器类型: {t}")
-
-    if platform_name == "linux":
-        if t == "date":
-            raise ValueError("Linux cron 拒绝 date 触发器")
-        if t == "interval":
-            raise ValueError("Linux cron 拒绝 interval（字段 step 不能表示任意时长）")
-        if t == "cron":
-            if not trigger.cron_expression:
-                raise ValueError("cron 缺少表达式")
-            validate_linux_cron_expression(trigger.cron_expression)
-            return warnings
-        raise ValueError(f"Linux 不支持触发器类型: {t}")
-
-    raise ValueError(f"未知平台: {platform_name}")
-
-
-
-# ---------------------------------------------------------------------------
-# 抽象基类 —— 六个核心成员（无 scope）
+# 抽象基类
 # ---------------------------------------------------------------------------
 
 
@@ -294,20 +158,24 @@ class SystemSchedulerBackend(ABC):
         """构建 OS 侧任务标识。"""
 
     @abstractmethod
-    async def register(self, spec: SystemTaskSpec) -> None:
+    def register(self, spec: NativeTaskSpec) -> None:
         """幂等注册：已存在则更新。"""
 
     @abstractmethod
-    async def unregister(self, task_id: str) -> None:
+    def unregister(self, task_id: str) -> None:
         """幂等卸载：不存在则静默成功；非 not-found 错误抛出。"""
 
     @abstractmethod
-    async def is_registered(self, task_id: str) -> bool:
+    def is_registered(self, task_id: str) -> bool:
         """查询注册状态。明确 not-found → False；其他错误抛 RuntimeError。"""
 
     @abstractmethod
-    async def verify_registration(self, spec: SystemTaskSpec) -> tuple[bool, str]:
+    def verify_registration(self, spec: NativeTaskSpec) -> tuple[bool, str]:
         """注册后校验。返回 (ok, detail)。"""
+
+    @abstractmethod
+    def list_registered_task_ids(self) -> list[str]:
+        """列出本机已注册的 MWU 任务 UUID。"""
 
 
 def _windows_is_not_found(stderr: str) -> bool:
@@ -320,7 +188,11 @@ def _windows_is_not_found(stderr: str) -> bool:
 
 
 def _macos_is_not_found(stderr: str) -> bool:
-    return "Could not find" in stderr or "No such process" in stderr or "not found" in stderr.lower()
+    return (
+        "Could not find" in stderr
+        or "No such process" in stderr
+        or "not found" in stderr.lower()
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -336,9 +208,8 @@ class WindowsBackend(SystemSchedulerBackend):
     def build_identifier(self, task_id: str) -> str:
         return f"\\MWU\\{task_id}"
 
-    async def register(self, spec: SystemTaskSpec) -> None:
+    def register(self, spec: NativeTaskSpec) -> None:
         validate_task_id(spec.task_id)
-        validate_trigger_for_platform(self.platform_name, spec.trigger)
 
         xml_bytes = self._build_task_xml(spec)
         temp_path = None
@@ -348,8 +219,7 @@ class WindowsBackend(SystemSchedulerBackend):
                 temp_path = f.name
 
             task_path = self.build_identifier(spec.task_id)
-            await asyncio.to_thread(
-                self._run_schtasks,
+            self._run_schtasks(
                 ["schtasks", "/create", "/xml", temp_path, "/tn", task_path, "/f"],
                 check=True,
             )
@@ -361,26 +231,20 @@ class WindowsBackend(SystemSchedulerBackend):
             if temp_path and os.path.exists(temp_path):
                 os.unlink(temp_path)
 
-    async def unregister(self, task_id: str) -> None:
+    def unregister(self, task_id: str) -> None:
         validate_task_id(task_id)
         task_path = self.build_identifier(task_id)
-        proc = await asyncio.to_thread(
-            _run_text,
-            ["schtasks", "/delete", "/tn", task_path, "/f"],
-        )
+        proc = _run_text(["schtasks", "/delete", "/tn", task_path, "/f"])
         if proc.returncode != 0:
             stderr = proc.stderr or ""
             if _windows_is_not_found(stderr):
                 return
             raise RuntimeError(f"schtasks 卸载失败: {stderr.strip()}")
 
-    async def is_registered(self, task_id: str) -> bool:
+    def is_registered(self, task_id: str) -> bool:
         validate_task_id(task_id)
         task_path = self.build_identifier(task_id)
-        proc = await asyncio.to_thread(
-            _run_text,
-            ["schtasks", "/query", "/tn", task_path, "/fo", "list"],
-        )
+        proc = _run_text(["schtasks", "/query", "/tn", task_path, "/fo", "list"])
         if proc.returncode == 0:
             return True
         stderr = proc.stderr or ""
@@ -388,12 +252,10 @@ class WindowsBackend(SystemSchedulerBackend):
             return False
         raise RuntimeError(f"schtasks query failed: {stderr.strip() or proc.returncode}")
 
-    async def verify_registration(self, spec: SystemTaskSpec) -> tuple[bool, str]:
+    def verify_registration(self, spec: NativeTaskSpec) -> tuple[bool, str]:
         task_path = self.build_identifier(spec.task_id)
-        # NOTE: schtasks /query /xml emits UTF-16 LE; must keep raw bytes for
-        # _decode_task_xml's multi-codepage cascade. Do not switch to _run_text.
-        proc = await asyncio.to_thread(
-            subprocess.run,
+        # NOTE: schtasks /query /xml emits UTF-16 LE; keep raw bytes.
+        proc = subprocess.run(
             ["schtasks", "/query", "/tn", task_path, "/xml"],
             capture_output=True,
         )
@@ -408,8 +270,33 @@ class WindowsBackend(SystemSchedulerBackend):
         except Exception as e:
             return False, f"xml verify error: {e}"
 
+    def list_registered_task_ids(self) -> list[str]:
+        proc = _run_text(["schtasks", "/query", "/fo", "csv", "/nh"])
+        if proc.returncode != 0:
+            stderr = (proc.stderr or "").strip()
+            # Empty task list can still succeed; hard failure otherwise.
+            if _windows_is_not_found(stderr):
+                return []
+            # Some locales return success with empty stdout when no tasks.
+            if not (proc.stdout or "").strip() and not stderr:
+                return []
+            raise RuntimeError(
+                f"schtasks query/csv failed: {stderr or proc.returncode}"
+            )
+        ids: list[str] = []
+        for row in csv.reader(io.StringIO(proc.stdout or "")):
+            if not row:
+                continue
+            name = row[0].strip().strip('"')
+            if not name.startswith("\\MWU\\"):
+                continue
+            task_id = name[len("\\MWU\\") :]
+            if _TASK_ID_RE.match(task_id):
+                ids.append(task_id)
+        return ids
+
     def compare_exported_xml_bytes(
-        self, raw: bytes, spec: SystemTaskSpec
+        self, raw: bytes, spec: NativeTaskSpec
     ) -> tuple[bool, str]:
         """Public helper for unit tests (no schtasks required)."""
         return self._compare_exported_xml(raw, spec)
@@ -450,7 +337,7 @@ class WindowsBackend(SystemSchedulerBackend):
         return None
 
     def _compare_exported_xml(
-        self, raw: bytes, spec: SystemTaskSpec
+        self, raw: bytes, spec: NativeTaskSpec
     ) -> tuple[bool, str]:
         root = self._decode_task_xml(raw)
         logon = self._find_desc(root, "LogonType")
@@ -496,78 +383,98 @@ class WindowsBackend(SystemSchedulerBackend):
         if alw is None or (alw.text or "").lower() != "true":
             return False, "Settings.AllowStartOnDemand must be true"
 
-        expected_root = self._decode_task_xml(self._build_task_xml(spec))
-        trig = spec.trigger
+        return self._compare_trigger_xml(root, to_schtasks(spec.cron))
 
-        def _sb(el_root: ET.Element) -> str | None:
-            sb = self._find_desc(el_root, "StartBoundary")
-            return sb.text if sb is not None else None
+    def _compare_trigger_xml(
+        self, root: ET.Element, sch: SchtasksSpec
+    ) -> tuple[bool, str]:
+        hour, minute = _parse_hhmm(sch.start_time)
 
-        if trig.trigger_type == "date":
-            if self._find_desc(root, "TimeTrigger") is None:
-                return False, "expected TimeTrigger for date"
-            if self._find_desc(root, "Repetition") is not None:
-                return False, "date trigger must not have Repetition"
-            exp_sb, got_sb = _sb(expected_root), _sb(root)
-            if exp_sb is None or got_sb is None:
-                return False, "date StartBoundary missing"
-            if got_sb[:19] != exp_sb[:19]:
-                return False, f"date StartBoundary mismatch: {got_sb!r} != {exp_sb!r}"
-        elif trig.trigger_type == "interval":
-            if self._find_desc(root, "TimeTrigger") is None:
-                return False, "expected TimeTrigger for interval"
-            interval_el = self._find_desc(root, "Interval")
-            mins = trig.interval_minutes or 0
-            if mins % (24 * 60) == 0 and mins >= 24 * 60:
-                expect = f"P{mins // (24 * 60)}D"
-            elif mins % 60 == 0:
-                expect = f"PT{mins // 60}H"
-            else:
-                expect = f"PT{mins}M"
-            if interval_el is None or (interval_el.text or "") != expect:
-                return False, (
-                    f"interval duration mismatch: "
-                    f"{getattr(interval_el, 'text', None)!r} != {expect!r}"
-                )
-            stop = self._find_desc(root, "StopAtDurationEnd")
-            if stop is None or (stop.text or "").lower() != "false":
-                return False, "interval StopAtDurationEnd must be false"
-        elif trig.trigger_type == "cron":
-            if self._find_desc(root, "CalendarTrigger") is None:
-                return False, "expected CalendarTrigger for cron"
-            for el in root.iter():
-                if self._local_tag(el.tag) == "Interval" and (el.text or "") == "PT1M":
-                    return False, "cron must not use PT1M repetition"
-            days = self._find_desc(root, "DaysInterval")
-            if days is None or (days.text or "") != "1":
-                return False, (
-                    f"cron DaysInterval must be 1, got {getattr(days, 'text', None)!r}"
-                )
-            if self._find_desc(root, "ScheduleByDay") is None:
-                return False, "cron fixed daily requires ScheduleByDay"
-            minute, hour = parse_fixed_daily_cron(trig.cron_expression or "")
-            got_sb = _sb(root)
-            if got_sb is None:
-                return False, "cron StartBoundary missing"
+        def _start_boundary_ok() -> tuple[bool, str]:
+            sb = self._find_desc(root, "StartBoundary")
+            if sb is None or not sb.text:
+                return False, "StartBoundary missing"
             try:
-                dt = datetime.fromisoformat(got_sb)
+                dt = datetime.fromisoformat(sb.text)
             except Exception:
-                return False, f"cron StartBoundary unparseable: {got_sb!r}"
+                return False, f"StartBoundary unparseable: {sb.text!r}"
             if dt.minute != minute or dt.hour != hour or dt.second != 0:
                 return False, (
-                    f"cron StartBoundary time mismatch: "
+                    f"StartBoundary time mismatch: "
                     f"{dt.hour:02d}:{dt.minute:02d}:{dt.second:02d} "
                     f"!= {hour:02d}:{minute:02d}:00"
                 )
-            en = None
-            for el in root.iter():
-                if self._local_tag(el.tag) == "CalendarTrigger":
-                    for child in el:
-                        if self._local_tag(child.tag) == "Enabled":
-                            en = child
-                            break
-            if en is None or (en.text or "").lower() != "true":
-                return False, "cron trigger Enabled must be true"
+            return True, "ok"
+
+        schedule = sch.schedule.upper()
+        if schedule == "HOURLY":
+            if self._find_desc(root, "TimeTrigger") is None:
+                return False, "expected TimeTrigger for hourly"
+            interval_el = self._find_desc(root, "Interval")
+            if interval_el is None or (interval_el.text or "") != "PT1H":
+                return False, (
+                    f"hourly Interval must be PT1H, got "
+                    f"{getattr(interval_el, 'text', None)!r}"
+                )
+            ok, detail = _start_boundary_ok()
+            if not ok:
+                return False, detail
+            return True, "xml verified"
+
+        if self._find_desc(root, "CalendarTrigger") is None:
+            return False, f"expected CalendarTrigger for {schedule.lower()}"
+
+        # Reject PT1M-style minute repetition leftovers.
+        for el in root.iter():
+            if self._local_tag(el.tag) == "Interval" and (el.text or "") == "PT1M":
+                return False, "cron must not use PT1M repetition"
+
+        ok, detail = _start_boundary_ok()
+        if not ok:
+            return False, detail
+
+        if schedule == "DAILY":
+            if self._find_desc(root, "ScheduleByDay") is None:
+                return False, "daily requires ScheduleByDay"
+            days = self._find_desc(root, "DaysInterval")
+            if days is None or (days.text or "") != "1":
+                return False, (
+                    f"daily DaysInterval must be 1, got {getattr(days, 'text', None)!r}"
+                )
+        elif schedule == "WEEKLY":
+            if self._find_desc(root, "ScheduleByWeek") is None:
+                return False, "weekly requires ScheduleByWeek"
+            expected_day = _SCHTASKS_DOW_TO_XML.get(sch.day_of_week or "")
+            if not expected_day:
+                return False, f"weekly missing day_of_week: {sch.day_of_week!r}"
+            if self._find_desc(root, expected_day) is None:
+                return False, f"weekly DaysOfWeek missing {expected_day}"
+        elif schedule == "MONTHLY":
+            if self._find_desc(root, "ScheduleByMonth") is None:
+                return False, "monthly requires ScheduleByMonth"
+            day_el = self._find_desc(root, "Day")
+            if day_el is None or (day_el.text or "") != str(sch.day_of_month):
+                return False, (
+                    f"monthly Day mismatch: {getattr(day_el, 'text', None)!r} "
+                    f"!= {sch.day_of_month!r}"
+                )
+            if sch.months:
+                month_xml = _SCHTASKS_MONTH_TO_XML.get(sch.months)
+                if not month_xml or self._find_desc(root, month_xml) is None:
+                    return False, f"monthly Months missing {sch.months}"
+        else:
+            return False, f"unknown schedule: {schedule}"
+
+        # Trigger Enabled
+        en = None
+        for el in root.iter():
+            if self._local_tag(el.tag) in ("CalendarTrigger", "TimeTrigger"):
+                for child in el:
+                    if self._local_tag(child.tag) == "Enabled":
+                        en = child
+                        break
+        if en is None or (en.text or "").lower() != "true":
+            return False, "trigger Enabled must be true"
         return True, "xml verified"
 
     @staticmethod
@@ -576,7 +483,7 @@ class WindowsBackend(SystemSchedulerBackend):
     ) -> subprocess.CompletedProcess[str]:
         return _run_text(args, check=check)
 
-    def _build_task_xml(self, spec: SystemTaskSpec) -> bytes:
+    def _build_task_xml(self, spec: NativeTaskSpec) -> bytes:
         """Build schema-valid user-level Task Scheduler XML."""
         ET.register_namespace("", _XML_NS)
         root = ET.Element(f"{{{_XML_NS}}}Task", version="1.2")
@@ -594,7 +501,7 @@ class WindowsBackend(SystemSchedulerBackend):
         lt.text = "InteractiveToken"
 
         triggers = ET.SubElement(root, "Triggers")
-        self._add_triggers(triggers, spec.trigger)
+        self._add_triggers(triggers, to_schtasks(spec.cron))
 
         actions = ET.SubElement(root, "Actions")
         actions.set("Context", "Author")
@@ -620,57 +527,67 @@ class WindowsBackend(SystemSchedulerBackend):
 
         return ET.tostring(root, encoding="utf-8", xml_declaration=True)
 
-    def _add_triggers(self, parent: ET.Element, trigger_spec: OSTriggerSpec) -> None:
-        if trigger_spec.trigger_type == "date":
-            trigger = ET.SubElement(parent, "TimeTrigger")
-            sb = ET.SubElement(trigger, "StartBoundary")
-            if trigger_spec.run_date is None:
-                raise ValueError("date 类型的触发器缺少 run_date")
-            run_date = ensure_timezone_aware(trigger_spec.run_date)
-            sb.text = run_date.isoformat(timespec="seconds")
-            enabled = ET.SubElement(trigger, "Enabled")
-            enabled.text = "true"
-            return
+    def _add_triggers(self, parent: ET.Element, sch: SchtasksSpec) -> None:
+        schedule = sch.schedule.upper()
+        hour, minute = _parse_hhmm(sch.start_time)
 
-        if trigger_spec.trigger_type == "interval":
-            mins = trigger_spec.interval_minutes or 0
-            if mins < 1 or mins > _MAX_INTERVAL_MINUTES:
-                raise ValueError("invalid interval minutes")
+        if schedule == "HOURLY":
             trigger = ET.SubElement(parent, "TimeTrigger")
             sb = ET.SubElement(trigger, "StartBoundary")
-            sb.text = datetime.now().astimezone().isoformat(timespec="seconds")
+            sb.text = _next_start_boundary(hour, minute).isoformat(timespec="seconds")
             enabled = ET.SubElement(trigger, "Enabled")
             enabled.text = "true"
             rep = ET.SubElement(trigger, "Repetition")
             interval = ET.SubElement(rep, "Interval")
-            if mins % (24 * 60) == 0 and mins >= 24 * 60:
-                days = mins // (24 * 60)
-                interval.text = f"P{days}D"
-            elif mins % 60 == 0:
-                hours = mins // 60
-                interval.text = f"PT{hours}H"
-            else:
-                interval.text = f"PT{mins}M"
+            interval.text = "PT1H"
             stop = ET.SubElement(rep, "StopAtDurationEnd")
             stop.text = "false"
             return
 
-        if not trigger_spec.cron_expression:
-            raise ValueError("cron 类型的触发器缺少 cron_expression")
-        minute, hour = parse_fixed_daily_cron(trigger_spec.cron_expression)
-
         trigger = ET.SubElement(parent, "CalendarTrigger")
-        now = datetime.now().astimezone()
-        start = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
-        if start <= now:
-            start = start + timedelta(days=1)
         sb = ET.SubElement(trigger, "StartBoundary")
-        sb.text = start.isoformat(timespec="seconds")
+        sb.text = _next_start_boundary(hour, minute).isoformat(timespec="seconds")
         enabled = ET.SubElement(trigger, "Enabled")
         enabled.text = "true"
-        schedule_by_day = ET.SubElement(trigger, "ScheduleByDay")
-        days_interval = ET.SubElement(schedule_by_day, "DaysInterval")
-        days_interval.text = "1"
+
+        if schedule == "DAILY":
+            schedule_by_day = ET.SubElement(trigger, "ScheduleByDay")
+            days_interval = ET.SubElement(schedule_by_day, "DaysInterval")
+            days_interval.text = "1"
+            return
+
+        if schedule == "WEEKLY":
+            if not sch.day_of_week:
+                raise ValueError("weekly 触发器缺少 day_of_week")
+            day_xml = _SCHTASKS_DOW_TO_XML.get(sch.day_of_week)
+            if not day_xml:
+                raise ValueError(f"无效的 day_of_week: {sch.day_of_week!r}")
+            schedule_by_week = ET.SubElement(trigger, "ScheduleByWeek")
+            weeks_interval = ET.SubElement(schedule_by_week, "WeeksInterval")
+            weeks_interval.text = "1"
+            days_of_week = ET.SubElement(schedule_by_week, "DaysOfWeek")
+            ET.SubElement(days_of_week, day_xml)
+            return
+
+        if schedule == "MONTHLY":
+            if sch.day_of_month is None:
+                raise ValueError("monthly 触发器缺少 day_of_month")
+            schedule_by_month = ET.SubElement(trigger, "ScheduleByMonth")
+            days_of_month = ET.SubElement(schedule_by_month, "DaysOfMonth")
+            day_el = ET.SubElement(days_of_month, "Day")
+            day_el.text = str(sch.day_of_month)
+            months_el = ET.SubElement(schedule_by_month, "Months")
+            if sch.months:
+                month_xml = _SCHTASKS_MONTH_TO_XML.get(sch.months)
+                if not month_xml:
+                    raise ValueError(f"无效的 months: {sch.months!r}")
+                ET.SubElement(months_el, month_xml)
+            else:
+                for month_xml in _ALL_MONTHS_XML:
+                    ET.SubElement(months_el, month_xml)
+            return
+
+        raise ValueError(f"不支持的 schtasks schedule: {schedule}")
 
 
 # ---------------------------------------------------------------------------
@@ -693,64 +610,55 @@ class MacOSBackend(SystemSchedulerBackend):
     def _domain(self) -> str:
         return f"gui/{_get_uid()}"
 
-    async def register(self, spec: SystemTaskSpec) -> None:
+    def register(self, spec: NativeTaskSpec) -> None:
         validate_task_id(spec.task_id)
-        validate_trigger_for_platform(self.platform_name, spec.trigger)
         label = self.build_identifier(spec.task_id)
         plist_path = self._plist_path(spec.task_id)
         plist_data = self._build_plist(spec)
 
         plist_path.parent.mkdir(parents=True, exist_ok=True)
-        await asyncio.to_thread(self._write_plist, plist_path, plist_data)
-        await self._bootstrap_idempotent(label, str(plist_path))
+        self._write_plist(plist_path, plist_data)
+        self._bootstrap_idempotent(label, str(plist_path))
         logger.info("macOS launchd 任务注册成功: %s", label)
 
-    async def unregister(self, task_id: str) -> None:
+    def unregister(self, task_id: str) -> None:
         validate_task_id(task_id)
         label = self.build_identifier(task_id)
         plist_path = self._plist_path(task_id)
         domain = self._domain()
-        proc = await asyncio.to_thread(
-            _run_text,
-            ["launchctl", "bootout", f"{domain}/{label}"],
-        )
+        proc = _run_text(["launchctl", "bootout", f"{domain}/{label}"])
         if proc.returncode != 0:
             stderr = proc.stderr or ""
             if not _macos_is_not_found(stderr):
                 raise RuntimeError(f"launchctl bootout failed: {stderr.strip()}")
-        if await asyncio.to_thread(os.path.exists, str(plist_path)):
+        if os.path.exists(str(plist_path)):
             try:
-                await asyncio.to_thread(os.unlink, str(plist_path))
+                os.unlink(str(plist_path))
             except PermissionError as e:
                 raise RuntimeError(f"无法删除 plist: {plist_path}") from e
 
-    async def is_registered(self, task_id: str) -> bool:
+    def is_registered(self, task_id: str) -> bool:
         validate_task_id(task_id)
         label = self.build_identifier(task_id)
         domain = self._domain()
-        proc = await asyncio.to_thread(
-            _run_text,
-            ["launchctl", "print", f"{domain}/{label}"],
-        )
+        proc = _run_text(["launchctl", "print", f"{domain}/{label}"])
         if proc.returncode == 0:
             return True
         stderr = proc.stderr or ""
         if _macos_is_not_found(stderr) or proc.returncode == 113:
             return False
         detail = stderr.strip() or "no stderr"
-        raise RuntimeError(
-            f"launchctl print failed (rc={proc.returncode}): {detail}"
-        )
+        raise RuntimeError(f"launchctl print failed (rc={proc.returncode}): {detail}")
 
-    async def verify_registration(self, spec: SystemTaskSpec) -> tuple[bool, str]:
+    def verify_registration(self, spec: NativeTaskSpec) -> tuple[bool, str]:
         label = self.build_identifier(spec.task_id)
         plist_path = self._plist_path(spec.task_id)
         domain = self._domain()
 
-        if not await asyncio.to_thread(os.path.exists, str(plist_path)):
+        if not os.path.exists(str(plist_path)):
             return False, "plist missing"
         try:
-            mode = await asyncio.to_thread(os.stat, str(plist_path))
+            mode = os.stat(str(plist_path))
             perms = mode.st_mode & 0o777
             if perms not in (0o600, 0o400):
                 return False, f"plist permissions {oct(perms)} not 0600/0400"
@@ -759,20 +667,37 @@ class MacOSBackend(SystemSchedulerBackend):
             expected = self._build_plist(spec)
             if data.get("Label") != expected.get("Label"):
                 return False, "label mismatch"
-            if "Year" in data.get("StartCalendarInterval", {}):
+            cal = data.get("StartCalendarInterval", {})
+            if "Year" in cal:
                 return False, "Year key present (unsupported)"
+            if cal != expected.get("StartCalendarInterval"):
+                return False, "StartCalendarInterval mismatch"
             if data.get("ProgramArguments") != expected.get("ProgramArguments"):
                 return False, "ProgramArguments mismatch"
+            if data.get("WorkingDirectory") != expected.get("WorkingDirectory"):
+                return False, "WorkingDirectory mismatch"
         except Exception as e:
             return False, f"plist compare failed: {e}"
 
-        proc = await asyncio.to_thread(
-            _run_text,
-            ["launchctl", "print", f"{domain}/{label}"],
-        )
+        proc = _run_text(["launchctl", "print", f"{domain}/{label}"])
         if proc.returncode != 0:
             return False, f"launchctl print {domain}/{label} failed"
         return True, f"verified {domain}/{label}"
+
+    def list_registered_task_ids(self) -> list[str]:
+        agents = Path("~/Library/LaunchAgents").expanduser()
+        if not agents.is_dir():
+            return []
+        prefix = "com.mwu.task."
+        ids: list[str] = []
+        for path in agents.glob("com.mwu.task.*.plist"):
+            stem = path.stem  # com.mwu.task.<uuid>
+            if not stem.startswith(prefix):
+                continue
+            task_id = stem[len(prefix) :]
+            if _TASK_ID_RE.match(task_id):
+                ids.append(task_id)
+        return ids
 
     @staticmethod
     def _write_plist(path: Path, data: dict) -> None:
@@ -780,53 +705,30 @@ class MacOSBackend(SystemSchedulerBackend):
             plistlib.dump(data, f)
         os.chmod(path, 0o600)
 
-    async def _bootstrap_idempotent(self, label: str, plist_path_str: str) -> None:
+    def _bootstrap_idempotent(self, label: str, plist_path_str: str) -> None:
         domain = self._domain()
         target = f"{domain}/{label}"
 
-        await asyncio.to_thread(
-            _run_text,
-            ["launchctl", "bootout", target],
-        )
-        proc = await asyncio.to_thread(
-            _run_text,
-            ["launchctl", "bootstrap", domain, plist_path_str],
-        )
+        _run_text(["launchctl", "bootout", target])
+        proc = _run_text(["launchctl", "bootstrap", domain, plist_path_str])
         if proc.returncode != 0:
             stderr = proc.stderr or ""
             raise RuntimeError(f"launchctl bootstrap 失败: {stderr.strip()}")
 
-    def _build_plist(self, spec: SystemTaskSpec) -> dict:
+    def _build_plist(self, spec: NativeTaskSpec) -> dict:
         label = self.build_identifier(spec.task_id)
-        plist: dict = {
+        log_path = os.path.join(
+            spec.working_dir, "config", "logs", f"headless_{spec.task_id}.log"
+        )
+        return {
             "Label": label,
             "ProgramArguments": [spec.exe_path] + list(spec.cli_args),
             "WorkingDirectory": spec.working_dir,
             "RunAtLoad": False,
+            "StandardOutPath": log_path,
+            "StandardErrorPath": log_path,
+            "StartCalendarInterval": to_launchd_calendar(spec.cron),
         }
-        log_path = os.path.join(
-            spec.working_dir, "config", "logs", f"headless_{spec.task_id}.log"
-        )
-        plist["StandardOutPath"] = log_path
-        plist["StandardErrorPath"] = log_path
-
-        trigger_spec = spec.trigger
-        if trigger_spec.trigger_type == "cron":
-            if not trigger_spec.cron_expression:
-                raise ValueError("cron 类型的触发器缺少 cron_expression")
-            minute, hour = parse_fixed_daily_cron(trigger_spec.cron_expression)
-            plist["StartCalendarInterval"] = {
-                "Minute": minute,
-                "Hour": hour,
-            }
-        elif trigger_spec.trigger_type == "date":
-            raise ValueError("macOS 拒绝 date 触发器")
-        elif trigger_spec.trigger_type == "interval":
-            mins = trigger_spec.interval_minutes or 0
-            if mins < 1:
-                raise ValueError("interval 必须为正")
-            plist["StartInterval"] = mins * 60
-        return plist
 
 
 # ---------------------------------------------------------------------------
@@ -842,35 +744,73 @@ class LinuxBackend(SystemSchedulerBackend):
     _CRONTAB_LOCK_NAME = "mwu-crontab.lock"
 
     def build_identifier(self, task_id: str) -> str:
-        return f"mwu-{task_id}"
+        return f"# MWU:{task_id}"
 
-    async def register(self, spec: SystemTaskSpec) -> None:
+    def register(self, spec: NativeTaskSpec) -> None:
         validate_task_id(spec.task_id)
-        validate_trigger_for_platform(self.platform_name, spec.trigger)
-        await self._register_user_cron(spec)
-        logger.info("Linux 任务注册成功: %s", spec.task_id)
+        lock = self._acquire_crontab_lock()
+        try:
+            cron_line = self._build_cron_line(spec)
+            crontab_text = self._read_crontab()
+            lines = crontab_text.splitlines(True)
+            new_lines: list[str] = []
+            skip_next = False
+            for line in lines:
+                stripped = line.strip()
+                if stripped == f"# MWU:{spec.task_id}":
+                    skip_next = True
+                    continue
+                if skip_next:
+                    skip_next = False
+                    continue
+                new_lines.append(line)
+            entry = f"# MWU:{spec.task_id}\n{cron_line}\n"
+            new_crontab = "".join(new_lines) + entry
+            self._write_crontab(new_crontab)
+            logger.info("Linux 任务注册成功: %s", spec.task_id)
+        finally:
+            lock.release()
 
-    async def unregister(self, task_id: str) -> None:
+    def unregister(self, task_id: str) -> None:
         validate_task_id(task_id)
-        await self._remove_from_user_crontab(task_id)
+        lock = self._acquire_crontab_lock()
+        try:
+            self._remove_from_user_crontab_unlocked(task_id)
+        finally:
+            lock.release()
 
-    async def is_registered(self, task_id: str) -> bool:
+    def is_registered(self, task_id: str) -> bool:
         validate_task_id(task_id)
-        marker = f"# MWU:{task_id}"
-        crontab_text = await self._read_crontab()
-        return marker in crontab_text
+        lock = self._acquire_crontab_lock()
+        try:
+            marker = f"# MWU:{task_id}"
+            return marker in self._read_crontab()
+        finally:
+            lock.release()
 
-    async def verify_registration(self, spec: SystemTaskSpec) -> tuple[bool, str]:
+    def verify_registration(self, spec: NativeTaskSpec) -> tuple[bool, str]:
         expected_line = self._build_cron_line(spec)
         marker = f"# MWU:{spec.task_id}"
-        text = await self._read_crontab()
-        lines = text.splitlines()
-        for i, line in enumerate(lines):
-            if line.strip() == marker:
-                if i + 1 < len(lines) and lines[i + 1].strip() == expected_line:
-                    return True, "user crontab marker+line match"
-                return False, "user crontab line mismatch"
-        return False, "user crontab marker missing"
+        lock = self._acquire_crontab_lock()
+        try:
+            text = self._read_crontab()
+            lines = text.splitlines()
+            for i, line in enumerate(lines):
+                if line.strip() == marker:
+                    if i + 1 < len(lines) and lines[i + 1].strip() == expected_line:
+                        return True, "user crontab marker+line match"
+                    return False, "user crontab line mismatch"
+            return False, "user crontab marker missing"
+        finally:
+            lock.release()
+
+    def list_registered_task_ids(self) -> list[str]:
+        lock = self._acquire_crontab_lock()
+        try:
+            text = self._read_crontab()
+            return _MWU_CRON_MARKER_RE.findall(text)
+        finally:
+            lock.release()
 
     def _crontab_lock_path(self) -> Path:
         return Path.home() / ".mwu" / self._CRONTAB_LOCK_NAME
@@ -882,8 +822,8 @@ class LinuxBackend(SystemSchedulerBackend):
         lock.acquire(timeout_seconds=30.0)
         return lock
 
-    async def _read_crontab(self) -> str:
-        proc = await asyncio.to_thread(_run_text, ["crontab", "-l"])
+    def _read_crontab(self) -> str:
+        proc = _run_text(["crontab", "-l"])
         if proc.returncode != 0:
             err = f"{proc.stderr or ''}{proc.stdout or ''}"
             err_l = err.lower()
@@ -892,9 +832,8 @@ class LinuxBackend(SystemSchedulerBackend):
             raise RuntimeError(f"crontab -l failed: {err.strip() or proc.returncode}")
         return proc.stdout or ""
 
-    async def _write_crontab(self, content: str) -> None:
-        proc = await asyncio.to_thread(
-            subprocess.run,
+    def _write_crontab(self, content: str) -> None:
+        proc = subprocess.run(
             ["crontab", "-"],
             input=content,
             capture_output=True,
@@ -906,15 +845,8 @@ class LinuxBackend(SystemSchedulerBackend):
             stderr = proc.stderr or ""
             raise RuntimeError(f"crontab 写入失败: {stderr.strip()}")
 
-    async def _remove_from_user_crontab(self, task_id: str) -> None:
-        lock = self._acquire_crontab_lock()
-        try:
-            await self._remove_from_user_crontab_unlocked(task_id)
-        finally:
-            lock.release()
-
-    async def _remove_from_user_crontab_unlocked(self, task_id: str) -> None:
-        crontab_text = await self._read_crontab()
+    def _remove_from_user_crontab_unlocked(self, task_id: str) -> None:
+        crontab_text = self._read_crontab()
         if not crontab_text:
             return
         lines = crontab_text.splitlines(True)
@@ -934,49 +866,22 @@ class LinuxBackend(SystemSchedulerBackend):
 
         new_crontab = "".join(new_lines)
         if not new_crontab.strip():
-            proc = await asyncio.to_thread(_run_text, ["crontab", "-r"])
+            proc = _run_text(["crontab", "-r"])
             if proc.returncode != 0:
                 stderr = proc.stderr or ""
                 if "no crontab for" not in stderr.lower():
                     raise RuntimeError(f"crontab -r failed: {stderr.strip()}")
         else:
-            await self._write_crontab(new_crontab)
+            self._write_crontab(new_crontab)
 
-    async def _register_user_cron(self, spec: SystemTaskSpec) -> None:
-        lock = self._acquire_crontab_lock()
-        try:
-            cron_line = self._build_cron_line(spec)
-            crontab_text = await self._read_crontab()
-            lines = crontab_text.splitlines(True)
-            new_lines: list[str] = []
-            skip_next = False
-            for line in lines:
-                stripped = line.strip()
-                if stripped == f"# MWU:{spec.task_id}":
-                    skip_next = True
-                    continue
-                if skip_next:
-                    skip_next = False
-                    continue
-                new_lines.append(line)
-            entry = f"# MWU:{spec.task_id}\n{cron_line}\n"
-            new_crontab = "".join(new_lines) + entry
-            await self._write_crontab(new_crontab)
-        finally:
-            lock.release()
-
-    def _build_command_body(self, spec: SystemTaskSpec) -> str:
+    def _build_command_body(self, spec: NativeTaskSpec) -> str:
         wd = shlex.quote(spec.working_dir)
         exe = shlex.quote(spec.exe_path)
         args = " ".join(shlex.quote(a) for a in spec.cli_args)
         return f"cd {wd} && {exe} {args}".rstrip()
 
-    def _build_cron_line(self, spec: SystemTaskSpec) -> str:
-        trigger_spec = spec.trigger
-        if trigger_spec.trigger_type != "cron" or not trigger_spec.cron_expression:
-            raise ValueError("Linux 仅支持 cron 触发器")
-        cron_timing = validate_linux_cron_expression(trigger_spec.cron_expression)
-        return f"{cron_timing} {self._build_command_body(spec)}"
+    def _build_cron_line(self, spec: NativeTaskSpec) -> str:
+        return f"{to_crontab_line(spec.cron)} {self._build_command_body(spec)}"
 
 
 # ---------------------------------------------------------------------------
@@ -1001,14 +906,14 @@ def build_native_command(
 ) -> tuple[str, list[str]]:
     """Build source/frozen native command for OS registration.
 
-    Source mode: python_executable + absolute main.py + --headless --task id
-    Frozen mode: executable + --headless --task id
+    Source mode: python_executable + absolute main.py + --scheduled-task id
+    Frozen mode: executable + --scheduled-task id
     """
     import sys
 
     is_frozen = getattr(sys, "frozen", False) if frozen is None else frozen
 
     if is_frozen:
-        return sys.executable, ["--headless", "--task", task_id]
+        return sys.executable, ["--scheduled-task", task_id]
     main_py = str((Path(app_root) / "main.py").resolve())
-    return sys.executable, [main_py, "--headless", "--task", task_id]
+    return sys.executable, [main_py, "--scheduled-task", task_id]

@@ -76,6 +76,12 @@ class MaaWorker:
         return None
 
     def shutdown(self):
+        # Stop running pipeline before tearing down sinks/agents.
+        if self.task_state.running:
+            try:
+                self.tasks.stop()
+            except Exception:
+                pass
         self.sinks.unregister_all(
             self.resource,
             self.tasker,

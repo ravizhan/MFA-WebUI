@@ -10,6 +10,7 @@ vi.mock("@/services/api", () => ({
   postCustomDevice: vi.fn<() => void>(),
   postResource: vi.fn<() => void>(),
   startTask: vi.fn<() => void>(),
+  stopTask: vi.fn<() => void>(),
   getSettings: vi.fn<() => void>(),
   updateSettings: vi.fn<() => void>(),
   getTaskConfig: vi.fn<() => void>(),
@@ -40,6 +41,7 @@ import type {
   DeviceSearchData,
   ResourceInfo,
 } from "@/services/api"
+import type { ManualStartPayload, StartConflict } from "@/types/schedulerModel"
 import type { PanelLastConnectedDevice } from "@/types/settingsModel"
 
 const disconnectedState: DeviceRuntimeState = {
@@ -208,148 +210,170 @@ describe("useDeviceConnectionStore", () => {
   })
 
   describe("StartTask", () => {
-    it("returns false when device connection fails", async () => {
+    function setupReadyToStart() {
       const store = useDeviceConnectionStore()
-      store.controllerCapabilities = [adbCapability]
-      store.selectedController = "ADB"
-      store.selectedDeviceKey = "adb|/usr/bin/adb|127.0.0.1:5555"
-      store.availableDevices = [adbDevice]
-      vi.mocked(api.getDeviceState).mockResolvedValue(disconnectedState)
-      vi.mocked(api.postDevices).mockResolvedValue({
-        success: false,
-        message: "connect failed",
-      })
-      const result = await store.StartTask()
-      expect(result).toBe(false)
-      expect(showGlobalMessage).toHaveBeenCalledWith("error", "设备连接失败: connect failed")
-    })
-
-    it("returns false when resource selection fails", async () => {
-      const store = useDeviceConnectionStore()
-      const indexStore = useIndexStore()
-      const settingsStore = useSettingsStore()
+      const configStore = useTaskConfigStore()
+      const interfaceStore = useInterfaceStore()
       store.controllerCapabilities = [adbCapability]
       store.selectedController = "ADB"
       store.selectedDeviceKey = "adb|/usr/bin/adb|127.0.0.1:5555"
       store.availableDevices = [adbDevice]
       store.resource = "res1"
-      indexStore.Connected = true
-      settingsStore.settings.panel.lastConnectedDevice = savedAdbDevice
+      configStore.configLoaded = true
+      configStore.taskList = [{ id: "task1", name: "Task 1", order: 0, checked: true }]
+      interfaceStore.interface = {
+        task: [{ name: "Task 1", entry: "task1" }],
+      }
+      vi.mocked(api.getDeviceState).mockResolvedValue(lockedAdbState)
+      return { store, configStore, interfaceStore }
+    }
+
+    const expectedStartPayload: ManualStartPayload = {
+      task_list: ["task1"],
+      task_options: {},
+      preTasks: [],
+      controller_name: "adb",
+      device: {
+        controller_name: "adb",
+        device_type: "Adb",
+        device_address: "127.0.0.1:5555",
+      },
+      resource_name: "res1",
+    }
+
+    it("returns false when no device selected", async () => {
+      const store = useDeviceConnectionStore()
+      store.controllerCapabilities = [adbCapability]
+      store.selectedController = "ADB"
+      store.selectedDeviceKey = null
+      store.resource = "res1"
+      vi.mocked(api.getDeviceState).mockResolvedValue(lockedAdbState)
+      const result = await store.StartTask()
+      expect(result).toBe(false)
+      expect(showGlobalMessage).toHaveBeenCalledWith("error", "panel.selectDevice")
+      expect(api.startTask).not.toHaveBeenCalled()
+    })
+
+    it("returns false when no resource selected", async () => {
+      const store = useDeviceConnectionStore()
+      store.controllerCapabilities = [adbCapability]
+      store.selectedController = "ADB"
+      store.selectedDeviceKey = "adb|/usr/bin/adb|127.0.0.1:5555"
+      store.availableDevices = [adbDevice]
+      store.resource = null
+      // Runtime state must not re-hydrate a resource during syncDeviceRuntimeState
       vi.mocked(api.getDeviceState).mockResolvedValue({
         connected: true,
-        configuration_locked: false,
-        controller_name: null,
+        configuration_locked: true,
+        controller_name: "adb",
         resource_name: null,
-      })
-      vi.mocked(api.postDevices).mockResolvedValue({ success: true, message: "ok" })
-      vi.mocked(api.postResource).mockResolvedValue({
-        success: false,
-        message: "resource failed",
       })
       const result = await store.StartTask()
       expect(result).toBe(false)
-      expect(showGlobalMessage).toHaveBeenCalledWith("error", "资源设置失败: resource failed")
+      expect(showGlobalMessage).toHaveBeenCalledWith("error", "panel.selectResource")
+      expect(api.startTask).not.toHaveBeenCalled()
     })
 
     it("returns false when no compatible tasks", async () => {
-      const store = useDeviceConnectionStore()
-      const configStore = useTaskConfigStore()
-      const interfaceStore = useInterfaceStore()
-      store.controllerCapabilities = [adbCapability]
-      store.selectedController = "ADB"
-      store.resource = "res1"
-      configStore.configLoaded = true
+      const { store, configStore, interfaceStore } = setupReadyToStart()
       configStore.taskList = [{ id: "task1", name: "Task 1", order: 0, checked: true }]
-
       interfaceStore.interface = {
         task: [{ name: "Task 1", entry: "task1", controller: ["win32"] }],
       }
-      vi.mocked(api.getDeviceState).mockResolvedValue(lockedAdbState)
-      vi.spyOn(store, "connectDevices").mockResolvedValue({ success: true, message: "ok" })
-      vi.spyOn(store, "postResourceSelection").mockResolvedValue({
-        success: true,
-        message: "ok",
-      })
       const result = await store.StartTask()
       expect(result).toBe(false)
       expect(showGlobalMessage).toHaveBeenCalledWith("error", "panel.noCompatibleTask")
+      expect(api.startTask).not.toHaveBeenCalled()
     })
 
     it("returns false when no tasks selected", async () => {
-      const store = useDeviceConnectionStore()
-      const configStore = useTaskConfigStore()
-      const interfaceStore = useInterfaceStore()
-      store.controllerCapabilities = [adbCapability]
-      store.selectedController = "ADB"
-      store.resource = "res1"
-      configStore.configLoaded = true
+      const { store, configStore } = setupReadyToStart()
       configStore.taskList = [{ id: "task1", name: "Task 1", order: 0, checked: false }]
-
-      interfaceStore.interface = {
-        task: [{ name: "Task 1", entry: "task1" }],
-      }
-      vi.mocked(api.getDeviceState).mockResolvedValue(lockedAdbState)
-      vi.spyOn(store, "connectDevices").mockResolvedValue({ success: true, message: "ok" })
-      vi.spyOn(store, "postResourceSelection").mockResolvedValue({
-        success: true,
-        message: "ok",
-      })
       const result = await store.StartTask()
       expect(result).toBe(false)
       expect(showGlobalMessage).toHaveBeenCalledWith("error", "panel.selectTask")
+      expect(api.startTask).not.toHaveBeenCalled()
     })
 
     it("returns true on full success", async () => {
-      const store = useDeviceConnectionStore()
-      const configStore = useTaskConfigStore()
-      const interfaceStore = useInterfaceStore()
-      const payload = { task_list: ["task1"], task_options: {}, preTasks: [] }
-      store.controllerCapabilities = [adbCapability]
-      store.selectedController = "ADB"
-      store.resource = "res1"
-      configStore.configLoaded = true
-      configStore.taskList = [{ id: "task1", name: "Task 1", order: 0, checked: true }]
-
-      interfaceStore.interface = {
-        task: [{ name: "Task 1", entry: "task1" }],
-      }
-      vi.mocked(api.getDeviceState).mockResolvedValue(lockedAdbState)
-      vi.spyOn(configStore, "buildExecutionPayload").mockReturnValue(payload)
-      vi.mocked(api.startTask).mockResolvedValue(true)
+      const { store, configStore } = setupReadyToStart()
+      const indexStore = useIndexStore()
+      vi.spyOn(configStore, "buildExecutionPayload").mockReturnValue({
+        task_list: ["task1"],
+        task_options: {},
+        preTasks: [],
+      })
+      vi.mocked(api.startTask).mockResolvedValue({ accepted: true, runId: "run-1" })
       const result = await store.StartTask()
       expect(result).toBe(true)
-      expect(api.startTask).toHaveBeenCalledWith(payload)
+      expect(api.startTask).toHaveBeenCalledWith(expectedStartPayload)
+      expect(store.startConflict).toBeNull()
+      expect(indexStore.TaskRunning).toBe(true)
     })
 
-    it("skips connect and resource when already connected", async () => {
-      const store = useDeviceConnectionStore()
-      const configStore = useTaskConfigStore()
-      const interfaceStore = useInterfaceStore()
-      const payload = { task_list: ["task1"], task_options: {}, preTasks: [] }
-      store.controllerCapabilities = [adbCapability]
-      store.selectedController = "ADB"
-      store.resource = "res1"
-      configStore.configLoaded = true
-      configStore.taskList = [{ id: "task1", name: "Task 1", order: 0, checked: true }]
-
-      interfaceStore.interface = {
-        task: [{ name: "Task 1", entry: "task1" }],
+    it("sets startConflict and returns false on conflict", async () => {
+      const { store, configStore } = setupReadyToStart()
+      const conflict: StartConflict = {
+        code: "busy_manual",
+        message: "busy",
+        active_run_id: "run-active",
+        active_task_name: "Other",
+        active_origin: "manual",
       }
-      vi.mocked(api.getDeviceState).mockResolvedValue(lockedAdbState)
-      vi.spyOn(configStore, "buildExecutionPayload").mockReturnValue(payload)
-      const connectSpy = vi.spyOn(store, "connectDevices").mockResolvedValue({
-        success: true,
-        message: "ok",
+      vi.spyOn(configStore, "buildExecutionPayload").mockReturnValue({
+        task_list: ["task1"],
+        task_options: {},
+        preTasks: [],
       })
-      const resourceSpy = vi.spyOn(store, "postResourceSelection").mockResolvedValue({
-        success: true,
-        message: "ok",
-      })
-      vi.mocked(api.startTask).mockResolvedValue(true)
+      vi.mocked(api.startTask).mockResolvedValue({ accepted: false, conflict })
       const result = await store.StartTask()
+      expect(result).toBe(false)
+      expect(store.startConflict).toEqual(conflict)
+      expect(api.startTask).toHaveBeenCalledWith(expectedStartPayload)
+    })
+
+    it("stopActiveAndRestart calls stopTask then retries successfully", async () => {
+      const { store, configStore } = setupReadyToStart()
+      const indexStore = useIndexStore()
+      const conflict: StartConflict = {
+        code: "busy_scheduled",
+        message: "scheduled running",
+        active_run_id: "run-sched",
+        active_task_name: "Sched",
+        active_origin: "in_app",
+      }
+      store.startConflict = conflict
+      vi.spyOn(configStore, "buildExecutionPayload").mockReturnValue({
+        task_list: ["task1"],
+        task_options: {},
+        preTasks: [],
+      })
+      vi.mocked(api.stopTask).mockResolvedValue(true)
+      vi.mocked(api.startTask).mockResolvedValue({ accepted: true, runId: "run-2" })
+
+      const result = await store.stopActiveAndRestart()
+
       expect(result).toBe(true)
-      expect(connectSpy).not.toHaveBeenCalled()
-      expect(resourceSpy).not.toHaveBeenCalled()
+      expect(api.stopTask).toHaveBeenCalledOnce()
+      expect(api.startTask).toHaveBeenCalledWith(expectedStartPayload)
+      expect(store.startConflict).toBeNull()
+      expect(indexStore.TaskRunning).toBe(true)
+    })
+
+    it("stopActiveAndRestart returns false when stopTask fails", async () => {
+      const store = useDeviceConnectionStore()
+      store.startConflict = {
+        code: "busy_manual",
+        message: "busy",
+        active_run_id: "run-active",
+        active_task_name: "Other",
+        active_origin: "manual",
+      }
+      vi.mocked(api.stopTask).mockResolvedValue(false)
+      const result = await store.stopActiveAndRestart()
+      expect(result).toBe(false)
+      expect(api.startTask).not.toHaveBeenCalled()
+      expect(store.startConflict).not.toBeNull()
     })
   })
 

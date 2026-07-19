@@ -117,9 +117,10 @@
         "running": "运行中",
         "stopped": "已停止",
         "inProcess": "进程内",
-        "systemUser": "系统级·用户",
-        "systemSystem": "系统级·系统",
-        "needsRepair": "需修复"
+        "skipped_busy_manual": "跳过（手动任务运行中）",
+        "skipped_busy_scheduled": "跳过（定时任务运行中）",
+        "skipped_update_in_progress": "跳过（更新中）",
+        "missed_deadline": "错过执行时间"
       },
       "dialog": {
         "editTitle": "编辑定时任务",
@@ -172,23 +173,8 @@
           "environment": "运行环境",
           "content": "执行内容"
         },
-        "systemScheduling": "系统级调度",
-        "enableSystemScheduling": "启用系统级调度",
-        "scope": {
-          "label": "运行范围",
-          "user": "用户级",
-          "system": "系统级",
-          "userWarning": "用户级任务在用户登出后不会执行",
-          "systemWarning": "系统级任务以 SYSTEM 账户运行，可能无法访问 ADB 设备。如任务依赖 ADB，建议使用用户级。"
-        },
-        "systemRegisterSuccess": "系统级注册成功",
-        "systemRegisterFail": "系统级注册失败",
-        "systemUnregisterSuccess": "已卸载系统级注册",
-        "systemUnregisterFail": "卸载系统级注册失败",
-        "capabilityDisabled": "当前触发类型不支持系统级调度：{reason}",
-        "partialFailure": "任务已保存，但系统级注册失败：{message}",
-        "orphaned": "已游离",
-        "repair": "修复"
+        "runWhenClosed": "MWU 关闭后仍执行",
+        "runWhenClosedIneligible": "仅支持单数值 5 字段 Cron（如 0 9 * * 1）。分钟必须是数字；日期与星期不能同时指定。"
       },
       "rules": {
         "nameRequired": "请输入任务名称",
@@ -201,10 +187,24 @@
         "endBeforeStart": "结束时间不能早于开始时间",
         "taskListRequired": "请至少选择一个任务"
       },
-      "systemLevel": "调度方式",
-      "repairAll": "修复全部",
-      "repairSuccess": "修复完成",
-      "repairFail": "修复失败"
+      "origin": {
+        "manual": "手动",
+        "in_app": "应用内",
+        "native": "系统级"
+      },
+      "list": {
+        "runsWhenClosed": "关闭后执行"
+      },
+      "history": {
+        "skippedBy": "已跳过：{origin} 任务「{name}」正在运行"
+      },
+      "conflict": {
+        "title": "已有任务在运行",
+        "message": "现在无法开始。「{taskName}」（{origin}）正在运行。",
+        "messageUpdate": "现在无法开始。更新正在进行中，请稍后再试。",
+        "stopAndStart": "停止当前任务并开始",
+        "cancel": "取消"
+      }
     },
     "ui": {
       "title": "界面设置",

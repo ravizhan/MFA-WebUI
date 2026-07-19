@@ -20,8 +20,22 @@
           <span class="font-medium text-sm truncate">{{ exec.task_name }}</span>
           <span class="text-xs opacity-50 shrink-0">{{ formatDateTimeText(exec.started_at) }}</span>
         </div>
-        <div class="text-xs" :class="statusTextClass(exec.status)">
-          {{ getStatusLabelText(exec.status) }}
+        <div class="flex items-center gap-2 text-xs">
+          <span
+            class="px-1.5 py-0.5 rounded text-[10px] leading-tight"
+            :class="originBadgeClass(exec.origin)"
+          >
+            {{ getOriginLabelText(exec.origin) }}
+          </span>
+          <span :class="statusTextClass(exec.status)">
+            {{ getStatusLabelText(exec.status) }}
+          </span>
+        </div>
+        <div v-if="exec.blocker_task_name" class="text-xs text-warning opacity-80">
+          {{ t("settings.scheduler.history.skippedBy", {
+            origin: getOriginLabelText(exec.origin),
+            name: exec.blocker_task_name,
+          }) }}
         </div>
         <div v-if="exec.error_message" class="text-xs text-error opacity-80">
           {{ exec.error_message }}
@@ -34,12 +48,13 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n"
 import { Icon } from "@iconify/vue"
-import type { ExecutionStatus, TaskExecution } from "@/types/schedulerModel"
+import type { ExecutionStatus, TaskExecution, ExecutionOrigin } from "@/types/schedulerModel"
 import {
   formatDateTime,
   getStatusIcon,
   getStatusLabel,
   getStatusType,
+  getOriginLabel,
 } from "@/utils/scheduler/display"
 
 defineProps<{
@@ -54,6 +69,10 @@ function formatDateTimeText(dateStr?: string): string {
 
 function getStatusLabelText(status: ExecutionStatus): string {
   return getStatusLabel(t, status)
+}
+
+function getOriginLabelText(origin: ExecutionOrigin): string {
+  return getOriginLabel(t, origin)
 }
 
 function statusIcon(status: ExecutionStatus): string {
@@ -81,5 +100,11 @@ function statusTextClass(status: ExecutionStatus): string {
   if (type === "error") return "text-error"
   if (type === "warning") return "text-warning"
   return "text-info"
+}
+
+function originBadgeClass(origin: ExecutionOrigin): string {
+  if (origin === "manual") return "bg-primary/10 text-primary"
+  if (origin === "native") return "bg-secondary/10 text-secondary"
+  return "bg-accent/10 text-accent"
 }
 </script>

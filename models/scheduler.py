@@ -1,7 +1,4 @@
-from __future__ import annotations
-
 import uuid
-
 from datetime import datetime
 from typing import Literal
 
@@ -10,6 +7,18 @@ from pydantic import BaseModel, Field, field_validator
 
 TaskOptionValue = str | list[str] | dict[str, str]
 TaskOptionsByTask = dict[str, dict[str, TaskOptionValue]]
+
+ExecutionOrigin = Literal["manual", "in_app", "native"]
+ExecutionStatus = Literal[
+    "running",
+    "success",
+    "failed",
+    "stopped",
+    "skipped_busy_manual",
+    "skipped_busy_scheduled",
+    "skipped_update_in_progress",
+    "missed_deadline",
+]
 
 
 class ScheduledTaskDeviceConfig(BaseModel):
@@ -92,9 +101,6 @@ class ScheduledTask(TaskExecutionPayload):
     name: str = Field(..., min_length=1, max_length=100, description="任务名称")
     description: str | None = Field(None, max_length=500, description="任务描述")
     enabled: bool = Field(True, description="是否启用")
-    trigger_type: Literal["cron", "date", "interval"] = Field(
-        ..., description="触发器类型"
-    )
     trigger_config: TriggerConfig = Field(..., description="触发器配置")
     controller_name: str | None = Field(None, description="控制器名称")
     device: ScheduledTaskDeviceConfig | None = Field(None, description="设备配置")
@@ -114,7 +120,6 @@ class ScheduledTaskCreate(TaskExecutionPayload):
     name: str = Field(..., min_length=1, max_length=100)
     description: str | None = Field(None, max_length=500)
     enabled: bool = True
-    trigger_type: Literal["cron", "date", "interval"]
     trigger_config: TriggerConfig
     controller_name: str | None = Field(None, description="控制器名称")
     device: ScheduledTaskDeviceConfig | None = Field(None, description="设备配置")
@@ -128,14 +133,13 @@ class ScheduledTaskUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=100)
     description: str | None = Field(None, max_length=500)
     enabled: bool | None = None
-    trigger_type: (Literal["cron", "date", "interval"]) | None = None
     trigger_config: TriggerConfig | None = None
     controller_name: str | None = Field(None, description="控制器名称")
     device: ScheduledTaskDeviceConfig | None = Field(None, description="设备配置")
     resource_name: str | None = Field(None, description="资源包名称")
-    task_list: (list[str]) | None = None
+    task_list: list[str] | None = None
     task_options: TaskOptionsByTask | None = None
-    preTasks: (list[PreTaskCommand]) | None = None
+    preTasks: list[PreTaskCommand] | None = None
     # omitted=keep; true/false via model_fields_set (explicit false disables wakeup)
     wakeup_enabled: bool | None = None
 
@@ -143,156 +147,33 @@ class ScheduledTaskUpdate(BaseModel):
 class TaskExecution(BaseModel):
     """任务执行记录"""
 
-    id: str = Field(..., description="执行记录唯一标识")
-    task_id: str = Field(..., description="关联的定时任务ID")
-    task_name: str = Field(..., description="任务名称")
-    started_at: datetime = Field(..., description="开始时间")
-    finished_at: datetime | None = Field(None, description="结束时间")
-    status: Literal["running", "success", "failed", "stopped"] = Field(
-        ..., description="执行状态"
-    )
-    error_message: str | None = Field(None, description="错误信息")
-
-
-class TaskExecutionCreate(BaseModel):
-    """创建执行记录请求"""
-
-    task_id: str
+    id: str
+    task_id: str | None
     task_name: str
-    status: Literal["running", "success", "failed", "stopped"]
+    origin: ExecutionOrigin
+    occurrence_id: str | None = None
+    scheduled_for: datetime | None = None
+    status: ExecutionStatus
+    blocker_run_id: str | None = None
+    blocker_task_name: str | None = None
     error_message: str | None = None
+    started_at: datetime
+    finished_at: datetime | None = None
 
 
-# ---------------------------------------------------------------------------
-# 用户级原生唤醒注册模型
-# ---------------------------------------------------------------------------
+class StartConflict(BaseModel):
+    """手动启动冲突信息"""
+
+    code: Literal["busy_manual", "busy_scheduled", "update_in_progress"]
+    message: str
+    active_run_id: str
+    active_task_name: str
+    active_origin: ExecutionOrigin
 
 
-OperationalState = Literal["active", "error"]
+class ManualStartPayload(TaskExecutionPayload):
+    """手动启动请求载荷（设备/资源在 admission 之后由后端准备）"""
 
-# Exact allowlist of keys written to system_tasks.json.
-OPERATIONAL_STATE_KEYS = frozenset(
-    {
-        "task_id",
-        "platform",
-        "state",
-        "registered_exe_path",
-        "last_registered_at",
-        "last_error",
-    }
-)
-
-OPERATIONAL_STATE_VERSION = 4
-
-
-class OSTriggerSpec(BaseModel):
-    """OS 级触发器规格，由 APScheduler 触发器映射而来"""
-
-    trigger_type: Literal["cron", "date", "interval"]
-    cron_expression: str | None = Field(
-        None, description="cron 类型：5-field cron 表达式"
-    )
-    run_date: datetime | None = Field(None, description="date 类型：一次性执行时间")
-    interval_minutes: int | None = Field(
-        None, description="interval 类型：间隔分钟数（整分钟，禁止静默取整）"
-    )
-
-
-class SystemTaskSpec(BaseModel):
-    """注册到 OS 用户级调度器的任务规格"""
-
-    task_id: str
-    task_name: str
-    exe_path: str = Field(
-        ..., description="命令可执行文件（frozen: exe；source: python）"
-    )
-    cli_args: list[str] = Field(
-        ..., description="命令行参数，如 source 下 [main.py, --headless, --task, id]"
-    )
-    trigger: OSTriggerSpec
-    working_dir: str
-
-
-class SystemTaskOperationalRecord(BaseModel):
-    """Persisted operational native-registration record (disk allowlist only)."""
-
-    task_id: str
-    platform: Literal["windows", "macos", "linux"]
-    state: OperationalState = "active"
-    registered_exe_path: str = Field(
-        "", description="Last-known registered exe path (diagnostic)"
-    )
-    last_registered_at: datetime | None = None
-    last_error: str | None = None
-
-    def to_operational_dict(self) -> dict:
-        """Serialize only operational allowlisted keys."""
-        raw = self.model_dump(mode="json")
-        return {k: raw[k] for k in OPERATIONAL_STATE_KEYS if k in raw}
-
-
-class SystemTaskRegistration(BaseModel):
-    """API/list DTO for native wakeup registration (hydrated from APS + disk)."""
-
-    task_id: str
-    task_name: str = ""
-    platform: Literal["windows", "macos", "linux"]
-    state: OperationalState = "active"
-    registered_exe_path: str = ""
-    last_registered_at: datetime | None = None
-    last_error: str | None = None
-    trigger_spec: OSTriggerSpec | None = None
-    next_run_time: datetime | None = None
-    registered: bool = False
-    verified: bool = False
-    path_valid: bool = False
-    reason: str | None = None
-    enabled: bool | None = None
-
-
-class SystemTaskStatusResponse(BaseModel):
-    """原生唤醒注册状态（authoritative APS + native observation）。"""
-
-    task_id: str
-    registered: bool
-    platform: str | None = None
-    task_name: str = ""
-    next_run_time: datetime | None = None
-    last_error: str | None = None
-    path_valid: bool = Field(..., description="注册路径是否与当前 command 一致")
-    state: OperationalState | None = None
-    registered_exe_path: str = ""
-    enabled: bool | None = None
-    verified: bool | None = None
-    reason: str | None = None
-
-
-class TaskUpdateSyncedResult(BaseModel):
-    """APS update + native reconcile partial-success result.
-
-    APS success with native failure still carries ``task`` and surfaces
-    ``native_error`` / ``native_status`` without treating the request as failed.
-    """
-
-    task: ScheduledTask | None = None
-    aps_outcome: Literal["success", "not_found", "error"] = "success"
-    aps_error: str | None = None
-    native_status: SystemTaskStatusResponse | None = None
-    native_error: str | None = None
-
-
-class ReconcileTaskResult(BaseModel):
-    """Single-task reconcile outcome for repair/reconcile_all aggregation."""
-
-    task_id: str
-    action: Literal[
-        "noop",
-        "registered",
-        "updated",
-        "cleaned",
-        "materialized",
-        "error",
-        "skipped",
-    ] = "noop"
-    detail: str = ""
-    native_error: str | None = None
+    controller_name: str
+    device: ScheduledTaskDeviceConfig
+    resource_name: str

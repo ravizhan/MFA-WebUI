@@ -3,6 +3,7 @@ import asyncio
 import hashlib
 import logging
 import os
+import secrets
 import signal
 import subprocess
 import sys
@@ -10,9 +11,9 @@ import threading
 import time
 import webbrowser
 from contextlib import asynccontextmanager, suppress
-from datetime import datetime
 from pathlib import Path
 
+import httpx
 import uvicorn
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -30,19 +31,20 @@ from models.interface_loader import (
     resolve_interface_relative_path,
 )
 from models.scheduler import (
+    ManualStartPayload,
     ScheduledTaskCreate,
     ScheduledTaskUpdate,
-    TaskExecutionPayload,
 )
 from models.settings import SettingsModel
 from models.task_config import (
     TaskConfigModel,
     normalize_task_config,
-    normalize_task_execution_payload,
 )
 from scheduler_manager import SchedulerManager
+from services.execution_coordinator import ExecutionCoordinator
+from services.execution_store import ExecutionStore
 from services.process_lock import LockBusyError, LockError, RuntimeOwnership
-from services.system_scheduler import SystemTaskService
+from services.system_scheduler import SystemScheduler
 from services.update_service import (
     check_github_update,
     check_mirrorchyan_update,
@@ -64,14 +66,13 @@ SETTINGS_FILE = CONFIG_DIR / "settings.json"
 TASK_CONFIG_FILE = CONFIG_DIR / "task_config.json"
 LOGS_DIR = CONFIG_DIR / "logs"
 INDEX_FILE = APP_ROOT_DIR / "page/index.html"
+NATIVE_TOKEN_FILE = CONFIG_DIR / "native_token"
+SCHEDULER_DB_PATH = CONFIG_DIR / "scheduler.sqlite"
 
-# Headless 模式退出码
 EXIT_SUCCESS = 0
-EXIT_TASK_NOT_FOUND = 1
-EXIT_DEVICE_FAILED = 2
-EXIT_TASK_FAILED = 3
 EXIT_APP_RUNNING = 4
 EXIT_UPDATING = 5
+EXIT_DELEGATE_FAILED = 1
 
 
 def load_interface_translations() -> dict[str, dict]:
@@ -153,130 +154,52 @@ def release_runtime_ownership() -> None:
         app_state.runtime_ownership = None
 
 
-async def _headless_log_consumer(logger: logging.Logger):
-    """Headless 模式日志消费者：从队列读取事件并写入日志文件"""
-    while True:
-        while not app_state.message_conn.empty():
-            message = normalize_event(app_state.message_conn.get_nowait())
-            level = logging.INFO
-            if hasattr(message, "level"):
-                level_map = {
-                    "error": logging.ERROR,
-                    "warning": logging.WARNING,
-                    "info": logging.INFO,
-                }
-                level = level_map.get(message.level, logging.INFO)
-            logger.log(level, f"[{message.event}] {message.message}")
-        await asyncio.sleep(0.1)
-
-
-async def run_headless(task_id: str) -> int:
-    """Headless 模式：不启动 Web 服务器，执行指定任务后退出
-
-    流程：
-    1. Runtime ownership（update 锁 30s + runtime 独占 + recheck）
-    2. 文件日志（失败也释放锁）
-    3. MaaWorker + SchedulerManager（paused，无后台派发）
-    4. 拒绝禁用任务；执行恰好一个 job
-    5. 清理并退出
-    """
-    ownership = None
-    file_handler = None
-    root_logger = logging.getLogger()
-    scheduler_manager = None
-    worker = None
-    log_task = None
-
-    try:
+def ensure_native_token() -> str:
+    """Load or create config/native_token (0600)."""
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    if not NATIVE_TOKEN_FILE.exists():
+        token = secrets.token_hex(32)
+        NATIVE_TOKEN_FILE.write_text(token, encoding="utf-8")
         try:
-            ownership = acquire_runtime_ownership()
-            app_state.runtime_ownership = ownership
-        except LockBusyError as e:
-            msg = str(e).lower()
-            if "update" in msg:
-                print("更新进行中，跳过执行")
-                return EXIT_UPDATING
-            print("应用已在运行，委托现有实例处理")
-            return EXIT_APP_RUNNING
-        except LockError as e:
-            print(f"锁协议失败: {e}")
-            return EXIT_UPDATING
+            os.chmod(NATIVE_TOKEN_FILE, 0o600)
+        except OSError:
+            pass
+        return token
+    return NATIVE_TOKEN_FILE.read_text(encoding="utf-8").strip()
 
+
+def delegate_native_dispatch(task_id: str) -> int:
+    """POST native-dispatch to the running instance; retry ~30s; always exit 0 on give-up."""
+    if not NATIVE_TOKEN_FILE.exists():
+        print("native_token 不存在，无法委托", file=sys.stderr)
+        return EXIT_DELEGATE_FAILED
+    token = NATIVE_TOKEN_FILE.read_text(encoding="utf-8").strip()
+    if not token:
+        print("native_token 为空，无法委托", file=sys.stderr)
+        return EXIT_DELEGATE_FAILED
+
+    url = "http://127.0.0.1:5566/api/internal/scheduler/native-dispatch"
+    payload = {"task_id": task_id, "token": token}
+    deadline = time.monotonic() + 30.0
+    last_err = "unknown"
+    while time.monotonic() < deadline:
         try:
-            LOGS_DIR.mkdir(parents=True, exist_ok=True)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            log_file = LOGS_DIR / f"headless_{task_id}_{timestamp}.log"
-            file_handler = logging.FileHandler(log_file, encoding="utf-8")
-            file_handler.setFormatter(
-                logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-            )
-            root_logger.addHandler(file_handler)
-            root_logger.setLevel(logging.INFO)
+            with httpx.Client(timeout=5.0) as client:
+                resp = client.post(url, json=payload)
+            if resp.status_code < 500:
+                # 2xx/4xx: running instance answered
+                if resp.status_code >= 400:
+                    print(
+                        f"native-dispatch 响应 {resp.status_code}: {resp.text}",
+                        file=sys.stderr,
+                    )
+                return EXIT_SUCCESS
+            last_err = f"HTTP {resp.status_code}"
         except Exception as e:
-            print(f"日志初始化失败: {e}")
-            return EXIT_TASK_FAILED
-
-        logger = logging.getLogger("headless")
-        logger.info(f"Headless 模式启动，任务 ID: {task_id}")
-
-        worker = MaaWorker(app_state.message_conn, interface, APP_ROOT_DIR)
-        scheduler_manager = SchedulerManager()
-        scheduler_manager.set_worker(worker)
-        await scheduler_manager.initialize(start_scheduler=True, paused=True)
-
-        log_task = asyncio.create_task(_headless_log_consumer(logger))
-
-        if scheduler_manager.scheduler is None:
-            logger.error("调度器未初始化")
-            return EXIT_TASK_FAILED
-        job = scheduler_manager.scheduler.get_job(task_id)
-        if job is None:
-            logger.error(f"APScheduler 中未找到任务: {task_id}")
-            return EXIT_TASK_NOT_FOUND
-
-        if job.next_run_time is None:
-            logger.error(f"任务已禁用，拒绝 headless 执行: {task_id}")
-            return EXIT_TASK_FAILED
-
-        from scheduler_manager import execute_scheduled_task
-
-        await execute_scheduled_task(**job.kwargs)
-
-        last_status = getattr(worker.task_state, "last_status", "failed")
-        logger.info(f"任务执行完成，状态: {last_status}")
-
-        if last_status == "success":
-            return EXIT_SUCCESS
-        elif last_status == "idle":
-            return EXIT_DEVICE_FAILED
-        else:
-            return EXIT_TASK_FAILED
-
-    except Exception as e:
-        logging.getLogger("headless").error(f"Headless 执行异常: {e}", exc_info=True)
-        return EXIT_TASK_FAILED
-    finally:
-        if log_task is not None:
-            log_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await log_task
-        if scheduler_manager is not None:
-            try:
-                await scheduler_manager.shutdown()
-            except Exception:
-                pass
-        if worker is not None:
-            try:
-                worker.shutdown()
-            except Exception:
-                pass
-        release_runtime_ownership()
-        if file_handler is not None:
-            try:
-                root_logger.removeHandler(file_handler)
-                file_handler.close()
-            except Exception:
-                pass
+            last_err = str(e)
+        time.sleep(2.0)
+    print(f"native-dispatch 委托失败（已重试）: {last_err}", file=sys.stderr)
+    return EXIT_SUCCESS
 
 
 @asynccontextmanager
@@ -284,6 +207,8 @@ async def lifespan(app: FastAPI):
     app_state.is_shutting_down = False
     app_state.worker = MaaWorker(app_state.message_conn, interface, APP_ROOT_DIR)
     app_state.broadcaster = LogBroadcaster()
+    app_state.native_token = ensure_native_token()
+
     with SETTINGS_FILE.open("r", encoding="utf-8") as f:
         config_data = json.load(f)
     with interface_lock:
@@ -291,35 +216,65 @@ async def lifespan(app: FastAPI):
             config_data,
             context={"interface": interface},
         )
-    # 初始化调度器（paused：先 repair，再 resume，避免启动期误派发）
-    app_state.scheduler_manager = SchedulerManager()
+
+    # Execution store + coordinator (admission gate)
+    app_state.execution_store = ExecutionStore(SCHEDULER_DB_PATH)
+    await app_state.execution_store.init()
+    app_state.execution_coordinator = ExecutionCoordinator(app_state.execution_store)
+    app_state.execution_coordinator.set_worker(app_state.worker)
+
+    # Native wakeup adapter (stateless)
+    app_state.system_scheduler = SystemScheduler(APP_ROOT_DIR)
+
+    # APS manager (paused until converge completes)
+    app_state.scheduler_manager = SchedulerManager(
+        SCHEDULER_DB_PATH,
+        system_scheduler=app_state.system_scheduler,
+    )
     app_state.scheduler_manager.set_worker(app_state.worker)
     await app_state.scheduler_manager.initialize(paused=True)
 
-    # 初始化用户级原生唤醒：load operational state + repair（均在 paused 下）
-    app_state.system_scheduler = SystemTaskService(APP_ROOT_DIR)
+    # Converge OS registrations to APS desired set
     try:
-        repair_result = await app_state.system_scheduler.repair_all(
-            app_state.scheduler_manager
-        )
-        if repair_result["repaired"] or repair_result["failed"]:
-            detail_tail = ""
-            if repair_result.get("failed"):
-                details = repair_result.get("details") or []
-                detail_tail = f"; details={details}"
+        all_tasks = await app_state.scheduler_manager.get_all_tasks()
+        desired = [t for t in all_tasks if t.wakeup_enabled and t.enabled]
+        report = app_state.system_scheduler.converge(desired)
+        if report.failed:
             app_state.send_log(
-                f"系统任务修复完成: 修复 {repair_result['repaired']} 个, "
-                f"失败 {repair_result['failed']} 个"
-                f"{detail_tail}"
+                f"系统任务 converge 有失败: {report.failed}"
+            )
+        if report.registered or report.unregistered:
+            app_state.send_log(
+                f"系统任务 converge: 注册 {len(report.registered)}, "
+                f"注销 {len(report.unregistered)}"
             )
     except Exception as e:
-        app_state.send_log(f"系统任务修复失败: {e}")
+        app_state.send_log(f"系统任务 converge 失败: {e}")
 
-    # Resume APS dispatch only after import+repair attempts complete.
-    # Failures above are logged; resume still runs to avoid permanent paused lockout.
-    if app_state.scheduler_manager.scheduler is not None:
-        app_state.scheduler_manager.scheduler.resume()
-        app_state.send_log("调度器已恢复派发（paused import/repair 完成）")
+    app_state.scheduler_manager.resume()
+    app_state.send_log("调度器已恢复派发")
+
+    # Cold-start native wake: run after resume as background task
+    pending_id = app_state.pending_scheduled_task_id
+    if pending_id and app_state.execution_coordinator is not None:
+
+        async def _run_pending_native():
+            assert app_state.scheduler_manager is not None
+            assert app_state.execution_coordinator is not None
+            try:
+                task = await app_state.scheduler_manager.get_task(pending_id)
+                if task is None:
+                    app_state.send_log(
+                        f"启动参数 --scheduled-task 任务不存在: {pending_id}"
+                    )
+                    return
+                await app_state.execution_coordinator.submit_scheduled(
+                    task, origin="native"
+                )
+            except Exception as e:
+                app_state.send_log(f"启动 native 任务失败: {e}")
+
+        asyncio.create_task(_run_pending_native())
 
     monitor_task = asyncio.create_task(log_monitor())
     webbrowser.open_new("http://127.0.0.1:5566")
@@ -330,7 +285,6 @@ async def lifespan(app: FastAPI):
         await monitor_task
     if app_state.worker:
         app_state.worker.shutdown()
-    # 关闭调度器
     if app_state.scheduler_manager:
         await app_state.scheduler_manager.shutdown()
     release_runtime_ownership()
@@ -697,10 +651,20 @@ def check_update():
 @app.get("/api/update")
 async def perform_update():
     try:
+        coordinator = app_state.execution_coordinator
+        if coordinator is not None and coordinator.active_run() is not None:
+            msg = "任务执行中，无法更新"
+            app_state.send_log(msg)
+            return {"status": "failed", "message": msg}
+
         if app_state.update_info is None:
             msg = "暂无可用更新信息"
             app_state.send_log(msg)
             return {"status": "failed", "message": msg}
+
+        # One-way gate: no more admissions once update download begins.
+        if coordinator is not None:
+            coordinator.set_update_in_progress()
 
         update_package_path = app_state.update_info["file_name"]
         download_url = app_state.update_info["download_url"]
@@ -845,57 +809,39 @@ def test_notification():
 
 
 @app.post("/api/start")
-def start(task_execution: TaskExecutionPayload):
-    if app_state.worker is None:
-        msg = "Worker未初始化"
+async def start(payload: ManualStartPayload):
+    if app_state.execution_coordinator is None:
+        msg = "执行协调器未初始化"
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
-    if app_state.worker.task_state.running:
-        msg = "任务已开始"
-        app_state.send_log(msg)
-        return {"status": "failed", "message": msg}
-    if not app_state.worker.device_state.connected:
-        msg = "请先连接设备"
-        app_state.send_log(msg)
-        return {"status": "failed", "message": msg}
-    normalized_task_list, normalized_task_options, normalized_pre_tasks = (
-        normalize_task_execution_payload(
-            task_execution.task_list,
-            task_execution.task_options,
-            interface,
-            task_execution.preTasks,
-        )
-    )
-
-    if not normalized_task_list:
-        msg = "请选择任务"
-        app_state.send_log(msg)
+    try:
+        admission = await app_state.execution_coordinator.submit_manual(payload)
+    except Exception as e:
+        msg = str(e)
+        app_state.send_log(f"启动任务失败: {msg}")
         return {"status": "failed", "message": msg}
 
-    if not app_state.worker.tasks.start(
-        normalized_task_list,
-        normalized_task_options,
-        pre_tasks=normalized_pre_tasks,
-    ):
-        msg = (
-            app_state.worker.device_state.last_resource_error
-            or app_state.worker.device_state.last_device_error
-            or app_state.worker.agent_state.start_error
-            or app_state.worker.task_state.last_error
-            or "任务启动失败"
-        )
-        app_state.send_log(msg)
-        return {"status": "failed", "message": msg}
-    return {"status": "success"}
+    if admission.accepted:
+        return {"status": "success", "run_id": admission.run_id}
+    if admission.conflict is not None:
+        return {
+            "status": "conflict",
+            "conflict": admission.conflict.model_dump(mode="json"),
+        }
+    return {"status": "failed", "message": "任务启动被拒绝"}
 
 
 @app.post("/api/stop")
-def stop():
-    if app_state.worker is None or not app_state.worker.task_state.running:
+async def stop():
+    if app_state.execution_coordinator is None:
+        msg = "执行协调器未初始化"
+        app_state.send_log(msg)
+        return {"status": "failed", "message": msg}
+    stopped = await app_state.execution_coordinator.stop_active()
+    if not stopped:
         msg = "任务未开始"
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
-    app_state.worker.tasks.stop()
     return {"status": "success"}
 
 
@@ -960,19 +906,21 @@ async def get_scheduler_tasks():
 
 @app.post("/api/scheduler/tasks")
 async def create_scheduler_task(task_create: ScheduledTaskCreate):
-    """创建定时任务"""
+    """创建定时任务（native 物化内联在 SchedulerManager）"""
     if app_state.scheduler_manager is None:
         msg = "调度器未初始化"
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
     try:
-        if app_state.system_scheduler is not None:
-            task = await app_state.system_scheduler.create_task_synced(
-                app_state.scheduler_manager, task_create
-            )
-        else:
-            task = await app_state.scheduler_manager.create_task(task_create)
-        return {"status": "success", "task": task.model_dump()}
+        task = await app_state.scheduler_manager.create_task(task_create)
+        return {"status": "success", "task": task.model_dump(mode="json")}
+    except (ValueError, RuntimeError) as e:
+        msg = str(e)
+        app_state.send_log(f"创建调度任务失败: {msg}")
+        return JSONResponse(
+            status_code=400,
+            content={"status": "failed", "message": msg},
+        )
     except Exception as e:
         msg = str(e)
         app_state.send_log(f"创建调度任务失败: {msg}")
@@ -981,43 +929,25 @@ async def create_scheduler_task(task_create: ScheduledTaskCreate):
 
 @app.put("/api/scheduler/tasks/{task_id}")
 async def update_scheduler_task(task_id: str, task_update: ScheduledTaskUpdate):
-    """更新定时任务.
-
-    APS success + native failure returns status=success with additive
-    native_status / native_error fields (partial success).
-    """
+    """更新定时任务（native register/unregister 在 manager 内联）"""
     if app_state.scheduler_manager is None:
         msg = "调度器未初始化"
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
     try:
-        if app_state.system_scheduler is not None:
-            result = await app_state.system_scheduler.update_task_synced(
-                app_state.scheduler_manager, task_id, task_update
-            )
-            if result.aps_outcome == "not_found" or result.task is None:
-                msg = result.aps_error or "任务不存在"
-                app_state.send_log(msg)
-                return {"status": "failed", "message": msg}
-            if result.aps_outcome == "error":
-                msg = result.aps_error or "APS 更新失败"
-                app_state.send_log(msg)
-                return {"status": "failed", "message": msg}
-            payload = {
-                "status": "success",
-                "task": result.task.model_dump(),
-            }
-            if result.native_status is not None:
-                payload["native_status"] = result.native_status.model_dump(mode="json")
-            if result.native_error:
-                payload["native_error"] = result.native_error
-            return payload
         task = await app_state.scheduler_manager.update_task(task_id, task_update)
         if task is None:
             msg = "任务不存在"
             app_state.send_log(msg)
             return {"status": "failed", "message": msg}
-        return {"status": "success", "task": task.model_dump()}
+        return {"status": "success", "task": task.model_dump(mode="json")}
+    except (ValueError, RuntimeError) as e:
+        msg = str(e)
+        app_state.send_log(f"更新调度任务失败: {msg}")
+        return JSONResponse(
+            status_code=400,
+            content={"status": "failed", "message": msg},
+        )
     except Exception as e:
         msg = str(e)
         app_state.send_log(f"更新调度任务失败: {msg}")
@@ -1032,12 +962,7 @@ async def delete_scheduler_task(task_id: str):
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
     try:
-        if app_state.system_scheduler is not None:
-            success = await app_state.system_scheduler.delete_task_synced(
-                app_state.scheduler_manager, task_id
-            )
-        else:
-            success = await app_state.scheduler_manager.delete_task(task_id)
+        success = await app_state.scheduler_manager.delete_task(task_id)
         if success:
             return {"status": "success"}
         msg = "任务不存在"
@@ -1092,15 +1017,15 @@ async def resume_scheduler_task(task_id: str):
 @app.get("/api/scheduler/executions")
 async def get_scheduler_executions(limit: int = 50):
     """获取执行历史"""
-    if app_state.scheduler_manager is None:
-        msg = "调度器未初始化"
+    if app_state.execution_store is None:
+        msg = "执行存储未初始化"
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
     try:
-        executions = await app_state.scheduler_manager.get_executions(limit)
+        executions = await app_state.execution_store.list(limit)
         return {
             "status": "success",
-            "executions": [exec.model_dump() for exec in executions],
+            "executions": [ex.model_dump(mode="json") for ex in executions],
         }
     except Exception as e:
         msg = str(e)
@@ -1108,110 +1033,74 @@ async def get_scheduler_executions(limit: int = 50):
         return {"status": "failed", "message": msg}
 
 
-# ---------------------------------------------------------------------------
-# 原生唤醒（用户级）注册 API
-# 用户级原生唤醒（wakeup_enabled）；无 capability/scope 兼容层。
-# ---------------------------------------------------------------------------
+class NativeDispatchRequest(BaseModel):
+    task_id: str
+    token: str
 
 
-@app.get("/api/scheduler/tasks/{task_id}/system-status")
-async def get_system_task_status(task_id: str):
-    """查询任务的原生唤醒注册状态（name/trigger/path from APS when available）"""
-    if app_state.system_scheduler is None:
-        return {"status": "failed", "message": "系统调度服务未初始化"}
-
-    try:
-        status = await app_state.system_scheduler.get_status(
-            task_id, manager=app_state.scheduler_manager
+@app.post("/api/internal/scheduler/native-dispatch")
+async def native_dispatch(body: NativeDispatchRequest):
+    """OS-native second process hands off to the running MWU instance."""
+    if not app_state.native_token or body.token != app_state.native_token:
+        return JSONResponse(
+            status_code=401,
+            content={"status": "failed", "message": "invalid token"},
         )
-        return {"status": "success", "data": status.model_dump(mode="json")}
-    except Exception as e:
-        msg = str(e)
-        app_state.send_log(f"查询系统级状态失败: {msg}")
-        return {"status": "failed", "message": msg}
-
-
-@app.get("/api/scheduler/system-tasks")
-async def list_system_tasks():
-    """列出所有原生唤醒注册（hydrated from APS when available）"""
-    if app_state.system_scheduler is None:
-        return {"status": "failed", "message": "系统调度服务未初始化"}
-
-    try:
-        registrations = await app_state.system_scheduler.list_registered(
-            manager=app_state.scheduler_manager
+    if app_state.scheduler_manager is None or app_state.execution_coordinator is None:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "failed", "message": "scheduler not ready"},
         )
-        return {
-            "status": "success",
-            "registrations": [reg.model_dump(mode="json") for reg in registrations],
-        }
-    except Exception as e:
-        msg = str(e)
-        app_state.send_log(f"获取系统级任务列表失败: {msg}")
-        return {"status": "failed", "message": msg}
-
-
-@app.post("/api/scheduler/system-tasks/repair")
-async def repair_system_tasks():
-    """手动触发修复所有原生唤醒注册（路径变化后使用）"""
-    if app_state.system_scheduler is None:
-        return {"status": "failed", "message": "系统调度服务未初始化"}
-    if app_state.scheduler_manager is None:
-        return {"status": "failed", "message": "调度器未初始化"}
-
-    try:
-        result = await app_state.system_scheduler.repair_all(
-            app_state.scheduler_manager
+    task = await app_state.scheduler_manager.get_task(body.task_id)
+    if task is None:
+        return JSONResponse(
+            status_code=404,
+            content={"status": "failed", "message": "task not found"},
         )
-        return {"status": "success", "data": result}
-    except Exception as e:
-        msg = str(e)
-        app_state.send_log(f"修复系统级任务失败: {msg}")
-        return {"status": "failed", "message": msg}
+    admission = await app_state.execution_coordinator.submit_scheduled(
+        task, origin="native"
+    )
+    return {
+        "status": "success",
+        "accepted": admission.accepted,
+        "run_id": admission.run_id,
+        "deduplicated": admission.deduplicated,
+        "skip_status": admission.skip_status,
+    }
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="MWU - MaaFramework WebUI")
     parser.add_argument(
-        "--headless",
-        action="store_true",
-        help="Headless 模式，不启动 Web 服务器（用于系统级调度）",
-    )
-    parser.add_argument(
-        "--task",
+        "--scheduled-task",
         type=str,
         default=None,
-        help="要执行的任务 ID（需配合 --headless 使用）",
+        help="启动后执行指定定时任务（native 唤醒 / 冷启动）",
     )
     args = parser.parse_args()
+    app_state.pending_scheduled_task_id = args.scheduled_task
 
-    if args.headless:
-        if not args.task:
-            print("错误：--headless 模式需要指定 --task <task_id>")
-            sys.exit(EXIT_TASK_FAILED)
-        exit_code = asyncio.run(run_headless(args.task))
-        sys.exit(exit_code)
-    else:
-        # Acquire runtime ownership for GUI process lifetime (not on import)
-        try:
-            app_state.runtime_ownership = acquire_runtime_ownership()
-        except LockBusyError as e:
-            msg = str(e).lower()
-            if "update" in msg:
-                print("更新进行中，无法启动")
-                sys.exit(EXIT_UPDATING)
-            print("应用已在运行")
-            sys.exit(EXIT_APP_RUNNING)
-        except LockError as e:
-            print(f"锁协议失败: {e}")
+    try:
+        app_state.runtime_ownership = acquire_runtime_ownership()
+    except LockBusyError as e:
+        msg = str(e).lower()
+        if "update" in msg:
+            print("更新进行中，无法启动")
             sys.exit(EXIT_UPDATING)
+        if args.scheduled_task:
+            sys.exit(delegate_native_dispatch(args.scheduled_task))
+        print("应用已在运行")
+        sys.exit(EXIT_APP_RUNNING)
+    except LockError as e:
+        print(f"锁协议失败: {e}")
+        sys.exit(EXIT_UPDATING)
 
-        try:
-            uvicorn.run(
-                app,
-                host="0.0.0.0",
-                port=5566,
-                timeout_graceful_shutdown=1,
-            )
-        finally:
-            release_runtime_ownership()
+    try:
+        uvicorn.run(
+            app,
+            host="0.0.0.0",
+            port=5566,
+            timeout_graceful_shutdown=1,
+        )
+    finally:
+        release_runtime_ownership()

@@ -1,8 +1,20 @@
 import type { PreTaskCommand } from "@/types/taskConfigModel"
 
+export type { PreTaskCommand }
+
 export type TriggerType = "cron" | "date" | "interval"
 
-export type ExecutionStatus = "running" | "success" | "failed" | "stopped"
+export type ExecutionOrigin = "manual" | "in_app" | "native"
+
+export type ExecutionStatus =
+  | "running"
+  | "success"
+  | "failed"
+  | "stopped"
+  | "skipped_busy_manual"
+  | "skipped_busy_scheduled"
+  | "skipped_update_in_progress"
+  | "missed_deadline"
 
 export interface CronTriggerConfig {
   type: "cron"
@@ -48,7 +60,6 @@ export interface ScheduledTask extends TaskExecutionPayload {
   name: string
   description?: string
   enabled: boolean
-  trigger_type: TriggerType
   trigger_config: TriggerConfig
   controller_name?: string | null
   device?: ScheduledTaskDeviceConfig | null
@@ -64,7 +75,6 @@ export interface ScheduledTaskCreate extends TaskExecutionPayload {
   name: string
   description?: string
   enabled: boolean
-  trigger_type: TriggerType
   trigger_config: TriggerConfig
   controller_name?: string | null
   device?: ScheduledTaskDeviceConfig | null
@@ -76,7 +86,6 @@ export interface ScheduledTaskUpdate {
   name?: string
   description?: string
   enabled?: boolean
-  trigger_type?: TriggerType
   trigger_config?: TriggerConfig
   controller_name?: string | null
   device?: ScheduledTaskDeviceConfig | null
@@ -90,12 +99,35 @@ export interface ScheduledTaskUpdate {
 
 export interface TaskExecution {
   id: string
-  task_id: string
+  task_id: string | null
   task_name: string
-  started_at: string // ISO 8601 datetime string
-  finished_at?: string // ISO 8601 datetime string
+  origin: ExecutionOrigin
+  occurrence_id: string | null
+  scheduled_for: string | null
   status: ExecutionStatus
-  error_message?: string
+  blocker_run_id: string | null
+  blocker_task_name: string | null
+  error_message: string | null
+  started_at: string
+  finished_at: string | null
+}
+
+export interface StartConflict {
+  code: "busy_manual" | "busy_scheduled" | "update_in_progress"
+  message: string
+  active_run_id: string
+  active_task_name: string
+  active_origin: ExecutionOrigin
+}
+
+export type ManualStartResult =
+  | { accepted: true; runId: string }
+  | { accepted: false; conflict?: StartConflict; error?: string }
+
+export interface ManualStartPayload extends TaskExecutionPayload {
+  controller_name: string
+  device: ScheduledTaskDeviceConfig
+  resource_name: string
 }
 
 export interface SchedulerApiResponse {
@@ -104,61 +136,4 @@ export interface SchedulerApiResponse {
   tasks?: ScheduledTask[]
   task?: ScheduledTask
   executions?: TaskExecution[]
-  native_status?: SystemTaskStatus
-  native_error?: string
-}
-
-// ---------------------------------------------------------------------------
-// 系统级计划任务注册（精简 DTO，无 scope/legacy）
-// ---------------------------------------------------------------------------
-
-export type SystemTaskPlatform = "windows" | "macos" | "linux"
-
-export type SystemTaskState = "active" | "error"
-
-export interface OSTriggerSpec {
-  trigger_type: TriggerType
-  cron_expression?: string
-  run_date?: string
-  interval_minutes?: number
-}
-
-/** Authoritative native wakeup status (status endpoint / native_status). */
-export interface SystemTaskStatus {
-  task_id: string
-  task_name?: string
-  platform?: SystemTaskPlatform
-  state?: SystemTaskState
-  registered?: boolean
-  enabled?: boolean
-  verified?: boolean
-  path_valid?: boolean
-  registered_exe_path?: string
-  next_run_time?: string
-  last_error?: string
-  reason?: string
-  trigger?: OSTriggerSpec
-}
-
-/** List DTO for /api/scheduler/system-tasks registrations. */
-export interface SystemTaskRegistration {
-  task_id: string
-  task_name?: string
-  platform: SystemTaskPlatform
-  state: SystemTaskState
-  registered?: boolean
-  enabled?: boolean
-  verified?: boolean
-  path_valid?: boolean
-  registered_exe_path?: string
-  next_run_time?: string
-  last_error?: string
-  reason?: string
-  trigger?: OSTriggerSpec
-}
-
-export interface SystemTaskRepairResult {
-  repaired: number
-  failed: number
-  details: string[]
 }

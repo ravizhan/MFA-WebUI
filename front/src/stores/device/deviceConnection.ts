@@ -10,6 +10,7 @@ import {
   postDevices,
   postResource,
   startTask,
+  stopTask,
   type ConnectableDevice,
   type DeviceControllerCapability,
   type PostDeviceResult,
@@ -20,6 +21,7 @@ import { useIndexStore } from "@/stores/panel/session"
 import { useInterfaceStore } from "@/stores/interface/interface"
 import { useSettingsStore } from "@/stores/settings/settings"
 import { useTaskConfigStore } from "@/stores/task-config/taskConfig"
+import type { ManualStartPayload, StartConflict } from "@/types/schedulerModel"
 import type { TaskListItem } from "@/types/taskConfigModel"
 import type { PanelLastConnectedDevice } from "@/types/settingsModel"
 import {
@@ -53,6 +55,7 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
     connectedResourceName: string | null
     deviceStatePollTimer: number | null
     initialized: boolean
+    startConflict: StartConflict | null
     _fetchDevicesRequestId: number
     _fetchResourcesRequestId: number
   } => ({
@@ -69,6 +72,7 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
     connectedResourceName: null,
     deviceStatePollTimer: null,
     initialized: false,
+    startConflict: null,
     _fetchDevicesRequestId: 0,
     _fetchResourcesRequestId: 0,
   }),
@@ -614,6 +618,42 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
       return result
     },
 
+    clearStartConflict() {
+      this.startConflict = null
+    },
+
+    async stopActiveAndRestart(): Promise<boolean> {
+      const stopped = await stopTask()
+      if (!stopped) {
+        return false
+      }
+      this.clearStartConflict()
+      return this.StartTask()
+    },
+
+    resolveStartDevice():
+      | { ok: true; device: ConnectableDevice }
+      | { ok: false; message: string } {
+      const t = i18n.global.t
+      const selectedCapability = this.selectedControllerCapability
+      if (!selectedCapability || this.selectedControllerDisabled) {
+        return { ok: false, message: t("panel.selectDeviceType") }
+      }
+
+      if (selectedCapability.type === "PlayCover") {
+        const playCoverResult = this.buildPlayCoverDevice()
+        if ("error" in playCoverResult) {
+          return { ok: false, message: playCoverResult.error }
+        }
+        return { ok: true, device: playCoverResult.device }
+      }
+
+      if (!this.selectedDevice) {
+        return { ok: false, message: t("panel.selectDevice") }
+      }
+      return { ok: true, device: this.selectedDevice }
+    },
+
     async StartTask(): Promise<boolean> {
       const t = i18n.global.t
       const indexStore = useIndexStore()
@@ -622,24 +662,21 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
 
       await this.syncDeviceRuntimeState()
 
-      const alreadyConnected =
-        indexStore.Connected &&
-        this.isDeviceResourceLocked &&
-        this.connectedControllerName === this.selectedControllerName &&
-        this.connectedResourceName === this.resource
+      const selectedCapability = this.selectedControllerCapability
+      if (!selectedCapability || this.selectedControllerDisabled) {
+        showGlobalMessage("error", t("panel.selectDeviceType"))
+        return false
+      }
 
-      if (!alreadyConnected) {
-        const connectResult = await this.connectDevices()
-        if (!connectResult.success) {
-          showGlobalMessage("error", "设备连接失败: " + connectResult.message)
-          return false
-        }
+      const deviceResult = this.resolveStartDevice()
+      if (!deviceResult.ok) {
+        showGlobalMessage("error", deviceResult.message)
+        return false
+      }
 
-        const resourceResult = await this.postResourceSelection()
-        if (!resourceResult.success) {
-          showGlobalMessage("error", "资源设置失败: " + resourceResult.message)
-          return false
-        }
+      if (!this.resource) {
+        showGlobalMessage("error", t("panel.selectResource"))
+        return false
       }
 
       const isTaskCompatibleInCurrentContext = (taskId: string) =>
@@ -662,12 +699,31 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
         return false
       }
 
-      const payload = configStore.buildExecutionPayload(compatibleTaskIds)
-      const success = await startTask(payload)
-      if (success) {
-        indexStore.setTaskRunning(true)
+      const execution = configStore.buildExecutionPayload(compatibleTaskIds)
+      const payload: ManualStartPayload = {
+        task_list: execution.task_list,
+        task_options: execution.task_options,
+        preTasks: [],
+        controller_name: selectedCapability.name,
+        device: {
+          controller_name: selectedCapability.name,
+          device_type: selectedCapability.type,
+          device_address: getDeviceIdentity(deviceResult.device),
+        },
+        resource_name: this.resource,
       }
-      return success
+
+      const result = await startTask(payload)
+      if (result.accepted) {
+        this.startConflict = null
+        indexStore.setTaskRunning(true)
+        return true
+      }
+      if (result.conflict) {
+        this.startConflict = result.conflict
+        return false
+      }
+      return false
     },
 
     resetConfig() {
