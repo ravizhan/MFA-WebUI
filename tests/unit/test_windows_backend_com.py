@@ -286,11 +286,11 @@ def _spec(
 
 
 def test_module_imports_without_pywin32(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Importing system_scheduler_backend must not require pywin32 on Linux."""
-    # Ensure real pywin32 is not present (or is irrelevant)
-    monkeypatch.delitem(sys.modules, "pythoncom", raising=False)
-    monkeypatch.delitem(sys.modules, "win32com", raising=False)
-    monkeypatch.delitem(sys.modules, "win32com.client", raising=False)
+    """Importing the backend module must not require pywin32 on any platform."""
+    # A None entry makes imports fail even when pywin32 is installed on Windows CI.
+    monkeypatch.setitem(sys.modules, "pythoncom", None)
+    monkeypatch.setitem(sys.modules, "win32com", None)
+    monkeypatch.setitem(sys.modules, "win32com.client", None)
 
     # Re-import path already loaded; assert WindowsBackend._import_com fails cleanly
     # and module-level symbols remain available.

@@ -60,7 +60,7 @@ async def manager(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_scheduled_job_fired_skips_wakeup_task():
+async def test_scheduled_job_fired_skips_wakeup_task(main_module):
     task = _task(wakeup_enabled=True)
     coordinator = SimpleNamespace(submit_scheduled=AsyncMock())
     manager = SimpleNamespace(get_task=AsyncMock(return_value=task))
@@ -68,19 +68,15 @@ async def test_scheduled_job_fired_skips_wakeup_task():
         execution_coordinator=coordinator,
         scheduler_manager=manager,
     )
-    with patch.dict("sys.modules", {"main": SimpleNamespace(app_state=app_state)}):
-        # Re-import path uses `import main as main_mod` inside the function
-        import main as main_mod
-
-        with patch.object(main_mod, "app_state", app_state, create=True):
-            await scheduled_job_fired(task_id=task.id)
+    with patch.object(main_module, "app_state", app_state, create=True):
+        await scheduled_job_fired(task_id=task.id)
 
     coordinator.submit_scheduled.assert_not_awaited()
     manager.get_task.assert_awaited_once_with(task.id)
 
 
 @pytest.mark.asyncio
-async def test_scheduled_job_fired_dispatches_non_wakeup_task():
+async def test_scheduled_job_fired_dispatches_non_wakeup_task(main_module):
     task = _task(wakeup_enabled=False)
     coordinator = SimpleNamespace(submit_scheduled=AsyncMock())
     manager = SimpleNamespace(get_task=AsyncMock(return_value=task))
@@ -88,9 +84,7 @@ async def test_scheduled_job_fired_dispatches_non_wakeup_task():
         execution_coordinator=coordinator,
         scheduler_manager=manager,
     )
-    import main as main_mod
-
-    with patch.object(main_mod, "app_state", app_state, create=True):
+    with patch.object(main_module, "app_state", app_state, create=True):
         await scheduled_job_fired(task_id=task.id)
 
     coordinator.submit_scheduled.assert_awaited_once()
