@@ -487,6 +487,70 @@ def test_task_not_ready_hresult_is_not_missing() -> None:
     assert _com_is_not_found(FakeComError(0x80070002, "file not found")) is True
 
 
+def test_com_is_not_found_reads_nested_excepinfo_scode() -> None:
+    """DISP_E_EXCEPTION outer + nested 0x80070002 (real Win32 \\MWU missing shape)."""
+    # Real pywintypes.com_error:
+    # args=(-2147352567, '发生意外。', (0,None,None,None,0,-2147024894), None)
+    # outer 0x80020009, nested scode -2147024894 == 0x80070002
+    outer = -2147352567  # 0x80020009 DISP_E_EXCEPTION
+    nested_scode = -2147024894  # 0x80070002 ERROR_FILE_NOT_FOUND
+    excepinfo = (0, None, None, None, 0, nested_scode)
+
+    class WrappedComError(Exception):
+        def __init__(self) -> None:
+            self.hresult = outer
+            self.excepinfo = excepinfo
+            super().__init__(outer, "发生意外。", excepinfo, None)
+
+    assert _com_is_not_found(WrappedComError()) is True
+
+    # args[2] only (no excepinfo attribute) must also work
+    class ArgsOnlyComError(Exception):
+        def __init__(self) -> None:
+            self.hresult = outer
+            super().__init__(outer, "发生意外。", excepinfo, None)
+
+    assert _com_is_not_found(ArgsOnlyComError()) is True
+
+    # Chinese outer message alone must not classify as not-found without nested code
+    class ChineseOnlyError(Exception):
+        def __init__(self) -> None:
+            self.hresult = outer
+            super().__init__(outer, "发生意外。", None, None)
+
+    assert _com_is_not_found(ChineseOnlyError()) is False
+
+
+def test_list_missing_folder_wrapped_disp_exception_returns_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Missing \\MWU as DISP_E_EXCEPTION + nested FILE_NOT_FOUND → []."""
+    outer = -2147352567
+    nested_scode = -2147024894
+    excepinfo = (0, None, None, None, 0, nested_scode)
+
+    class WrappedComError(Exception):
+        def __init__(self) -> None:
+            self.hresult = outer
+            self.excepinfo = excepinfo
+            super().__init__(outer, "发生意外。", excepinfo, None)
+
+    service = FakeScheduleService(folder_exists=False)
+
+    def boom_get_folder(path: str) -> FakeFolder | FakeRootFolder:
+        if path == "\\":
+            return FakeRootFolder(service)
+        raise WrappedComError()
+
+    monkeypatch.setattr(service, "GetFolder", boom_get_folder)
+    pc = _install_fake_com(monkeypatch, service)
+    backend = WindowsBackend()
+
+    assert backend.list_registered_task_ids() == []
+    assert pc.init_count == 1
+    assert pc.uninit_count == 1
+
+
 def test_get_task_not_ready_raises_not_false(monkeypatch: pytest.MonkeyPatch) -> None:
     service = FakeScheduleService()
 

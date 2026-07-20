@@ -143,32 +143,66 @@ def _next_hourly_start_boundary(
     return start
 
 
+def _com_normalize_hresult(value: int | str | bytes | bytearray | None) -> int | None:
+    if value is None:
+        return None
+    try:
+        # signed HRESULTs (e.g. -2147024894) → unsigned 0x80070002
+        return int(value) & 0xFFFFFFFF
+    except (TypeError, ValueError):
+        return None
+
+
 def _com_hresult(exc: BaseException) -> int | None:
+    """Primary display HRESULT (outer). Does not dig into excepinfo."""
     hresult = getattr(exc, "hresult", None)
     if hresult is not None:
-        try:
-            return int(hresult) & 0xFFFFFFFF
-        except (TypeError, ValueError):
-            pass
+        hr = _com_normalize_hresult(hresult)
+        if hr is not None:
+            return hr
     args = getattr(exc, "args", None)
     if args:
         try:
-            return int(args[0]) & 0xFFFFFFFF
-        except (TypeError, ValueError, IndexError):
+            return _com_normalize_hresult(args[0])
+        except IndexError:
             return None
     return None
 
 
+def _com_excepinfo_scode(exc: BaseException) -> int | None:
+    """Nested scode from pywintypes.com_error excepinfo (attr or args[2])."""
+    excepinfo = getattr(exc, "excepinfo", None)
+    if excepinfo is None:
+        args = getattr(exc, "args", None)
+        if args and len(args) >= 3:
+            excepinfo = args[2]
+    if not isinstance(excepinfo, (tuple, list)) or len(excepinfo) < 6:
+        return None
+    # (wCode, source, description, helpfile, helpContext, scode)
+    return _com_normalize_hresult(excepinfo[5])
+
+
 def _com_is_not_found(exc: BaseException) -> bool:
     """COM/计划任务报任务或文件夹不存在时为 True。"""
-    hr = _com_hresult(exc)
-    if hr in (
+    not_found = (
         0x80070002,  # 文件不存在
         0x80070003,  # 路径不存在
-    ):
+    )
+    task_not_ready = 0x8004130A  # 任务未就绪，勿当 missing
+
+    hr = _com_hresult(exc)
+    if hr in not_found:
         return True
-    if hr == 0x8004130A:  # 任务未就绪，勿当 missing
+    if hr == task_not_ready:
         return False
+
+    # DISP_E_EXCEPTION (0x80020009) 等外层 HRESULT 下，真实错误在 excepinfo scode
+    nested = _com_excepinfo_scode(exc)
+    if nested in not_found:
+        return True
+    if nested == task_not_ready:
+        return False
+
     msg = str(exc).lower()
     return (
         "cannot find" in msg
@@ -232,6 +266,7 @@ class WindowsBackend(SystemSchedulerBackend):
         pythoncom, Dispatch = self._import_com()
         # COM 初始化是线程级的，必须与 CoUninitialize 在同一调用内成对
         pythoncom.CoInitialize()
+        service = folder = task_def = None
         try:
             service = Dispatch("Schedule.Service")
             service.Connect()
@@ -252,12 +287,15 @@ class WindowsBackend(SystemSchedulerBackend):
                 ) from e
             logger.info("Windows 任务注册成功: %s", self.build_identifier(spec.task_id))
         finally:
+            # 释放 COM 代理引用后再 CoUninitialize，避免 IUnknown 释放告警
+            service = folder = task_def = None
             pythoncom.CoUninitialize()
 
     def unregister(self, task_id: str) -> None:
         validate_task_id(task_id)
         pythoncom, Dispatch = self._import_com()
         pythoncom.CoInitialize()
+        service = folder = None
         try:
             service = Dispatch("Schedule.Service")
             service.Connect()
@@ -281,12 +319,14 @@ class WindowsBackend(SystemSchedulerBackend):
                     f"Task Scheduler 删除失败: {self._com_error_detail(e)}"
                 ) from e
         finally:
+            service = folder = None
             pythoncom.CoUninitialize()
 
     def is_registered(self, task_id: str) -> bool:
         validate_task_id(task_id)
         pythoncom, Dispatch = self._import_com()
         pythoncom.CoInitialize()
+        service = folder = None
         try:
             service = Dispatch("Schedule.Service")
             service.Connect()
@@ -308,11 +348,13 @@ class WindowsBackend(SystemSchedulerBackend):
                     f"Task Scheduler GetTask 失败: {self._com_error_detail(e)}"
                 ) from e
         finally:
+            service = folder = None
             pythoncom.CoUninitialize()
 
     def list_registered_task_ids(self) -> list[str]:
         pythoncom, Dispatch = self._import_com()
         pythoncom.CoInitialize()
+        service = folder = tasks = None
         try:
             service = Dispatch("Schedule.Service")
             service.Connect()
@@ -334,6 +376,7 @@ class WindowsBackend(SystemSchedulerBackend):
             # COM 集合下标从 1 开始
             count = int(tasks.Count)
             for i in range(1, count + 1):
+                task = None
                 try:
                     task = tasks.Item(i)
                     name = str(task.Name)
@@ -342,10 +385,13 @@ class WindowsBackend(SystemSchedulerBackend):
                         f"Task Scheduler 枚举任务失败 (index={i}): "
                         f"{self._com_error_detail(e)}"
                     ) from e
+                finally:
+                    task = None
                 if _TASK_ID_RE.match(name):
                     ids.append(name)
             return ids
         finally:
+            service = folder = tasks = None
             pythoncom.CoUninitialize()
 
     @staticmethod
