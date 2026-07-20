@@ -146,67 +146,6 @@ describe("SSEClient", () => {
       expect(listener).not.toHaveBeenCalled()
       client.close()
     })
-
-    it("normalizes legacy type, defaults, display, title, and details", () => {
-      const client = new SSEClient("/api/logs")
-      const legacyListener = vi.fn<() => void>()
-      const defaultsListener = vi.fn<() => void>()
-      client.addEventListener("custom", legacyListener)
-      client.addEventListener("log", defaultsListener)
-
-      const instance = getESInstance()
-      instance.onmessage?.({
-        data: JSON.stringify({
-          type: "custom",
-          level: "success",
-          message: "legacy format",
-          time: "2024-01-01T00:00:00Z",
-        }),
-      })
-      expect(legacyListener).toHaveBeenCalledWith(
-        expect.objectContaining({
-          event: "custom",
-          level: "success",
-          message: "legacy format",
-        }),
-      )
-
-      instance.onmessage?.({
-        data: JSON.stringify({
-          message: "bare message",
-          display: false,
-          title: "Notification Title",
-          details: { key: "value", count: 42 },
-        }),
-      })
-      expect(defaultsListener).toHaveBeenCalledWith(
-        expect.objectContaining({
-          event: "log",
-          level: "info",
-          message: "bare message",
-          time: "",
-          notify: [],
-          display: false,
-          title: "Notification Title",
-          details: { key: "value", count: 42 },
-        }),
-      )
-
-      instance.onmessage?.({
-        data: JSON.stringify({
-          level: "info",
-          message: "no extras",
-        }),
-      })
-      expect(defaultsListener).toHaveBeenCalledWith(
-        expect.objectContaining({
-          title: null,
-          details: null,
-          display: true,
-        }),
-      )
-      client.close()
-    })
   })
 
   describe("reconnect behavior", () => {

@@ -44,15 +44,12 @@ export function getStoredDeviceIdentity(stored: PanelLastConnectedDevice): strin
   return `${stored.hWnd}|${stored.gamepad_type}`
 }
 
-/** Prefer controller_name when present; fall back to type for legacy snapshots. */
+/** Match stored device to a controller capability by controller_name. */
 export function storedDeviceMatchesController(
   stored: PanelLastConnectedDevice,
   capability: Pick<DeviceControllerCapability, "name" | "type">,
 ): boolean {
-  if (stored.controller_name) {
-    return stored.controller_name === capability.name
-  }
-  return stored.type === capability.type
+  return stored.controller_name === capability.name
 }
 
 /** Match by identity first, then fingerprint (scan may enrich a saved custom device). */
@@ -104,18 +101,5 @@ export function getPlayCoverDefaultAddress(capabilities: DeviceControllerCapabil
 }
 
 export function getStoredDeviceFingerprint(stored: PanelLastConnectedDevice): string {
-  if (stored.fingerprint) {
-    return stored.fingerprint
-  }
-  const normalizedType = stored.type.toLowerCase()
-  if (normalizedType === "adb") {
-    return `adb|${stored.adb_path}|${stored.address}`
-  }
-  if (normalizedType === "win32") {
-    return `win32|${stored.hWnd}`
-  }
-  if (normalizedType === "gamepad") {
-    return `gamepad|${stored.hWnd}|${stored.gamepad_type}`
-  }
-  return `playcover|${stored.address}|${stored.uuid}`
+  return stored.fingerprint ?? ""
 }

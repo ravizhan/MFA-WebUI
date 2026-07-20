@@ -22,8 +22,7 @@ def run_command(cmd):
 def main():
     import os
 
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
+    sys.stdout.reconfigure(encoding="utf-8")
 
     os.environ.setdefault("PYTHONUNBUFFERED", "1")
 

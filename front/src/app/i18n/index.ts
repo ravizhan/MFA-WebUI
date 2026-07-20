@@ -9,13 +9,9 @@ function isLocale(value: string | null): value is "zh-CN" | "en-US" {
 }
 
 const savedLocale = localStorage.getItem("locale")
-const savedLang = localStorage.getItem("lang")
 let locale: "zh-CN" | "en-US" = "zh-CN"
 if (isLocale(savedLocale)) {
   locale = savedLocale
-}
-if (!isLocale(savedLocale) && isLocale(savedLang)) {
-  locale = savedLang
 }
 
 const i18n = createI18n<[MessageSchema], "zh-CN" | "en-US">({

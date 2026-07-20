@@ -99,16 +99,11 @@ describe("getDeviceIdentity / getStoredDeviceIdentity", () => {
 })
 
 describe("storedDeviceMatchesController", () => {
-  it("matches by controller_name or falls back to type", () => {
+  it("matches by controller_name only", () => {
     // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
     const byName = { type: "Adb", controller_name: "adb" } as PanelLastConnectedDevice
     expect(storedDeviceMatchesController(byName, { name: "adb", type: "Adb" })).toBe(true)
     expect(storedDeviceMatchesController(byName, { name: "other", type: "Adb" })).toBe(false)
-
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-    const byType = { type: "Win32", controller_name: "" } as PanelLastConnectedDevice
-    expect(storedDeviceMatchesController(byType, { name: "win32", type: "Win32" })).toBe(true)
-    expect(storedDeviceMatchesController(byType, { name: "adb", type: "Adb" })).toBe(false)
   })
 })
 
@@ -140,7 +135,7 @@ describe("buildDeviceLabel", () => {
 })
 
 describe("buildDeviceFingerprint / getStoredDeviceFingerprint", () => {
-  it("builds type-specific fingerprints for live and stored devices", () => {
+  it("builds type-specific fingerprints for live devices and returns stored fingerprint as-is", () => {
     expect(buildDeviceFingerprint(adbDevice)).toBe("adb|/usr/bin/adb|127.0.0.1:5555")
     expect(buildDeviceFingerprint(win32Device)).toBe("win32|12345")
     expect(buildDeviceFingerprint(gamepadDevice)).toBe("gamepad|67890|1")
@@ -154,16 +149,8 @@ describe("buildDeviceFingerprint / getStoredDeviceFingerprint", () => {
     expect(getStoredDeviceFingerprint(withFingerprint)).toBe("fp-001")
 
     // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-    const storedAdbFp = {
-      type: "Adb",
-      adb_path: "/usr/bin/adb",
-      address: "127.0.0.1:5555",
-    } as PanelLastConnectedDevice
-    expect(getStoredDeviceFingerprint(storedAdbFp)).toBe("adb|/usr/bin/adb|127.0.0.1:5555")
-
-    // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-    const storedWin32Fp = { type: "Win32", hWnd: 12345 } as PanelLastConnectedDevice
-    expect(getStoredDeviceFingerprint(storedWin32Fp)).toBe("win32|12345")
+    const withoutFingerprint = { type: "Adb" } as PanelLastConnectedDevice
+    expect(getStoredDeviceFingerprint(withoutFingerprint)).toBe("")
   })
 })
 
