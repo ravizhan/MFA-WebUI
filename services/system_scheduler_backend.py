@@ -203,7 +203,11 @@ class SystemSchedulerBackend(ABC):
 
     @abstractmethod
     def unregister(self, task_id: str) -> None:
-        """删除已注册任务；目标不存在时抛 RuntimeError。"""
+        """删除已注册任务。
+
+        推荐幂等：任务已被外部途径删除时静默成功，避免 disable/pause/delete
+        流程在状态漂移下被阻塞。各后端可自行决定「真正不存在」的判定。
+        """
 
     @abstractmethod
     def is_registered(self, task_id: str) -> bool:
@@ -266,6 +270,13 @@ class WindowsBackend(SystemSchedulerBackend):
             try:
                 folder.DeleteTask(task_id, 0)
             except Exception as e:
+                if _com_is_not_found(e):
+                    # 任务已通过 Task Scheduler GUI / 系统清理等外部途径被删除：
+                    # 视为成功，避免 disable/pause/delete 流程被孤儿状态阻塞
+                    logger.warning(
+                        "Windows 任务 %s 已不存在，幂等视为已注销", task_id
+                    )
+                    return
                 raise RuntimeError(
                     f"Task Scheduler 删除失败: {self._com_error_detail(e)}"
                 ) from e

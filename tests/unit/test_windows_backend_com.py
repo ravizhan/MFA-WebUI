@@ -448,12 +448,14 @@ def test_delete_and_is_registered(monkeypatch: pytest.MonkeyPatch) -> None:
     assert backend.is_registered(_UUID) is False
 
 
-def test_unregister_missing_task_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unregister_missing_task_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """任务已被外部删除时，unregister 应幂等成功而非阻塞 disable/pause/delete 流程。"""
     service = FakeScheduleService()
     _install_fake_com(monkeypatch, service)
     backend = WindowsBackend()
-    with pytest.raises(RuntimeError, match="删除失败"):
-        backend.unregister(_UUID)
+    # 不应抛异常；与 is_registered 返回 False 的判定保持一致
+    backend.unregister(_UUID)
+    assert _UUID not in service.tasks
 
 
 def test_unregister_missing_folder_raises(monkeypatch: pytest.MonkeyPatch) -> None:

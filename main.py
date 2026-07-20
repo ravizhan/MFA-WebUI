@@ -1047,17 +1047,26 @@ class NativeDispatchRequest(BaseModel):
 async def native_dispatch(body: NativeDispatchRequest):
     """OS native 二次进程把任务移交给已运行的 MWU 实例。"""
     if not app_state.native_token or body.token != app_state.native_token:
+        app_state.send_log(
+            f"native-dispatch 鉴权失败 task_id={body.task_id}（token 不匹配或为空）"
+        )
         return JSONResponse(
             status_code=401,
             content={"status": "failed", "message": "invalid token"},
         )
     if app_state.scheduler_manager is None or app_state.execution_coordinator is None:
+        app_state.send_log(
+            f"native-dispatch 拒绝 task_id={body.task_id}：调度器未就绪"
+        )
         return JSONResponse(
             status_code=503,
             content={"status": "failed", "message": "scheduler not ready"},
         )
     task = await app_state.scheduler_manager.get_task(body.task_id)
     if task is None:
+        app_state.send_log(
+            f"native-dispatch 收到不存在的任务 id={body.task_id}（可能已被删除）"
+        )
         return JSONResponse(
             status_code=404,
             content={"status": "failed", "message": "task not found"},
@@ -1065,6 +1074,14 @@ async def native_dispatch(body: NativeDispatchRequest):
     admission = await app_state.execution_coordinator.submit_scheduled(
         task, origin="native"
     )
+    if admission.accepted:
+        app_state.send_log(
+            f"native-dispatch 入场 task={task.name} run_id={admission.run_id}"
+        )
+    else:
+        app_state.send_log(
+            f"native-dispatch 跳过 task={task.name} 原因={admission.skip_status}"
+        )
     return {
         "status": "success",
         "accepted": admission.accepted,
