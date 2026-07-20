@@ -82,9 +82,9 @@ def _fake_worker():
 
 
 @pytest.fixture
-async def store(tmp_path: Path) -> ExecutionStore:
+def store(tmp_path: Path) -> ExecutionStore:
     s = ExecutionStore(tmp_path / "scheduler.sqlite")
-    await s.init()
+    s.init()
     return s
 
 
@@ -108,7 +108,7 @@ def state(tmp_path: Path, worker) -> AppState:
 
 
 @pytest.fixture
-async def coord(store: ExecutionStore, state: AppState) -> ExecutionCoordinator:
+def coord(store: ExecutionStore, state: AppState) -> ExecutionCoordinator:
     return ExecutionCoordinator(state, store)
 
 
@@ -129,7 +129,7 @@ async def test_manual_manual_conflict_busy_manual(
     assert result.conflict.active_run_id == "active-manual"
     assert result.conflict.active_task_name == MANUAL_TASK_NAME
     assert "手动" in result.conflict.message
-    assert await store.list() == []
+    assert store.list() == []
 
 
 @pytest.mark.asyncio
@@ -145,7 +145,7 @@ async def test_scheduled_while_manual_skipped_busy_manual(
     result = await coord.submit_scheduled(_scheduled(), origin="in_app")
     assert result.accepted is False
     assert result.skip_status == "skipped_busy_manual"
-    rows = await store.list()
+    rows = store.list()
     assert len(rows) == 1
     assert rows[0].status == "skipped_busy_manual"
     assert rows[0].blocker_run_id == "m1"
@@ -185,7 +185,7 @@ async def test_two_scheduled_different_tasks_skipped_busy_scheduled(
     )
     assert result.accepted is False
     assert result.skip_status == "skipped_busy_scheduled"
-    rows = await store.list()
+    rows = store.list()
     assert len(rows) == 1
     assert rows[0].status == "skipped_busy_scheduled"
     assert rows[0].blocker_task_name == "任务A"
@@ -206,7 +206,7 @@ async def test_update_gate_manual_conflict_and_scheduled_skip(
     scheduled = await coord.submit_scheduled(_scheduled(), origin="in_app")
     assert scheduled.accepted is False
     assert scheduled.skip_status == "skipped_update_in_progress"
-    rows = await store.list()
+    rows = store.list()
     assert len(rows) == 1
     assert rows[0].status == "skipped_update_in_progress"
 
@@ -218,7 +218,7 @@ async def test_manual_success_writes_origin_manual(
     result = await coord.submit_manual(_manual_payload())
     assert result.accepted is True
     assert result.run_id is not None
-    rows = await store.list()
+    rows = store.list()
     assert len(rows) == 1
     assert rows[0].origin == "manual"
     assert rows[0].task_name == MANUAL_TASK_NAME
@@ -252,14 +252,14 @@ async def test_native_late_missed_deadline(
     result = await coord.submit_scheduled(_scheduled(), origin="native")
     assert result.accepted is False
     assert result.skip_status == "missed_deadline"
-    rows = await store.list()
+    rows = store.list()
     assert len(rows) == 1
     assert rows[0].status == "missed_deadline"
     assert rows[0].origin == "native"
     assert rows[0].finished_at is not None
     result2 = await coord.submit_scheduled(_scheduled(), origin="native")
     assert result2.skip_status == "missed_deadline"
-    assert len(await store.list()) == 2
+    assert len(store.list()) == 2
 
 
 @pytest.mark.asyncio
@@ -295,7 +295,7 @@ async def test_in_app_success_path(
     )
     result = await coord.submit_scheduled(_scheduled(), origin="in_app")
     assert result.accepted is True
-    rows = await store.list()
+    rows = store.list()
     assert len(rows) == 1
     assert rows[0].origin == "in_app"
     assert rows[0].status == "success"

@@ -5,7 +5,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -202,7 +202,7 @@ def test_get_executions_from_store(client):
             finished_at=now,
         )
     ]
-    store = SimpleNamespace(list=AsyncMock(return_value=rows))
+    store = SimpleNamespace(list=MagicMock(return_value=rows))
     main.app_state.execution_store = store
 
     resp = c.get("/api/scheduler/executions?limit=10")
@@ -212,7 +212,7 @@ def test_get_executions_from_store(client):
     assert len(data["executions"]) == 1
     assert data["executions"][0]["id"] == "e1"
     assert data["executions"][0]["origin"] == "manual"
-    store.list.assert_awaited_once_with(10)
+    store.list.assert_called_once_with(10)
 
 
 def test_start_success_returns_run_id(client):

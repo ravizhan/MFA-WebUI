@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import aiosqlite
 import pytest
 
 from models.scheduler import TaskExecution
@@ -43,97 +42,34 @@ def _exec(
 
 
 @pytest.fixture
-async def store(tmp_path: Path) -> ExecutionStore:
+def store(tmp_path: Path) -> ExecutionStore:
     s = ExecutionStore(tmp_path / "scheduler.sqlite")
-    await s.init()
+    s.init()
     return s
 
 
-@pytest.mark.asyncio
-async def test_init_drops_legacy_occurrence_claims_table(tmp_path: Path):
-    path = tmp_path / "scheduler.sqlite"
-    async with aiosqlite.connect(path) as db:
-        await db.execute(
-            """
-            CREATE TABLE scheduler_occurrence_claims (
-                occurrence_id TEXT PRIMARY KEY,
-                task_id TEXT NOT NULL,
-                scheduled_for TEXT NOT NULL,
-                origin TEXT NOT NULL,
-                state TEXT NOT NULL,
-                run_id TEXT NOT NULL,
-                claimed_at TEXT NOT NULL,
-                lease_until TEXT,
-                finished_at TEXT
-            )
-            """
-        )
-        await db.execute(
-            "INSERT INTO scheduler_occurrence_claims VALUES "
-            "('occ','t1','2026-01-01','in_app','claimed','r1','2026-01-01',NULL,NULL)"
-        )
-        await db.commit()
-    s = ExecutionStore(path)
-    await s.init()
-    async with aiosqlite.connect(path) as db:
-        async with db.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-            ("scheduler_occurrence_claims",),
-        ) as cur:
-            row = await cur.fetchone()
-    assert row is None
-
-
-@pytest.mark.asyncio
-async def test_init_drops_legacy_executions_schema(tmp_path: Path):
-    path = tmp_path / "scheduler.sqlite"
-    async with aiosqlite.connect(path) as db:
-        await db.execute(
-            "CREATE TABLE scheduler_executions ("
-            "id TEXT PRIMARY KEY, task_id TEXT NOT NULL, task_name TEXT NOT NULL,"
-            "started_at TEXT NOT NULL, finished_at TEXT, status TEXT NOT NULL,"
-            "error_message TEXT)"
-        )
-        await db.execute(
-            "INSERT INTO scheduler_executions VALUES "
-            "('x','t','n','2020-01-01',NULL,'success',NULL)"
-        )
-        await db.commit()
-    s = ExecutionStore(path)
-    await s.init()
-    async with aiosqlite.connect(path) as db:
-        async with db.execute("PRAGMA table_info(scheduler_executions)") as cur:
-            columns = {row[1] for row in await cur.fetchall()}
-        async with db.execute("SELECT COUNT(*) FROM scheduler_executions") as cur:
-            (count,) = await cur.fetchone()
-    assert "origin" in columns
-    assert count == 0
-
-
-@pytest.mark.asyncio
-async def test_executions_add_list_order(store: ExecutionStore):
+def test_executions_add_list_order(store: ExecutionStore):
     t0 = _utc(datetime(2026, 7, 19, 10, 0, 0, tzinfo=timezone.utc))
     t1 = _utc(datetime(2026, 7, 19, 11, 0, 0, tzinfo=timezone.utc))
     t2 = _utc(datetime(2026, 7, 19, 12, 0, 0, tzinfo=timezone.utc))
-    await store.add(_exec("a", started_at=t0, task_name="old"))
-    await store.add(_exec("b", started_at=t2, task_name="new"))
-    await store.add(_exec("c", started_at=t1, task_name="mid"))
-    rows = await store.list(limit=10)
+    store.add(_exec("a", started_at=t0, task_name="old"))
+    store.add(_exec("b", started_at=t2, task_name="new"))
+    store.add(_exec("c", started_at=t1, task_name="mid"))
+    rows = store.list(limit=10)
     assert [r.id for r in rows] == ["b", "c", "a"]
 
 
-@pytest.mark.asyncio
-async def test_executions_trim_to_1000(store: ExecutionStore):
+def test_executions_trim_to_1000(store: ExecutionStore):
     base = _utc(datetime(2026, 1, 1, 0, 0, 0, tzinfo=timezone.utc))
     for i in range(1005):
-        await store.add(
+        store.add(
             _exec(
                 f"run-{i:04d}",
                 started_at=base + timedelta(seconds=i),
                 task_name=f"t{i}",
             )
         )
-    rows = await store.list(limit=2000)
+    rows = store.list(limit=2000)
     assert len(rows) == 1000
     # Newest retained
     assert rows[0].id == "run-1004"
@@ -143,19 +79,18 @@ async def test_executions_trim_to_1000(store: ExecutionStore):
     assert "run-0005" in ids
 
 
-@pytest.mark.asyncio
-async def test_finish_writes_status_and_finished_at(store: ExecutionStore):
-    await store.add(_exec("run-f", status="running"))
-    await store.finish("run-f", "success", error=None)
-    rows = await store.list()
+def test_finish_writes_status_and_finished_at(store: ExecutionStore):
+    store.add(_exec("run-f", status="running"))
+    store.finish("run-f", "success", error=None)
+    rows = store.list()
     assert len(rows) == 1
     assert rows[0].status == "success"
     assert rows[0].finished_at is not None
     assert rows[0].error_message is None
 
-    await store.add(_exec("run-e", status="running"))
-    await store.finish("run-e", "failed", error="boom")
-    by_id = {r.id: r for r in await store.list()}
+    store.add(_exec("run-e", status="running"))
+    store.finish("run-e", "failed", error="boom")
+    by_id = {r.id: r for r in store.list()}
     assert by_id["run-e"].status == "failed"
     assert by_id["run-e"].error_message == "boom"
     assert by_id["run-e"].finished_at is not None

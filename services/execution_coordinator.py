@@ -120,7 +120,8 @@ class ExecutionCoordinator:
         )
 
         now = _utc_now()
-        await self._store.add(
+        await asyncio.to_thread(
+            self._store.add,
             TaskExecution(
                 id=run_id,
                 task_id=None,
@@ -128,7 +129,7 @@ class ExecutionCoordinator:
                 origin="manual",
                 status="running",
                 started_at=now,
-            )
+            ),
         )
         try:
             status, error = await self._prepare_and_run(
@@ -141,7 +142,7 @@ class ExecutionCoordinator:
                 run_id=run_id,
                 log_label=MANUAL_TASK_NAME,
             )
-            await self._store.finish(run_id, status, error)
+            await asyncio.to_thread(self._store.finish, run_id, status, error)
             return Admission(accepted=True, run_id=run_id)
         finally:
             if self._state.active_run and self._state.active_run.run_id == run_id:
@@ -161,7 +162,8 @@ class ExecutionCoordinator:
         # Native late window: beyond 15min → missed_deadline.
         if origin == "native" and now_utc - scheduled_for_utc > MISFIRE_GRACE:
             run_id = str(uuid.uuid4())
-            await self._store.add(
+            await asyncio.to_thread(
+                self._store.add,
                 TaskExecution(
                     id=run_id,
                     task_id=task.id,
@@ -173,7 +175,7 @@ class ExecutionCoordinator:
                     started_at=now_utc,
                     finished_at=now_utc,
                     error_message="超过 15 分钟 misfire 窗口",
-                )
+                ),
             )
             return Admission(
                 accepted=False,
@@ -204,7 +206,8 @@ class ExecutionCoordinator:
 
         if skip_status is not None:
             skip_now = _utc_now()
-            await self._store.add(
+            await asyncio.to_thread(
+                self._store.add,
                 TaskExecution(
                     id=run_id,
                     task_id=task.id,
@@ -217,7 +220,7 @@ class ExecutionCoordinator:
                     blocker_task_name=blocker.task_name if blocker else None,
                     started_at=skip_now,
                     finished_at=skip_now,
-                )
+                ),
             )
             return Admission(
                 accepted=False,
@@ -225,7 +228,8 @@ class ExecutionCoordinator:
                 skip_status=skip_status,
             )
 
-        await self._store.add(
+        await asyncio.to_thread(
+            self._store.add,
             TaskExecution(
                 id=run_id,
                 task_id=task.id,
@@ -235,7 +239,7 @@ class ExecutionCoordinator:
                 scheduled_for=scheduled_for_utc,
                 status="running",
                 started_at=_utc_now(),
-            )
+            ),
         )
         try:
             status, error = await self._prepare_and_run(
@@ -248,7 +252,7 @@ class ExecutionCoordinator:
                 run_id=run_id,
                 log_label=task.id,
             )
-            await self._store.finish(run_id, status, error)
+            await asyncio.to_thread(self._store.finish, run_id, status, error)
             return Admission(accepted=True, run_id=run_id)
         finally:
             if self._state.active_run and self._state.active_run.run_id == run_id:

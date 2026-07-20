@@ -218,7 +218,7 @@ async def lifespan(app: FastAPI):
 
     # Execution store + coordinator (admission gate)
     app_state.execution_store = ExecutionStore(SCHEDULER_DB_PATH)
-    await app_state.execution_store.init()
+    await asyncio.to_thread(app_state.execution_store.init)
     app_state.execution_coordinator = ExecutionCoordinator(
         app_state, app_state.execution_store
     )
@@ -1016,7 +1016,7 @@ async def get_scheduler_executions(limit: int = 50):
         app_state.send_log(msg)
         return {"status": "failed", "message": msg}
     try:
-        executions = await app_state.execution_store.list(limit)
+        executions = await asyncio.to_thread(app_state.execution_store.list, limit)
         return {
             "status": "success",
             "executions": [ex.model_dump(mode="json") for ex in executions],

@@ -1,4 +1,6 @@
-"""SQLite persistence for scheduler execution history."""
+"""
+SQLite persistence for scheduler execution history.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +9,20 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List
 
-import aiosqlite
+from sqlalchemy import (
+    String,
+    create_engine,
+    delete,
+    select,
+    update,
+)
+from sqlalchemy.orm import (
+    DeclarativeBase,
+    Mapped,
+    mapped_column,
+    sessionmaker,
+)
+from sqlalchemy.schema import Index
 
 from models.scheduler import TaskExecution
 
@@ -15,22 +30,32 @@ logger = logging.getLogger(__name__)
 
 EXECUTIONS_MAX_RECORDS = 1000
 
-_CREATE_EXECUTIONS = """
-CREATE TABLE IF NOT EXISTS scheduler_executions (
-    id TEXT PRIMARY KEY,
-    task_id TEXT,
-    task_name TEXT NOT NULL,
-    origin TEXT NOT NULL,
-    occurrence_id TEXT,
-    scheduled_for TEXT,
-    status TEXT NOT NULL,
-    blocker_run_id TEXT,
-    blocker_task_name TEXT,
-    error_message TEXT,
-    started_at TEXT NOT NULL,
-    finished_at TEXT
-)
-"""
+
+class _Base(DeclarativeBase):
+    pass
+
+
+class SchedulerExecution(_Base):
+    """ORM entity for the ``scheduler_executions`` history table."""
+
+    __tablename__ = "scheduler_executions"
+    __table_args__ = (
+        Index("idx_scheduler_executions_started_at", "started_at"),
+        Index("idx_scheduler_executions_task_id", "task_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    task_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    task_name: Mapped[str] = mapped_column(String, nullable=False)
+    origin: Mapped[str] = mapped_column(String, nullable=False)
+    occurrence_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    scheduled_for: Mapped[str | None] = mapped_column(String, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False)
+    blocker_run_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    blocker_task_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String, nullable=True)
+    started_at: Mapped[str] = mapped_column(String, nullable=False)
+    finished_at: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 def _utc_now() -> datetime:
@@ -54,20 +79,37 @@ def _from_iso(value: str | None) -> datetime | None:
     return dt.astimezone(timezone.utc)
 
 
-def _row_to_execution(row: aiosqlite.Row) -> TaskExecution:
+def _orm_to_execution(row: SchedulerExecution) -> TaskExecution:
     return TaskExecution(
-        id=row["id"],
-        task_id=row["task_id"],
-        task_name=row["task_name"],
-        origin=row["origin"],
-        occurrence_id=row["occurrence_id"],
-        scheduled_for=_from_iso(row["scheduled_for"]),
-        status=row["status"],
-        blocker_run_id=row["blocker_run_id"],
-        blocker_task_name=row["blocker_task_name"],
-        error_message=row["error_message"],
-        started_at=_from_iso(row["started_at"]) or _utc_now(),
-        finished_at=_from_iso(row["finished_at"]),
+        id=row.id,
+        task_id=row.task_id,
+        task_name=row.task_name,
+        origin=row.origin,  # type: ignore[arg-type]
+        occurrence_id=row.occurrence_id,
+        scheduled_for=_from_iso(row.scheduled_for),
+        status=row.status,  # type: ignore[arg-type]
+        blocker_run_id=row.blocker_run_id,
+        blocker_task_name=row.blocker_task_name,
+        error_message=row.error_message,
+        started_at=_from_iso(row.started_at) or _utc_now(),
+        finished_at=_from_iso(row.finished_at),
+    )
+
+
+def _execution_to_orm(execution: TaskExecution) -> SchedulerExecution:
+    return SchedulerExecution(
+        id=execution.id,
+        task_id=execution.task_id,
+        task_name=execution.task_name,
+        origin=execution.origin,
+        occurrence_id=execution.occurrence_id,
+        scheduled_for=_to_iso(execution.scheduled_for),
+        status=execution.status,
+        blocker_run_id=execution.blocker_run_id,
+        blocker_task_name=execution.blocker_task_name,
+        error_message=execution.error_message,
+        started_at=_to_iso(execution.started_at),
+        finished_at=_to_iso(execution.finished_at),
     )
 
 
@@ -76,108 +118,68 @@ class ExecutionStore:
 
     def __init__(self, db_path: Path) -> None:
         self._db_path = Path(db_path)
+        # ``check_same_thread=False`` allows ``asyncio.to_thread`` callers to
+        # share the engine across executor threads; SQLite serializes writes.
+        self._engine = create_engine(
+            f"sqlite:///{self._db_path.resolve().as_posix()}",
+            connect_args={"check_same_thread": False},
+        )
+        self._session_factory = sessionmaker(self._engine)
 
-    async def init(self) -> None:
+    def init(self) -> None:
         """Create tables/indexes."""
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        async with aiosqlite.connect(self._db_path) as db:
-            # 旧 schema 重置：缺 origin 列的 executions 表直接丢弃（无迁移层，历史清空）
-            cursor = await db.execute("PRAGMA table_info(scheduler_executions)")
-            columns = {row[1] for row in await cursor.fetchall()}
-            if columns and "origin" not in columns:
-                logger.warning(
-                    "检测到旧版 executions 表，已按新 schema 重建（历史记录清空）"
-                )
-                await db.execute("DROP TABLE scheduler_executions")
-            await db.execute(_CREATE_EXECUTIONS)
-            await db.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_scheduler_executions_started_at
-                ON scheduler_executions(started_at DESC)
-                """
-            )
-            await db.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_scheduler_executions_task_id
-                ON scheduler_executions(task_id)
-                """
-            )
-            # Drop legacy occurrence-claim table if present (claim mechanism removed)
-            await db.execute("DROP TABLE IF EXISTS scheduler_occurrence_claims")
-            await db.commit()
+        _Base.metadata.create_all(self._engine)
 
-    async def add(self, execution: TaskExecution) -> None:
-        async with aiosqlite.connect(self._db_path) as db:
-            await db.execute(
-                """
-                INSERT INTO scheduler_executions (
-                    id, task_id, task_name, origin, occurrence_id, scheduled_for,
-                    status, blocker_run_id, blocker_task_name, error_message,
-                    started_at, finished_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    execution.id,
-                    execution.task_id,
-                    execution.task_name,
-                    execution.origin,
-                    execution.occurrence_id,
-                    _to_iso(execution.scheduled_for),
-                    execution.status,
-                    execution.blocker_run_id,
-                    execution.blocker_task_name,
-                    execution.error_message,
-                    _to_iso(execution.started_at),
-                    _to_iso(execution.finished_at),
-                ),
-            )
-            await db.execute(
-                """
-                DELETE FROM scheduler_executions
-                WHERE id NOT IN (
-                    SELECT id FROM scheduler_executions
-                    ORDER BY started_at DESC, id DESC
-                    LIMIT ?
+    def add(self, execution: TaskExecution) -> None:
+        with self._session_factory() as session:
+            session.add(_execution_to_orm(execution))
+            # Trim: keep only EXECUTIONS_MAX_RECORDS newest by started_at/id.
+            # Same session/transaction so insert+trim is atomic. Autoflush
+            # persists the just-added row before the DELETE is evaluated, so
+            # the new row participates in the keep/top subset selection.
+            keep_ids = (
+                select(SchedulerExecution.id)
+                .order_by(
+                    SchedulerExecution.started_at.desc(),
+                    SchedulerExecution.id.desc(),
                 )
-                """,
-                (EXECUTIONS_MAX_RECORDS,),
+                .limit(EXECUTIONS_MAX_RECORDS)
+                .scalar_subquery()
             )
-            await db.commit()
+            session.execute(
+                delete(SchedulerExecution)
+                .where(SchedulerExecution.id.not_in(keep_ids))
+                .execution_options(synchronize_session=False)
+            )
+            session.commit()
 
-    async def finish(self, run_id: str, status: str, error: str | None = None) -> None:
+    def finish(self, run_id: str, status: str, error: str | None = None) -> None:
         finished_at = _to_iso(_utc_now())
-        async with aiosqlite.connect(self._db_path) as db:
-            if error is None:
-                await db.execute(
-                    """
-                    UPDATE scheduler_executions
-                    SET status = ?, finished_at = ?
-                    WHERE id = ?
-                    """,
-                    (status, finished_at, run_id),
-                )
-            else:
-                await db.execute(
-                    """
-                    UPDATE scheduler_executions
-                    SET status = ?, finished_at = ?, error_message = ?
-                    WHERE id = ?
-                    """,
-                    (status, finished_at, error, run_id),
-                )
-            await db.commit()
+        values: dict[str, object] = {"status": status, "finished_at": finished_at}
+        if error is not None:
+            values["error_message"] = error
+        with self._session_factory() as session:
+            session.execute(
+                update(SchedulerExecution)
+                .where(SchedulerExecution.id == run_id)
+                .values(**values)
+            )
+            session.commit()
 
-    async def list(self, limit: int = 50) -> List[TaskExecution]:
+    def list(self, limit: int = 50) -> List[TaskExecution]:
         # Method name shadows builtin list; use typing.List for the annotation.
-        async with aiosqlite.connect(self._db_path) as db:
-            db.row_factory = aiosqlite.Row
-            async with db.execute(
-                """
-                SELECT * FROM scheduler_executions
-                ORDER BY started_at DESC, id DESC
-                LIMIT ?
-                """,
-                (limit,),
-            ) as cursor:
-                rows = await cursor.fetchall()
-        return [_row_to_execution(row) for row in rows]
+        with self._session_factory() as session:
+            rows = (
+                session.execute(
+                    select(SchedulerExecution)
+                    .order_by(
+                        SchedulerExecution.started_at.desc(),
+                        SchedulerExecution.id.desc(),
+                    )
+                    .limit(limit)
+                )
+                .scalars()
+                .all()
+            )
+            return [_orm_to_execution(row) for row in rows]
