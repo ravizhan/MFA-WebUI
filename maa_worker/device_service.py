@@ -149,6 +149,7 @@ class DeviceService:
         self.worker = worker
 
     def _settings_path(self) -> Path:
+        """settings.json 路径（相对 interface 根目录）。"""
         return self.worker.state.context.interface_base_dir / "config" / "settings.json"
 
     def _load_custom_devices(self) -> list[dict[str, Any]]:
@@ -308,6 +309,7 @@ class DeviceService:
         )
 
     def get_current_resource_definition(self):
+        """按当前资源名查找 interface 中的资源定义。"""
         resource_name = self.worker.state.device.current_resource_name
         if resource_name is None:
             return None
@@ -321,6 +323,7 @@ class DeviceService:
         )
 
     def get_active_controller_definitions(self) -> list[Any]:
+        """返回当前已选中的控制器定义列表（0 或 1 个）。"""
         controller = self.get_controller_definition(
             self.worker.state.device.controller_name
         )
@@ -487,12 +490,14 @@ class DeviceService:
         }
 
     def is_connection_alive(self) -> bool:
+        """检查设备是否仍处于已连接状态。"""
         controller = self.worker.state.device.controller
         if not self.worker.state.device.connected or controller is None:
             return False
         return bool(getattr(controller, "connected", False))
 
     def reset_connection_state(self, reason: str | None = None):
+        """断开并清空连接状态；configuration_locked 仅由此解除。"""
         state = self.worker.state.device
         state_changed = (
             state.connected
@@ -502,7 +507,7 @@ class DeviceService:
             or state.controller_type is not None
         )
 
-        # 销毁 controller sink
+        # 注销 controller sink，避免悬挂回调
         if state.controller is not None and hasattr(self.worker, "sinks"):
             self.worker.sinks.unregister_controller_sink(state.controller)
 
@@ -598,8 +603,10 @@ class DeviceService:
             raise ValueError(f"不支持的设备类型: {device_type}")
 
     def connect(self, device_config: DeviceModel) -> bool:
+        """按类型创建控制器并绑定 Tasker；configuration_locked 时拒绝重连。"""
         state = self.worker.state.device
         if state.configuration_locked:
+            # 锁为单向棘轮：仅断连时 reset 可解除
             if not self.is_connection_alive():
                 self.reset_connection_state(
                     "检测到设备连接已断开，已解除设备与资源锁定"
@@ -673,7 +680,7 @@ class DeviceService:
             state.controller_name = selected_controller.name
             state.last_device_error = None
 
-            # 注册 controller sink
+            # 注册 controller 侧 EventSink
             if hasattr(self.worker, "sinks"):
                 self.worker.sinks.register_controller_sink(controller)
 
@@ -689,6 +696,7 @@ class DeviceService:
         return False
 
     def set_resource(self, resource_name: str) -> bool:
+        """加载资源包；设备已连接时锁定 configuration_locked。"""
         state = self.worker.state.device
         if state.configuration_locked:
             if not self.is_connection_alive():
@@ -734,6 +742,7 @@ class DeviceService:
                     f"已为控制器 {controller_label} 加载附加资源: {', '.join(attached_paths)}"
                 )
             self.worker.events.send_log(f"资源已设置为: {resource_config.name}")
+            # 设备+资源齐备后锁定，防止生命周期内切换
             if state.connected:
                 state.configuration_locked = True
             return True

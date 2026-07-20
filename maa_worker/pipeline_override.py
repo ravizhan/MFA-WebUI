@@ -43,6 +43,7 @@ class PipelineOverrideService:
         )
 
     def _is_option_active_for_context(self, option, controller_names: set[str]) -> bool:
+        """判断 option 是否匹配当前控制器与资源上下文。"""
         if option.controller and not controller_names.intersection(option.controller):
             return False
         current_resource_name = self.worker.state.device.current_resource_name

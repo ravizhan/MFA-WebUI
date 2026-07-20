@@ -3,14 +3,9 @@ from typing import Any
 
 
 def _get_app_state():
-    """Access the AppState instance from the entry-point module.
-
-    ``main.py`` creates ``app_state = AppState(APP_ROOT_DIR)`` at module level;
-    this helper retrieves it via ``sys.modules`` to avoid circular
-    imports or duplicating the singleton in ``app_state.py``.
-
-    Checks both ``__main__`` (direct ``python main.py`` / ``uv run main.py``)
-    and ``main`` (``uvicorn main:app``) execution modes.
+    """
+    从入口模块取 AppState 单例，避免循环导入。
+    兼容 python main.py 与 uvicorn main:app 两种启动方式。
     """
     for mod_name in ("__main__", "main"):
         main_mod = sys.modules.get(mod_name)

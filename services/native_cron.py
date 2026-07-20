@@ -1,6 +1,6 @@
-"""Native OS scheduler cron parse / validate / translate (pure functions).
+"""原生 OS 调度用 cron 解析/校验/转换（纯函数）。
 
-Unix day-of-week semantics: 0 and 7 = Sunday. APS uses 0 = Monday.
+星期语义为 Unix：0 与 7 = 周日；APS 侧为 0 = 周一。
 """
 
 from __future__ import annotations
@@ -27,38 +27,38 @@ _MONTH_TO_SCHTASKS = (
 
 @dataclass(frozen=True)
 class NativeCron:
-    """Parsed single-value 5-field cron for native OS registration."""
+    """解析后的严格单值 5 字段 cron，供原生 OS 注册。"""
 
-    minute: int  # required concrete value
-    hour: int | None  # None = *
+    minute: int  # 必须为具体数值
+    hour: int | None  # None 表示 *
     day: int | None
     month: int | None
-    dow: int | None  # Unix 0-6, 7 normalized to 0
+    dow: int | None  # Unix 0-6；7 已归一为 0
 
 
 @dataclass(frozen=True)
 class SchtasksSpec:
-    """Windows schtasks schedule parameters."""
+    """Windows schtasks 调度参数。"""
 
     schedule: str  # DAILY / WEEKLY / MONTHLY / HOURLY
     start_time: str  # HH:MM
     day_of_week: str | None = None  # MON..SUN
     day_of_month: int | None = None
-    months: str | None = None  # JAN..DEC or None for all
+    months: str | None = None  # JAN..DEC；None 表示全年
 
 
 def unix_dow_to_aps(dow: int) -> int:
-    """Unix cron DOW (0=Sunday) → APScheduler DOW (0=Monday)."""
+    """Unix cron 星期（0=周日）→ APS 星期（0=周一）。"""
     return (dow - 1) % 7
 
 
 def aps_dow_to_unix(dow: int) -> int:
-    """APScheduler DOW (0=Monday) → Unix cron DOW (0=Sunday)."""
+    """APS 星期（0=周一）→ Unix cron 星期（0=周日）。"""
     return (dow + 1) % 7
 
 
 def _parse_field(name: str, raw: str, lo: int, hi: int) -> int | None:
-    """Parse one cron field: only ``*`` or a single integer in range."""
+    """解析单字段：仅允许 ``*`` 或范围内单个整数（有意不支持 list/range/step/名称）。"""
     if raw == "*":
         return None
     if not raw.isdigit():
@@ -73,16 +73,11 @@ def _parse_field(name: str, raw: str, lo: int, hi: int) -> int | None:
 
 
 def parse_native_cron(cron: str) -> NativeCron:
-    """Parse and validate a native-wakeup cron expression.
+    """解析并校验原生唤醒 cron（严格单值，供 OS 定时器注册）。
 
-    Rules:
-    - exactly 5 fields
-    - each field is ``*`` or a single integer (no list/range/step/names)
-    - minute must be a concrete integer
-    - day and dow must not both be restricted
-    - when dow is restricted, day and month must be ``*``
-    - ranges: minute 0-59, hour 0-23, day 1-31, month 1-12, dow 0-7
-    - dow 7 is normalized to 0 (Sunday)
+    约束：5 字段；每字段仅 ``*`` 或单整数；minute 必须具体；
+    day 与 dow 不可同时受限；dow 受限时 day/month 须为 ``*``；
+    dow=7 归一为 0。
     """
     if not isinstance(cron, str) or not cron.strip():
         raise ValueError("原生 cron 表达式不能为空")
@@ -109,14 +104,14 @@ def parse_native_cron(cron: str) -> NativeCron:
         raise ValueError("原生 cron 不允许 day 与 day-of-week 同时受限")
 
     if dow is not None and (day is not None or month is not None):
-        # day already rejected above when both set; month must be * when dow set
+        # day 与 dow 同时受限已在上方拒绝；此处主要拦截 month 受限
         raise ValueError("原生 cron 在 day-of-week 受限时，day 与 month 必须为 '*'")
 
     return NativeCron(minute=minute, hour=hour, day=day, month=month, dow=dow)
 
 
 def to_schtasks(cron: NativeCron) -> SchtasksSpec:
-    """Translate NativeCron to Windows schtasks schedule parameters."""
+    """NativeCron → Windows schtasks 调度参数。"""
     minute = cron.minute
     if cron.hour is None:
         return SchtasksSpec(
@@ -148,11 +143,7 @@ def to_schtasks(cron: NativeCron) -> SchtasksSpec:
 
 
 def to_launchd_calendar(cron: NativeCron) -> dict[str, int]:
-    """Translate NativeCron to launchd StartCalendarInterval dict.
-
-    ``*`` fields are omitted. Weekday uses Unix semantics (0=Sunday),
-    matching launchd.
-    """
+    """NativeCron → launchd StartCalendarInterval（``*`` 字段省略；Weekday 为 Unix 语义）。"""
     result: dict[str, int] = {"Minute": cron.minute}
     if cron.hour is not None:
         result["Hour"] = cron.hour
@@ -166,7 +157,7 @@ def to_launchd_calendar(cron: NativeCron) -> dict[str, int]:
 
 
 def to_crontab_line(cron: NativeCron) -> str:
-    """Serialize NativeCron back to a 5-field crontab line (``*`` for wildcards)."""
+    """NativeCron 序列化为 5 字段 crontab 行（通配写 ``*``）。"""
 
     def fmt(value: int | None) -> str:
         return "*" if value is None else str(value)

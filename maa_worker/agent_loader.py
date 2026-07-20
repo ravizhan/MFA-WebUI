@@ -334,10 +334,7 @@ def _black_magic_agent_server_stub():
 
 
 def run_black_magic(agent_config: Any, maa_worker: "MaaWorker"):
-    """
-    将Agent转换为custom的黑魔法
-    动态加载并注册自定义 Action、Recognition 以及 EventSink 子类
-    """
+    """嵌入式 Agent：扫描 agent/ 并注册自定义 Action/Recognition/EventSink。"""
     tasker = maa_worker.tasker
     controller = maa_worker.state.device.controller
     resource = maa_worker.resource
@@ -354,7 +351,7 @@ def run_black_magic(agent_config: Any, maa_worker: "MaaWorker"):
         _disable_deps_first_finder()
         _ensure_sys_path_priority(agent_index_path, 0)
 
-    # 扫描所有 .py 文件建立映射
+    # 扫描 agent 目录下全部 .py，建立模块名 → 路径映射
     module_map = {}  # module_name -> {path, is_pkg}
     for file_path in agent_index_path.glob("**/*.py"):
         try:
@@ -378,7 +375,7 @@ def run_black_magic(agent_config: Any, maa_worker: "MaaWorker"):
         except ValueError:
             continue
 
-    # 自定义 Loader，利用 importlib 规范支持循环 / 相互导入
+    # 自定义 meta_path Loader，支持 agent 模块间循环导入
     class AgentLoader(importlib.abc.MetaPathFinder, importlib.abc.Loader):
         def __init__(self, mapping):
             self.mapping = mapping
@@ -420,7 +417,7 @@ def run_black_magic(agent_config: Any, maa_worker: "MaaWorker"):
     loader = AgentLoader(module_map)
     sys.meta_path.insert(0, loader)
 
-    # 收集需要注册的 Action 和 Recognition
+    # 仅匹配双引号装饰器；单引号会静默漏检，类定义须紧跟装饰器下一行
     custom_action_pattern = re.compile(r"@AgentServer.custom_action\(\".*\"\)")
     custom_recognition_pattern = re.compile(
         r"@AgentServer.custom_recognition\(\".*\"\)"
@@ -458,7 +455,7 @@ def run_black_magic(agent_config: Any, maa_worker: "MaaWorker"):
                                 }
                             )
 
-            # --- AST 隐式继承检测：EventSink 子类 -------------------------------
+            # AST 扫描 EventSink 子类（按基类名隐式识别）
             try:
                 tree = ast.parse(source, filename=file_path)
                 for node in ast.walk(tree):
@@ -480,7 +477,7 @@ def run_black_magic(agent_config: Any, maa_worker: "MaaWorker"):
                                 "sink_type": sink_type,
                             }
                         )
-                        break  # 只匹配第一个能够识别的基类
+                        break  # 只取第一个可识别基类
             except SyntaxError as e:
                 print(f"Syntax error in {file_path}: {e}")
         except Exception as e:
@@ -490,7 +487,7 @@ def run_black_magic(agent_config: Any, maa_worker: "MaaWorker"):
 
     try:
         with _black_magic_agent_server_stub():
-            # 加载所有模块（支持循环/相互导入）
+            # 先导入全部模块，再实例化注册
             for module_name in module_map:
                 try:
                     importlib.import_module(module_name)
@@ -499,7 +496,6 @@ def run_black_magic(agent_config: Any, maa_worker: "MaaWorker"):
                     traceback.print_exc()
                     raise
 
-            # 注册实例
             for key in ["recognition", "action"]:
                 for item in to_register[key]:
                     try:
@@ -520,7 +516,7 @@ def run_black_magic(agent_config: Any, maa_worker: "MaaWorker"):
                         traceback.print_exc()
                         raise
 
-            # --- 注册嵌入式 Sink -------------------------------------------------
+            # 按 sink 类型挂到 resource / controller / tasker
             for item in to_register["sink"]:
                 try:
                     module = sys.modules.get(item["module_name"])
@@ -547,7 +543,7 @@ def run_black_magic(agent_config: Any, maa_worker: "MaaWorker"):
                     traceback.print_exc()
                     raise
     finally:
-        # 确保清理 loader，避免污染全局导入链
+        # 移除临时 loader，避免污染全局导入链
         if loader in sys.meta_path:
             sys.meta_path.remove(loader)
 
@@ -557,6 +553,7 @@ def load_agents(
     maa_worker: "MaaWorker",
     pi_env: dict[str, str] | None = None,
 ) -> list[subprocess.Popen]:
+    """按配置加载 Agent：嵌入式走黑魔法，外置进程走 AgentClient。"""
     agent_processes: list[subprocess.Popen] = []
     errors: list[str] = []
 
@@ -575,6 +572,7 @@ def load_agents(
                 errors.append(f"自定义Agent加载失败: {e}")
                 traceback.print_exc()
         else:
+            # 外置 Agent：子进程 + AgentClient 套接字通信
             agent_client = AgentClient()
             agent_client.bind(maa_worker.resource)
             agent_client.register_sink(

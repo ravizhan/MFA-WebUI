@@ -1,7 +1,6 @@
-"""Pure APS job encode/decode helpers for SchedulerManager.
+"""APS 调度任务编解码：触发器构建/还原与执行 kwargs 序列化。
 
-Owns trigger construction/reconstruction and execution kwargs schema.
-Does not import SchedulerManager or runtime/worker state.
+不依赖 SchedulerManager 或运行时状态，便于独立测试与复用。
 """
 
 from __future__ import annotations
@@ -37,7 +36,7 @@ _MISFIRE_GRACE = timedelta(minutes=15)
 
 
 class SchedulerJobDecodeError(Exception):
-    """Persisted APS job cannot be decoded into a ScheduledTask."""
+    """持久化 APS job 无法解码为 ScheduledTask。"""
 
     def __init__(
         self,
@@ -53,7 +52,7 @@ class SchedulerJobDecodeError(Exception):
 
 
 def decode_wakeup_enabled(raw: Any, *, job_id: str | None = None) -> bool:
-    """Decode APS wakeup_enabled: missing/None → False; bool only otherwise."""
+    """解码 wakeup_enabled：缺失/None 视为 False，其余仅接受 bool。"""
     if raw is None:
         return False
     if isinstance(raw, bool):
@@ -65,10 +64,7 @@ def decode_wakeup_enabled(raw: Any, *, job_id: str | None = None) -> bool:
 
 
 def _map_dow_expr(expr: str, mapper: Callable[[int], int]) -> str:
-    """Map numeric day-of-week tokens in a cron field expression.
-
-    Preserves ``*``, steps (``/N``), lists, and ranges. Name tokens pass through.
-    """
+    """映射 cron 星期字段中的数字 token（保留 *、步长、列表、范围；名称原样通过）。"""
     if expr == "*":
         return "*"
     if "/" in expr:
@@ -91,9 +87,9 @@ def build_trigger(
     *,
     timezone: Any = None,
 ) -> CronTrigger | DateTrigger | IntervalTrigger:
-    """Build an APScheduler trigger from TriggerConfig.
+    """由 TriggerConfig 构建 APScheduler 触发器。
 
-    Cron day-of-week uses Unix semantics (0/7=Sunday); mapped to APS (0=Monday).
+    Cron 星期采用 Unix 语义（0/7=周日），写入 APS 前映射为 0=周一。
     """
     if isinstance(trigger_config, CronTriggerConfig):
         parts = trigger_config.cron.split()
@@ -126,10 +122,10 @@ def build_trigger(
 
 
 def decode_trigger(trigger: Any) -> tuple[TriggerType, TriggerConfig]:
-    """Rebuild (trigger_type, TriggerConfig) from an APScheduler trigger.
+    """从 APS 触发器还原 (类型, TriggerConfig)。
 
-    Raises ValueError for unknown/corrupt triggers. Never invents a default cron.
-    Cron day-of-week is reverse-mapped from APS (0=Monday) to Unix (0=Sunday).
+    未知/损坏触发器抛 ValueError，不臆造默认 cron。
+    星期字段从 APS（0=周一）反映射为 Unix（0=周日）。
     """
     if isinstance(trigger, CronTrigger):
         required_fields = ("minute", "hour", "day", "month", "day_of_week")
@@ -183,11 +179,7 @@ def decode_trigger(trigger: Any) -> tuple[TriggerType, TriggerConfig]:
 
 
 def decode_pre_tasks_from_job_kwargs(kwargs: Mapping[str, Any]) -> Any:
-    """Decode persisted pre-tasks from job kwargs.
-
-    Reads only the ``pre_tasks`` key. Missing key returns ``[]``.
-    No legacy ``preTasks`` fallback.
-    """
+    """从 job kwargs 读取 pre_tasks；缺省返回 []，无旧键 preTasks 回退。"""
     if "pre_tasks" in kwargs:
         return kwargs["pre_tasks"]
     return []
@@ -229,10 +221,9 @@ def encode_execution_kwargs(
     wakeup_enabled: bool = False,
     trigger_config: TriggerConfig | None = None,
 ) -> dict[str, Any]:
-    """Encode complete APS job kwargs for add_job / modify_job.
+    """编码 add_job/modify_job 用的完整 APS kwargs。
 
-    Writes ``pre_tasks`` and always includes ``wakeup_enabled`` bool.
-    ``wakeup_enabled=True`` requires a ``CronTriggerConfig`` trigger.
+    始终写入 bool 型 wakeup_enabled；为 True 时触发器必须是 CronTriggerConfig。
     """
     if not isinstance(wakeup_enabled, bool):
         raise ValueError(f"invalid wakeup_enabled: {wakeup_enabled!r}")
@@ -257,7 +248,7 @@ def _last_fire_leq(
     start: datetime,
     now: datetime,
 ) -> datetime | None:
-    """Iterate get_next_fire_time from start to the last fire time <= now."""
+    """自 start 起迭代 get_next_fire_time，取最后一个 ≤ now 的触发时刻。"""
     last: datetime | None = None
     current = trigger.get_next_fire_time(None, start)
     while current is not None and current <= now:
@@ -267,14 +258,10 @@ def _last_fire_leq(
 
 
 def compute_occurrence(trigger: TriggerConfig, now: datetime) -> datetime:
-    """Compute the occurrence timestamp for a scheduled fire at ``now``.
+    """计算「在 now 时刻应归属」的计划触发时间戳（保持时区感知）。
 
-    - cron: last fire time <= now via CronTrigger.get_next_fire_time
-      (primary window now-15min; extended lookback if empty)
-    - date: run_date
-    - interval: now truncated to the minute
-
-    ``now`` should be timezone-aware (local). Return value stays aware.
+    cron：优先 15 分钟 misfire 窗口内最近触发；落空再扩展回看。
+    date：run_date；interval：截断到分钟。
     """
     if isinstance(trigger, DateTriggerConfig):
         return trigger.run_date
@@ -285,15 +272,14 @@ def compute_occurrence(trigger: TriggerConfig, now: datetime) -> datetime:
     if isinstance(trigger, CronTriggerConfig):
         tz = now.tzinfo
         if tz is None:
-            # Fall back to local zone name if a naive datetime slips through
+            # 无时区时退回 UTC，避免 naive 比较异常
             tz = ZoneInfo("UTC")
         built = build_trigger(trigger, timezone=tz)
         assert isinstance(built, CronTrigger)
         last = _last_fire_leq(built, now - _MISFIRE_GRACE, now)
         if last is not None:
             return last
-        # Extended lookback (e.g. 8:55 for daily 09:00 → previous day 09:00).
-        # Caller normally only invokes this inside grace; tests cover pre-fire.
+        # 扩展回看：如 8:55 对每日 09:00 应落到前一日 09:00
         last = _last_fire_leq(built, now - timedelta(days=8), now)
         if last is not None:
             return last
@@ -307,11 +293,10 @@ def decode_job_to_scheduled_task(
     *,
     normalize: NormalizePayload,
 ) -> ScheduledTask:
-    """Decode an APS Job into ScheduledTask.
+    """将 APS Job 解码为 ScheduledTask。
 
-    ``normalize`` receives (task_list, task_options, raw_pre_tasks) and returns
-    normalized execution payload. Raises SchedulerJobDecodeError on trigger
-    corruption; never invents a default cron and never mutates the job.
+    normalize 负责规范化 (task_list, task_options, pre_tasks)；
+    触发器损坏抛 SchedulerJobDecodeError，不改写 job、不臆造默认 cron。
     """
     job_id = getattr(job, "id", None)
     kwargs = getattr(job, "kwargs", None) or {}

@@ -28,17 +28,22 @@ _HISTORY_MAXLEN = 2000
 
 @dataclass
 class WorkerContext:
+    """Worker 侧上下文：interface 根目录与 i18n 映射。"""
+
     interface_base_dir: Path
     i18n_text_mapping: dict[str, Any] | None = None
 
 
 @dataclass
 class DeviceRuntimeState:
+    """设备/资源运行时状态；configuration_locked 为单向棘轮。"""
+
     controller: Any = None
     controller_type: str | None = None
     controller_name: str | None = None
     current_resource_name: str | None = None
     connected: bool = False
+    # 连接+资源设定后锁定，仅 reset_connection_state 可释放
     configuration_locked: bool = False
     last_device_error: str | None = None
     last_resource_error: str | None = None
@@ -46,6 +51,8 @@ class DeviceRuntimeState:
 
 @dataclass
 class TaskRuntimeState:
+    """任务流水线运行时；lock 保护 running/thread 等跨线程字段。"""
+
     stop_flag: bool = False
     running: bool = False
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -59,6 +66,8 @@ class TaskRuntimeState:
 
 @dataclass
 class AgentRuntimeState:
+    """Agent 进程与客户端状态；start_lock 防并发启动。"""
+
     start_lock: threading.Lock = field(default_factory=threading.Lock)
     started_once: bool = False
     start_succeeded: bool = False
@@ -70,6 +79,8 @@ class AgentRuntimeState:
 
 @dataclass
 class ActiveRun:
+    """当前活跃执行槽位，供准入闸门与冲突检测使用。"""
+
     run_id: str
     origin: ExecutionOrigin
     task_name: str
@@ -121,7 +132,10 @@ def normalize_event(payload: RealtimeEvent | dict[str, Any] | str) -> RealtimeEv
 
 
 class AppState:
+    """进程级共享状态；服务通过 worker.state.* 访问"""
+
     def __init__(self, app_root_dir: Path):
+        # 线程→asyncio 桥：worker 推事件，log_monitor 轮询后 SSE 广播
         self.message_conn: SimpleQueue = SimpleQueue()
         self.worker: MaaWorker | None = None
         self.is_shutting_down = False
@@ -135,9 +149,9 @@ class AppState:
         self.settings: SettingsModel | None = None
         self.update_status: dict | None = None
         self.update_info: dict | None = None
-        # Runtime ownership (kernel advisory lock); only for real CLI process lifetime
+        # 内核咨询锁持有者；仅真实 CLI 进程生命周期使用
         self.runtime_ownership: Any | None = None
-        # CLI: --scheduled-task uuid (set before uvicorn starts)
+        # CLI --scheduled-task，uvicorn 启动前写入，lifespan 内消费
         self.pending_scheduled_task_id: str | None = None
 
         self.context = WorkerContext(interface_base_dir=app_root_dir.resolve())

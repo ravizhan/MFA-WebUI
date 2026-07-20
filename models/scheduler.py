@@ -67,7 +67,7 @@ class DateTriggerConfig(BaseModel):
 
 
 class IntervalTriggerConfig(BaseModel):
-    """Interval 触发器配置"""
+    """间隔触发器配置。"""
 
     type: Literal["interval"] = "interval"
     weeks: int | None = Field(None, ge=0, description="周数")
@@ -83,7 +83,7 @@ TriggerConfig = CronTriggerConfig | DateTriggerConfig | IntervalTriggerConfig
 
 
 class TaskExecutionPayload(BaseModel):
-    """任务执行载荷"""
+    """任务执行载荷：任务列表、选项与前置命令。"""
 
     task_list: list[str] = Field(default_factory=list, description="要执行的任务列表")
     task_options: TaskOptionsByTask = Field(
@@ -95,7 +95,7 @@ class TaskExecutionPayload(BaseModel):
 
 
 class ScheduledTask(TaskExecutionPayload):
-    """定时任务配置"""
+    """定时任务完整配置（含触发器与可选原生唤醒）。"""
 
     id: str = Field(..., description="任务唯一标识")
     name: str = Field(..., min_length=1, max_length=100, description="任务名称")
@@ -105,7 +105,7 @@ class ScheduledTask(TaskExecutionPayload):
     controller_name: str | None = Field(None, description="控制器名称")
     device: ScheduledTaskDeviceConfig | None = Field(None, description="设备配置")
     resource_name: str | None = Field(None, description="资源包名称")
-    # APS-owned native user-level wakeup flag (False = no OS registration)
+    # False 表示不向 OS 注册用户级原生唤醒
     wakeup_enabled: bool = Field(
         False, description="是否注册用户级 OS 原生唤醒（False 表示关闭）"
     )
@@ -115,7 +115,7 @@ class ScheduledTask(TaskExecutionPayload):
 
 
 class ScheduledTaskCreate(TaskExecutionPayload):
-    """创建定时任务请求"""
+    """创建定时任务请求体。"""
 
     name: str = Field(..., min_length=1, max_length=100)
     description: str | None = Field(None, max_length=500)
@@ -128,7 +128,7 @@ class ScheduledTaskCreate(TaskExecutionPayload):
 
 
 class ScheduledTaskUpdate(BaseModel):
-    """更新定时任务请求"""
+    """更新定时任务请求；未出现字段保持原值。"""
 
     name: str | None = Field(None, min_length=1, max_length=100)
     description: str | None = Field(None, max_length=500)
@@ -140,12 +140,12 @@ class ScheduledTaskUpdate(BaseModel):
     task_list: list[str] | None = None
     task_options: TaskOptionsByTask | None = None
     preTasks: list[PreTaskCommand] | None = None
-    # omitted=keep; true/false via model_fields_set (explicit false disables wakeup)
+    # 省略则保持；经 model_fields_set 判断，显式 false 关闭唤醒
     wakeup_enabled: bool | None = None
 
 
 class TaskExecution(BaseModel):
-    """任务执行记录"""
+    """一次任务执行记录（含来源、状态与阻塞信息）。"""
 
     id: str
     task_id: str | None
@@ -162,7 +162,7 @@ class TaskExecution(BaseModel):
 
 
 class StartConflict(BaseModel):
-    """手动启动冲突信息"""
+    """手动启动被拒绝时的冲突详情。"""
 
     code: Literal["busy_manual", "busy_scheduled", "update_in_progress"]
     message: str
@@ -172,7 +172,7 @@ class StartConflict(BaseModel):
 
 
 class ManualStartPayload(TaskExecutionPayload):
-    """手动启动请求载荷（设备/资源在 admission 之后由后端准备）"""
+    """手动启动载荷；设备/资源在 admission 通过后由后端准备。"""
 
     controller_name: str
     device: ScheduledTaskDeviceConfig

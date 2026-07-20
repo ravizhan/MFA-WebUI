@@ -1,6 +1,4 @@
-"""
-SQLite persistence for scheduler execution history.
-"""
+"""调度执行记录的 SQLite 持久化"""
 
 from __future__ import annotations
 
@@ -36,7 +34,7 @@ class _Base(DeclarativeBase):
 
 
 class SchedulerExecution(_Base):
-    """ORM entity for the ``scheduler_executions`` history table."""
+    """``scheduler_executions`` 历史表 ORM 实体。"""
 
     __tablename__ = "scheduler_executions"
     __table_args__ = (
@@ -114,12 +112,11 @@ def _execution_to_orm(execution: TaskExecution) -> SchedulerExecution:
 
 
 class ExecutionStore:
-    """Owns scheduler.sqlite executions table."""
+    """scheduler.sqlite 执行历史表的同步读写封装。"""
 
     def __init__(self, db_path: Path) -> None:
         self._db_path = Path(db_path)
-        # ``check_same_thread=False`` allows ``asyncio.to_thread`` callers to
-        # share the engine across executor threads; SQLite serializes writes.
+        # check_same_thread=False：允许 asyncio.to_thread 跨线程共享 engine
         self._engine = create_engine(
             f"sqlite:///{self._db_path.resolve().as_posix()}",
             connect_args={"check_same_thread": False},
@@ -127,17 +124,15 @@ class ExecutionStore:
         self._session_factory = sessionmaker(self._engine)
 
     def init(self) -> None:
-        """Create tables/indexes."""
+        """创建表与索引。"""
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         _Base.metadata.create_all(self._engine)
 
     def add(self, execution: TaskExecution) -> None:
+        """插入一条记录，并在同一事务内裁剪至最多 EXECUTIONS_MAX_RECORDS 条。"""
         with self._session_factory() as session:
             session.add(_execution_to_orm(execution))
-            # Trim: keep only EXECUTIONS_MAX_RECORDS newest by started_at/id.
-            # Same session/transaction so insert+trim is atomic. Autoflush
-            # persists the just-added row before the DELETE is evaluated, so
-            # the new row participates in the keep/top subset selection.
+            # 同事务插入+裁剪；autoflush 使新行参与 keep 子集计算
             keep_ids = (
                 select(SchedulerExecution.id)
                 .order_by(
@@ -155,6 +150,7 @@ class ExecutionStore:
             session.commit()
 
     def finish(self, run_id: str, status: str, error: str | None = None) -> None:
+        """按 run_id 收尾：写 status / finished_at / 可选 error_message。"""
         finished_at = _to_iso(_utc_now())
         values: dict[str, object] = {"status": status, "finished_at": finished_at}
         if error is not None:
@@ -168,7 +164,7 @@ class ExecutionStore:
             session.commit()
 
     def list(self, limit: int = 50) -> List[TaskExecution]:
-        # Method name shadows builtin list; use typing.List for the annotation.
+        """按 started_at/id 倒序取最近 limit 条。"""
         with self._session_factory() as session:
             rows = (
                 session.execute(

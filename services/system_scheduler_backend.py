@@ -1,9 +1,5 @@
 """
-OS 级调度器后端 —— 策略模式实现。
-支持 Windows (Task Scheduler 2.0 COM)、macOS (launchd)、Linux (user crontab)。
-
-仅用户级原生唤醒；无 SYSTEM/root 提权路径。
-cron 翻译消费 services.native_cron 纯函数；无 date/interval 分支。
+OS 级调度后端（策略模式）：Windows Task Scheduler / macOS launchd / Linux crontab。
 """
 
 from __future__ import annotations
@@ -30,14 +26,10 @@ from services.native_cron import (
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# 常量
-# ---------------------------------------------------------------------------
-
 _TASK_ID_RE = re.compile(r"^[a-f0-9-]{36}$")
 _MWU_CRON_MARKER_RE = re.compile(r"#\s*MWU:([a-f0-9-]{36})")
 
-# Task Scheduler 2.0 constants (win32com)
+# Task Scheduler 2.0 COM 常量
 _TASK_ACTION_EXEC = 0
 _TASK_TRIGGER_TIME = 1
 _TASK_TRIGGER_DAILY = 2
@@ -72,15 +64,9 @@ _SCHTASKS_MONTH_TO_COM: dict[str, int] = {
 }
 _ALL_MONTHS_COM = 0xFFF
 
-
-# ---------------------------------------------------------------------------
-# Spec
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class NativeTaskSpec:
-    """OS registration payload (no pydantic)."""
+    """OS 注册载荷（非 pydantic）。"""
 
     task_id: str
     task_name: str
@@ -88,12 +74,6 @@ class NativeTaskSpec:
     cli_args: list[str]
     cron: NativeCron
     working_dir: str
-
-
-# ---------------------------------------------------------------------------
-# 辅助函数
-# ---------------------------------------------------------------------------
-
 
 def _get_uid() -> int:
     getuid = getattr(os, "getuid", None)
@@ -108,19 +88,19 @@ def validate_task_id(task_id: str) -> None:
 
 
 def windows_quote_argument(arg: str) -> str:
-    """Windows CreateProcess command-line quoting (MSDN rules)."""
+    """按 MSDN 规则对单个 Windows 命令行参数加引号。"""
     return subprocess.list2cmdline([arg])
 
 
 def windows_join_args(args: list[str]) -> str:
-    """Join argv into a single Windows command-line string (MSDN rules)."""
+    """按 MSDN 规则将 argv 拼成 Windows 命令行字符串。"""
     return subprocess.list2cmdline(args)
 
 
 def _run_text(
     args: list[str], *, check: bool = False
 ) -> subprocess.CompletedProcess[str]:
-    """Run a subprocess capturing stdout/stderr as UTF-8 str."""
+    """以 UTF-8 文本捕获 stdout/stderr 执行子进程。"""
     return subprocess.run(
         args,
         capture_output=True,
@@ -137,7 +117,7 @@ def _parse_hhmm(start_time: str) -> tuple[int, int]:
 
 
 def _next_start_boundary(hour: int, minute: int) -> datetime:
-    """Next local calendar occurrence of hour:minute (DAILY/WEEKLY/MONTHLY)."""
+    """下一本地日历时刻 hour:minute（日/周/月触发用）。"""
     now = datetime.now().astimezone()
     start = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
     if start <= now:
@@ -148,12 +128,10 @@ def _next_start_boundary(hour: int, minute: int) -> datetime:
 def _next_hourly_start_boundary(
     minute: int, *, now: datetime | None = None
 ) -> datetime:
-    """Next local time whose minute equals ``minute`` (within the coming hour).
+    """下一本地整点后 minute 分（一小时内）。
 
-    If the current hour's matching minute is still in the future, use it;
-    otherwise advance one hour. Seconds and microseconds are zeroed.
-
-    ``now`` may be injected for tests; defaults to local timezone wall clock.
+    本小时该分仍在未来则用本小时，否则进一小时；秒与微秒置零。
+    ``now`` 可注入便于测试，默认本地墙钟。
     """
     if now is None:
         now = datetime.now().astimezone()
@@ -182,18 +160,14 @@ def _com_hresult(exc: BaseException) -> int | None:
 
 
 def _com_is_not_found(exc: BaseException) -> bool:
-    """True when COM/Task Scheduler reports missing task or folder.
-
-    Note: 0x8004130A is SCHED_E_TASK_NOT_READY, not not-found — do not treat
-    it as missing.
-    """
+    """COM/计划任务报任务或文件夹不存在时为 True。"""
     hr = _com_hresult(exc)
     if hr in (
-        0x80070002,  # ERROR_FILE_NOT_FOUND
-        0x80070003,  # ERROR_PATH_NOT_FOUND
+        0x80070002,  # 文件不存在
+        0x80070003,  # 路径不存在
     ):
         return True
-    if hr == 0x8004130A:  # SCHED_E_TASK_NOT_READY
+    if hr == 0x8004130A:  # 任务未就绪，勿当 missing
         return False
     msg = str(exc).lower()
     return (
@@ -211,19 +185,13 @@ def _macos_is_not_found(stderr: str) -> bool:
         or "not found" in stderr.lower()
     )
 
-
-# ---------------------------------------------------------------------------
-# 抽象基类
-# ---------------------------------------------------------------------------
-
-
 class SystemSchedulerBackend(ABC):
     """OS 级用户唤醒后端抽象。"""
 
     @property
     @abstractmethod
     def platform_name(self) -> str:
-        """返回平台标识: 'windows' | 'macos' | 'linux'"""
+        """平台标识：'windows' | 'macos' | 'linux'。"""
 
     @abstractmethod
     def build_identifier(self, task_id: str) -> str:
@@ -235,24 +203,19 @@ class SystemSchedulerBackend(ABC):
 
     @abstractmethod
     def unregister(self, task_id: str) -> None:
-        """删除已注册任务。目标不存在时抛 RuntimeError。"""
+        """删除已注册任务；目标不存在时抛 RuntimeError。"""
 
     @abstractmethod
     def is_registered(self, task_id: str) -> bool:
-        """查询注册状态。明确 not-found → False；其他错误抛 RuntimeError。"""
+        """查询注册状态：明确不存在 → False；其他错误抛 RuntimeError。"""
 
     @abstractmethod
     def list_registered_task_ids(self) -> list[str]:
-        """列出本机已注册的 MWU 任务 UUID。文件夹/列表不存在时返回空列表。"""
-
-
-# ---------------------------------------------------------------------------
-# Windows 后端 (Task Scheduler 2.0 COM via pywin32)
-# ---------------------------------------------------------------------------
+        """列出本机已注册的 MWU 任务 UUID；目录/列表不存在时返回空列表。"""
 
 
 class WindowsBackend(SystemSchedulerBackend):
-    """Windows Task Scheduler 2.0 后端（用户级 InteractiveToken）。"""
+    """Windows 计划任务后端（用户级 InteractiveToken）。"""
 
     platform_name = "windows"
     _FOLDER = "\\MWU"
@@ -263,6 +226,7 @@ class WindowsBackend(SystemSchedulerBackend):
     def register(self, spec: NativeTaskSpec) -> None:
         validate_task_id(spec.task_id)
         pythoncom, Dispatch = self._import_com()
+        # COM 初始化是线程级的，必须与 CoUninitialize 在同一调用内成对
         pythoncom.CoInitialize()
         try:
             service = Dispatch("Schedule.Service")
@@ -356,7 +320,7 @@ class WindowsBackend(SystemSchedulerBackend):
                     f"Task Scheduler GetTasks 失败: {self._com_error_detail(e)}"
                 ) from e
             ids: list[str] = []
-            # COM collections are 1-based
+            # COM 集合下标从 1 开始
             count = int(tasks.Count)
             for i in range(1, count + 1):
                 try:
@@ -375,7 +339,7 @@ class WindowsBackend(SystemSchedulerBackend):
 
     @staticmethod
     def _import_com():
-        """Lazy-import pywin32 so non-Windows platforms can import this module."""
+        """延迟导入 pywin32，避免非 Windows 平台 import 本模块失败。"""
         try:
             import pythoncom  # type: ignore[import-not-found]
             from win32com.client import Dispatch  # type: ignore[import-not-found]
@@ -409,7 +373,7 @@ class WindowsBackend(SystemSchedulerBackend):
             ) from e
 
     def _build_task_definition(self, service, spec: NativeTaskSpec):
-        """Build ITaskDefinition matching prior schtasks XML semantics."""
+        """构建 ITaskDefinition，语义对齐旧 schtasks XML。"""
         task_def = service.NewTask(0)
 
         task_def.RegistrationInfo.Description = f"MWU Scheduled Task: {spec.task_name}"
@@ -490,12 +454,6 @@ class WindowsBackend(SystemSchedulerBackend):
 
         raise ValueError(f"不支持的 schtasks schedule: {schedule}")
 
-
-# ---------------------------------------------------------------------------
-# macOS 后端
-# ---------------------------------------------------------------------------
-
-
 class MacOSBackend(SystemSchedulerBackend):
     """macOS 14+ launchd 后端（用户 LaunchAgents）。"""
 
@@ -519,18 +477,15 @@ class MacOSBackend(SystemSchedulerBackend):
 
         plist_path.parent.mkdir(parents=True, exist_ok=True)
         self._write_plist(plist_path, plist_data)
-        # launchd update = bootout then bootstrap (not a concurrency lock).
+        # 更新 = bootout 再 bootstrap（非并发锁）
         self._bootstrap(label, str(plist_path))
         logger.info("macOS launchd 任务注册成功: %s", label)
 
     def unregister(self, task_id: str) -> None:
-        """Delete launchd job + plist.
+        """删除 launchd 作业与 plist。
 
-        - bootout success → remove plist if present, succeed
-        - bootout not-found/113 + plist exists → remove plist, succeed
-          (persisted job not currently loaded)
-        - bootout not-found + plist missing → RuntimeError (strict missing)
-        - other bootout errors → RuntimeError, leave plist untouched
+        bootout 成功或「未加载但有 plist」均清理 plist；
+        两者皆无则严格报不存在；其他 bootout 错误保留 plist。
         """
         validate_task_id(task_id)
         label = self.build_identifier(task_id)
@@ -544,7 +499,7 @@ class MacOSBackend(SystemSchedulerBackend):
             if _macos_is_not_found(stderr) or proc.returncode == 113:
                 if not plist_exists:
                     raise RuntimeError(f"launchd 任务不存在: {label}")
-                # Not loaded but plist remains — clean up persistence below.
+                # 未加载但残留 plist，下方清理
             else:
                 detail = stderr.strip() or str(proc.returncode)
                 raise RuntimeError(f"launchctl bootout failed: {detail}")
@@ -612,12 +567,6 @@ class MacOSBackend(SystemSchedulerBackend):
             "StandardErrorPath": log_path,
             "StartCalendarInterval": to_launchd_calendar(spec.cron),
         }
-
-
-# ---------------------------------------------------------------------------
-# Linux 后端
-# ---------------------------------------------------------------------------
-
 
 class LinuxBackend(SystemSchedulerBackend):
     """Linux 用户 crontab 后端。"""
@@ -727,14 +676,8 @@ class LinuxBackend(SystemSchedulerBackend):
     def _build_cron_line(self, spec: NativeTaskSpec) -> str:
         return f"{to_crontab_line(spec.cron)} {self._build_command_body(spec)}"
 
-
-# ---------------------------------------------------------------------------
-# 工厂函数
-# ---------------------------------------------------------------------------
-
-
 def get_backend(platform_name: str | None = None) -> SystemSchedulerBackend:
-    """根据当前平台返回对应后端实例。"""
+    """按平台返回对应后端实例。"""
     system = (platform_name or platform.system()).lower()
     if system in ("windows", "win32"):
         return WindowsBackend()
@@ -748,11 +691,7 @@ def get_backend(platform_name: str | None = None) -> SystemSchedulerBackend:
 def build_native_command(
     app_root: Path, task_id: str, *, frozen: bool | None = None
 ) -> tuple[str, list[str]]:
-    """Build source/frozen native command for OS registration.
-
-    Source mode: python_executable + absolute main.py + --scheduled-task id
-    Frozen mode: executable + --scheduled-task id
-    """
+    """构造源码/冻结包下的 OS 注册命令。"""
     import sys
 
     is_frozen = getattr(sys, "frozen", False) if frozen is None else frozen

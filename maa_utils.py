@@ -22,7 +22,10 @@ if TYPE_CHECKING:
 
 
 class MaaWorker:
+    """MAA 编排 DI 容器：持有 Resource/Tasker，并实例化各服务。"""
+
     def __init__(self, state: AppState, interface: InterfaceModel):
+        # 状态集中在 AppState；服务经 self.worker.state.* 读写
         Toolkit.init_option(str(state.context.interface_base_dir))
 
         self.state = state
@@ -45,6 +48,7 @@ class MaaWorker:
         self.events.send_log("MAA初始化成功")
 
     def get_screencap_bytes(self):
+        """截取当前设备画面为 JPEG；失败时解除 configuration 锁定。"""
         controller = self.state.device.controller
         if not self.state.device.connected or controller is None:
             return None
@@ -62,7 +66,7 @@ class MaaWorker:
         return None
 
     def shutdown(self):
-        # Stop running pipeline before tearing down sinks/agents.
+        """先停任务再拆 sink/agent，避免关闭时残留流水线。"""
         if self.state.task.running:
             try:
                 self.tasks.stop()

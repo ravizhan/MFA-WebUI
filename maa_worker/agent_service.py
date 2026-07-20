@@ -24,6 +24,7 @@ class AgentService:
         return [self.worker.interface.agent]
 
     def _load_i18n_mapping(self) -> dict[str, Any]:
+        """加载并缓存客户端语言映射，失败时返回空表。"""
         context = self.worker.state.context
         if context.i18n_text_mapping is not None:
             return context.i18n_text_mapping
@@ -83,6 +84,7 @@ class AgentService:
         return payload
 
     def _get_selected_controller_payload(self) -> dict[str, Any]:
+        """导出当前控制器定义并做 i18n 解析，供 PI 环境注入。"""
         controller = self.worker.device.get_controller_definition(
             self.worker.state.device.controller_name
         )
@@ -105,8 +107,10 @@ class AgentService:
         return {}
 
     def build_pi_env(self) -> dict[str, str]:
+        """构建注入 Agent 的 PI_* 环境变量；version 文件缺失时用 unknown。"""
         controller_payload = self._get_selected_controller_payload()
         resource_payload = self._get_selected_resource_payload()
+        # version 由 CI 生成，dev 环境可能不存在或过期
         version_path = self.worker.state.context.interface_base_dir / "version"
         try:
             client_version = version_path.read_text(encoding="utf-8").strip()
@@ -128,6 +132,7 @@ class AgentService:
         }
 
     def load(self, pi_env: dict[str, str] | None = None):
+        """加载 Agent 配置并将子进程列表写入共享状态。"""
         processes = load_agents(
             self._get_agent_configs(),
             self.worker,
@@ -136,6 +141,7 @@ class AgentService:
         self.worker.state.agent.processes = processes
 
     def ensure_started_once(self) -> bool:
+        """保证 Agent 只初始化一次；已启动则直接返回上次结果。"""
         configs = self._get_agent_configs()
         if not configs:
             return True
@@ -144,6 +150,7 @@ class AgentService:
         if state.started_once:
             return state.start_succeeded
 
+        # 双重检查：避免并发首次启动重复 load
         with state.start_lock:
             if state.started_once:
                 return state.start_succeeded

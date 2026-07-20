@@ -197,10 +197,12 @@ def _normalize_root_relative_path(raw_path: str, *, field_name: str) -> str:
 
 
 def _resolve_import_path(import_path: str, base_dir: Path) -> Path:
+    """解析 import 路径；故意不 resolve，避免符号链接绕过根目录约束。"""
     normalized_import_path = _normalize_root_relative_path(
         import_path,
         field_name="import",
     )
+    # 保持相对拼接结果，越界用 relative_to 检测
     resolved_path = base_dir / normalized_import_path
     try:
         resolved_path.relative_to(base_dir)
@@ -518,7 +520,9 @@ def _merge_imports_into_target(
 
 
 def load_interface_model(base_dir: str | Path) -> InterfaceModel:
+    """加载并合并用户 interface.json（含 import/scan_select），校验后返回模型。"""
     resolved_base_dir = Path(base_dir).resolve()
+    # root 路径不 resolve，与 import 路径策略一致
     root_path = resolved_base_dir / "interface.json"
     if not _is_within_base_dir(root_path, resolved_base_dir):
         raise InterfaceLoadError("interface.json 不在软件根目录内")

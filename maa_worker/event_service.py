@@ -30,8 +30,9 @@ class EventService:
         self.worker = worker
 
     def _publish_event(self, event: RealtimeEvent):
+        """将事件推入 message_conn，供 log_monitor 轮询并 SSE 广播。"""
         self.worker.state.message_conn.put(event)
-        time.sleep(0.05)
+        time.sleep(0.05)  # 轻微节流，避免前端瞬时刷屏
 
     def show_system_notification(self, title: str, message: str):
         notifier = plyer.notification
@@ -164,6 +165,7 @@ class EventService:
         )
 
     def _build_task_subject(self, task_list: list[str]) -> str:
+        """生成任务通知标题主体：优先当前任务名。"""
         if self.worker.state.task.current_task_name:
             return self.worker.state.task.current_task_name
         if len(task_list) == 1:

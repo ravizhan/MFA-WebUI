@@ -61,6 +61,8 @@ def _device_as_dict(
 
 @dataclass
 class Admission:
+    """调度入场结果：接受则带 run_id，拒绝则带冲突或跳过状态。"""
+
     accepted: bool
     run_id: str | None = None
     conflict: StartConflict | None = None
@@ -68,6 +70,8 @@ class Admission:
 
 
 class ExecutionCoordinator:
+    """调度执行编排：入场裁决、状态推进、与 ExecutionStore 交互。"""
+
     def __init__(self, state: AppState, store: ExecutionStore) -> None:
         self._state = state
         self._store = store
@@ -104,6 +108,7 @@ class ExecutionCoordinator:
         )
 
     async def submit_manual(self, payload: ManualStartPayload) -> Admission:
+        """手动启动：忙/更新中直接冲突；否则占 active_run 并执行。"""
         run_id = str(uuid.uuid4())
         if self._state.update_in_progress:
             return Admission(accepted=False, conflict=self._update_conflict())
@@ -153,13 +158,14 @@ class ExecutionCoordinator:
         task: ScheduledTask,
         origin: Literal["in_app", "native"],
     ) -> Admission:
+        """定时/原生唤醒入场：计算 occurrence，超时/忙碌记 skip，否则执行。"""
         now_local = _local_now()
         now_utc = _utc_now()
         scheduled_for = compute_occurrence(task.trigger_config, now_local)
         scheduled_for_utc = _to_utc(scheduled_for)
         occurrence_id = _occurrence_id(task.id, scheduled_for_utc)
 
-        # Native late window: beyond 15min → missed_deadline.
+        # 原生唤醒迟到超过 15 分钟 → missed_deadline
         if origin == "native" and now_utc - scheduled_for_utc > MISFIRE_GRACE:
             run_id = str(uuid.uuid4())
             await asyncio.to_thread(
@@ -259,6 +265,7 @@ class ExecutionCoordinator:
                 self._state.active_run = None
 
     async def stop_active(self) -> bool:
+        """请求停止当前活跃任务。"""
         if self._state.active_run is None:
             return False
         worker = self._state.worker
@@ -273,6 +280,7 @@ class ExecutionCoordinator:
         task_options: Any,
         pre_tasks: Any = None,
     ) -> tuple[list[str], TaskOptionsByTask, list]:
+        """有 interface 时走完整规范化；否则仅去重 task_id。"""
         worker = self._state.worker
         if not worker or not getattr(worker, "interface", None):
             normalized_task_list: list[str] = []
@@ -306,11 +314,8 @@ class ExecutionCoordinator:
         run_id: str,
         log_label: str,
     ) -> tuple[str, str | None]:
-        """Port of SchedulerManager._execute_task body (connect → start → poll).
-
-        Returns ``(status, error_message)``. Does not touch ActiveRun.
-        """
-        del run_id  # reserved for future correlation / logging
+        """连接设备 → 启动任务 → 轮询结束；返回 (status, error_message)，不碰 ActiveRun。"""
+        del run_id  # 预留给后续关联/日志
         worker = self._state.worker
         if not worker:
             logger.error("Worker 未就绪，无法执行任务 %s", log_label)
@@ -321,7 +326,7 @@ class ExecutionCoordinator:
         task_state = self._state.task
 
         try:
-            # Device/resource required for prepare path
+            # 准备路径要求设备与资源齐全
             if device_dict is None or resource_name is None:
                 _settings = load_settings()
                 worker.events.send_notification(
@@ -335,7 +340,7 @@ class ExecutionCoordinator:
                 )
                 return "failed", "设备或资源配置缺失"
 
-            # Connection match / reuse
+            # 已锁定且控制器/资源匹配则可复用连接
             device_controller_name = (
                 device_dict.get("controller_name") or controller_name
             )

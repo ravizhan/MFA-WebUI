@@ -61,6 +61,7 @@ class TaskService:
         task_name: str | None = None,
         pre_tasks: list[PreTaskCommand] | None = None,
     ) -> bool:
+        """过滤兼容任务后在后台线程启动执行；非阻塞锁失败则直接返回。"""
         self.worker.state.task.last_error = None
         if not self.worker.state.device.connected:
             return False
@@ -72,6 +73,7 @@ class TaskService:
         controller_names = self.worker.device.get_active_controller_names()
         current_resource_name = self.worker.state.device.current_resource_name
 
+        # 按当前控制器/资源过滤不可执行任务
         filtered_task_list: list[str] = []
         for task_entry in task_list:
             task_definition = self._get_task_definition(task_entry)
@@ -151,6 +153,7 @@ class TaskService:
             state.lock.release()
 
     def stop(self) -> bool:
+        """置 stop_flag 并终止前置进程，等待 Tasker 停稳。"""
         state = self.worker.state.task
         if not state.running:
             return False
@@ -185,6 +188,7 @@ class TaskService:
                     pass
 
     def _run_pre_tasks(self, pre_tasks: list[PreTaskCommand]) -> bool:
+        """顺序执行启用的前置命令；支持超时与 stop_flag 中断。"""
         state = self.worker.state.task
         enabled = [
             t
@@ -247,6 +251,7 @@ class TaskService:
             reader_thread = threading.Thread(target=_reader, daemon=True)
             reader_thread.start()
 
+            # 轮询退出/停止/超时
             start_time = time.time()
             timed_out = False
             stopped = False
@@ -316,6 +321,10 @@ class TaskService:
         options: TaskOptionsByTask,
         pre_tasks: list[PreTaskCommand] | None = None,
     ):
+        """
+        任务主循环：前置程序 → 逐任务 post_task。
+        stop_flag 在任务间与任务内（0.5s 轮询）均可中止。
+        """
         state = self.worker.state.task
         state.pre_tasks = pre_tasks or []
         try:
@@ -348,6 +357,7 @@ class TaskService:
                 else:
                     task_result = self.worker.tasker.post_task(task)
                 self.worker.events.send_log("正在运行任务: " + task)
+                # 任务内轮询 stop_flag，支持中途 abort
                 while not task_result.done:
                     time.sleep(0.5)
                     if state.stop_flag:

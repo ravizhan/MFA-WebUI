@@ -1,4 +1,4 @@
-"""APS job CRUD + lifecycle. Execution admission lives in ExecutionCoordinator."""
+"""APS 任务 CRUD 与生命周期；准入控制在 ExecutionCoordinator。"""
 
 from __future__ import annotations
 
@@ -34,10 +34,9 @@ logger = logging.getLogger(__name__)
 
 
 async def scheduled_job_fired(**kwargs: Any) -> None:
-    """APS job entry: decode task and hand off to ExecutionCoordinator.
+    """APS 任务入口：解码后交给 ExecutionCoordinator。
 
-    Wakeup tasks (``wakeup_enabled``) are owned by OS native cold-start /
-    native-dispatch only; APS in-app fire is a no-op for them.
+    wakeup 任务由系统原生调度负责，应用内触发直接跳过。
     """
     try:
         import main as main_mod
@@ -71,6 +70,7 @@ async def scheduled_job_fired(**kwargs: Any) -> None:
         logger.error("scheduled_job_fired: 任务不存在 %s", task_id)
         return
 
+    # 原生唤醒任务不在此路径执行，避免与 OS 调度重复派发
     if task.wakeup_enabled:
         logger.info(
             "scheduled_job_fired: skip in-app dispatch for wakeup task %s "
@@ -86,7 +86,7 @@ async def scheduled_job_fired(**kwargs: Any) -> None:
 
 
 class SchedulerManager:
-    """APScheduler CRUD and lifecycle; native wakeup via SystemScheduler."""
+    """APS 任务 CRUD/生命周期；系统唤醒经 SystemScheduler 注册。"""
 
     def __init__(
         self,
@@ -102,10 +102,11 @@ class SchedulerManager:
         self._worker = worker
 
     def set_system_scheduler(self, system_scheduler: SystemScheduler | None) -> None:
+        """注入跨平台系统调度后端（可为空）。"""
         self._system_scheduler = system_scheduler
 
     async def initialize(self, *, paused: bool = True) -> None:
-        """Start APS (optionally paused). Absolute db_path is injected by main."""
+        """启动 APS；db_path 由 main 注入，paused 时先不派发。"""
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         db_url = f"sqlite:///{self._db_path.resolve().as_posix()}"
         self.scheduler = AsyncIOScheduler(
@@ -117,25 +118,20 @@ class SchedulerManager:
             timezone=tzlocal.get_localzone(),
         )
         self.scheduler.start(paused=paused)
-        # 旧格式 job 重置：反序列化失败（如旧 headless 回调引用）→ 清空，用户重建
-        try:
-            self.scheduler.get_jobs()
-        except Exception:
-            logger.warning(
-                "检测到旧格式调度任务，已清空（请重建计划任务）", exc_info=True
-            )
-            self.scheduler.remove_all_jobs()
+        self.scheduler.get_jobs()
         if paused:
             logger.info("调度器已启动（paused）")
         else:
             logger.info("调度器已启动")
 
     def resume(self) -> None:
+        """从 paused 恢复 APS 派发。"""
         if self.scheduler is not None:
             self.scheduler.resume()
             logger.info("调度器已恢复派发")
 
     async def shutdown(self) -> None:
+        """关闭 APS 并清空引用。"""
         if self.scheduler:
             self.scheduler.shutdown()
             logger.info("调度器已关闭")
@@ -147,6 +143,7 @@ class SchedulerManager:
         task_options: Any,
         pre_tasks: Any = None,
     ) -> tuple[list[str], TaskOptionsByTask, list]:
+        """按 interface 规范化任务载荷；无 worker 时仅做去重。"""
         if not self._worker or not getattr(self._worker, "interface", None):
             normalized_task_list: list[str] = []
             if isinstance(task_list, list):
@@ -169,25 +166,30 @@ class SchedulerManager:
         )
 
     def _decode_job(self, job) -> ScheduledTask:
+        """将 APS job 解码为 ScheduledTask。"""
         return decode_job_to_scheduled_task(
             job,
             normalize=self._normalize_task_payload,
         )
 
     def _desired_wakeup(self, wakeup_enabled: bool, enabled: bool) -> bool:
+        """仅当唤醒开启且任务启用时才注册原生调度。"""
         return bool(wakeup_enabled) and bool(enabled)
 
     def _register_native(self, task: ScheduledTask) -> None:
+        """向系统调度注册原生唤醒（后端未注入则跳过）。"""
         if self._system_scheduler is None:
             return
         self._system_scheduler.register(task)
 
     def _unregister_native(self, task_id: str) -> None:
+        """取消系统原生唤醒注册。"""
         if self._system_scheduler is None:
             return
         self._system_scheduler.unregister(task_id)
 
     async def create_task(self, task_create: ScheduledTaskCreate) -> ScheduledTask:
+        """创建定时任务；需唤醒时先注册原生再写入 APS。"""
         if not self.scheduler:
             raise RuntimeError("调度器未初始化")
 
@@ -220,7 +222,7 @@ class SchedulerManager:
             updated_at=now,
         )
 
-        # Native before APS when desired wakeup is on.
+        # 先原生后 APS，避免注册失败时 APS 已写入
         if self._desired_wakeup(task.wakeup_enabled, task.enabled):
             self._register_native(task)
 
@@ -255,6 +257,7 @@ class SchedulerManager:
         return decoded
 
     async def get_task(self, task_id: str) -> Optional[ScheduledTask]:
+        """按 id 读取并解码单个 APS 任务。"""
         if not self.scheduler:
             return None
         job = self.scheduler.get_job(task_id)
@@ -263,6 +266,7 @@ class SchedulerManager:
         return self._decode_job(job)
 
     async def get_all_tasks(self) -> list[ScheduledTask]:
+        """列出全部任务；无法解码的旧/坏 job 直接删除。"""
         if not self.scheduler:
             return []
         tasks: list[ScheduledTask] = []
@@ -270,7 +274,7 @@ class SchedulerManager:
             try:
                 tasks.append(self._decode_job(job))
             except SchedulerJobDecodeError:
-                # 恶构/旧格式 job：删除并显式记录（不伪造兜底，用户重建）
+                # 不伪造兜底配置，删除后由用户重建
                 logger.warning("删除无法解码的调度任务 %s", job.id, exc_info=True)
                 job.remove()
         return tasks
@@ -278,6 +282,7 @@ class SchedulerManager:
     async def update_task(
         self, task_id: str, task_update: ScheduledTaskUpdate
     ) -> Optional[ScheduledTask]:
+        """合并更新；原生注册变更优先于 APS 修改。"""
         if not self.scheduler:
             return None
         job = self.scheduler.get_job(task_id)
@@ -350,7 +355,7 @@ class SchedulerManager:
             if task_update.enabled is not None:
                 new_enabled = bool(task_update.enabled)
             else:
-                # APS: next_run_time is None when paused
+                # 暂停时 next_run_time 为 None
                 new_enabled = job.next_run_time is not None
 
             normalized_task_list, normalized_task_options, normalized_pre_tasks = (
@@ -395,7 +400,7 @@ class SchedulerManager:
 
             if native_relevant and self._system_scheduler is not None:
                 if new_desired and (not old_desired or trigger_changed):
-                    # Native before APS mutation (register / re-register).
+                    # 先改原生再改 APS，保证冷启动与触发一致
                     self._register_native(tentative)
                 elif old_desired and not new_desired:
                     self._unregister_native(task_id)
@@ -437,7 +442,7 @@ class SchedulerManager:
             return None
 
     async def delete_task(self, task_id: str) -> bool:
-        """Delete task: native unregister first when desired, then remove APS job."""
+        """删除任务：若在原生注册中则先注销，再移除 APS job。"""
         if not self.scheduler:
             return False
         try:
@@ -460,6 +465,7 @@ class SchedulerManager:
             return False
 
     async def pause_task(self, task_id: str) -> bool:
+        """暂停任务；当前需要原生唤醒时先注销再 pause。"""
         if not self.scheduler:
             return False
         try:
@@ -467,7 +473,7 @@ class SchedulerManager:
             if job is None:
                 return False
             task = self._decode_job(job)
-            # Native before APS pause when wakeup is currently desired.
+            # 暂停后不应再被 OS 唤醒
             if self._desired_wakeup(task.wakeup_enabled, task.enabled):
                 self._unregister_native(task_id)
             self.scheduler.pause_job(task_id)
@@ -480,6 +486,7 @@ class SchedulerManager:
             return False
 
     async def resume_task(self, task_id: str) -> bool:
+        """恢复任务；开启唤醒时先注册原生再 resume。"""
         if not self.scheduler:
             return False
         try:
@@ -487,7 +494,7 @@ class SchedulerManager:
             if job is None:
                 return False
             task = self._decode_job(job)
-            # Native before APS resume when wakeup is requested.
+            # 恢复后需重新挂上系统唤醒
             if task.wakeup_enabled:
                 self._register_native(task)
             self.scheduler.resume_job(task_id)

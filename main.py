@@ -137,13 +137,14 @@ async def log_monitor():
 
 
 def acquire_runtime_ownership() -> RuntimeOwnership:
-    """Acquire process-lifetime runtime lock (not on import/test)."""
+    """获取进程级运行时锁；仅在真实 CLI 启动时调用，不在 import/测试路径。"""
     ownership = RuntimeOwnership(APP_ROOT_DIR)
     ownership.acquire()
     return ownership
 
 
 def release_runtime_ownership() -> None:
+    """释放运行时锁；失败时静默，避免关闭路径二次异常。"""
     ownership = app_state.runtime_ownership
     if ownership is not None:
         try:
@@ -154,7 +155,7 @@ def release_runtime_ownership() -> None:
 
 
 def ensure_native_token() -> str:
-    """Load or create config/native_token (0600)."""
+    """读取或创建 config/native_token（权限 0600），供 native 二次进程鉴权。"""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
     if not NATIVE_TOKEN_FILE.exists():
         token = secrets.token_hex(32)
@@ -168,7 +169,10 @@ def ensure_native_token() -> str:
 
 
 def delegate_native_dispatch(task_id: str) -> int:
-    """POST native-dispatch to the running instance; retry ~30s; always exit 0 on give-up."""
+    """
+    本实例抢锁失败时，将 native 唤醒委托给已运行实例。
+    约 30s 内重试；超时仍返回 0，避免 OS 调度器反复失败重试。
+    """
     if not NATIVE_TOKEN_FILE.exists():
         print("native_token 不存在，无法委托", file=sys.stderr)
         return EXIT_DELEGATE_FAILED
@@ -186,7 +190,7 @@ def delegate_native_dispatch(task_id: str) -> int:
             with httpx.Client(timeout=5.0) as client:
                 resp = client.post(url, json=payload)
             if resp.status_code < 500:
-                # 2xx/4xx: running instance answered
+                # 2xx/4xx 表示对端已响应，不再重试
                 if resp.status_code >= 400:
                     print(
                         f"native-dispatch 响应 {resp.status_code}: {resp.text}",
@@ -203,6 +207,7 @@ def delegate_native_dispatch(task_id: str) -> int:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """应用生命周期：初始化调度/准入，退出时释放运行时锁。"""
     app_state.is_shutting_down = False
     app_state.worker = MaaWorker(app_state, interface)
     app_state.broadcaster = LogBroadcaster()
@@ -216,17 +221,17 @@ async def lifespan(app: FastAPI):
             context={"interface": interface},
         )
 
-    # Execution store + coordinator (admission gate)
+    # 执行存储 + 准入协调器（唯一任务入口）
     app_state.execution_store = ExecutionStore(SCHEDULER_DB_PATH)
     await asyncio.to_thread(app_state.execution_store.init)
     app_state.execution_coordinator = ExecutionCoordinator(
         app_state, app_state.execution_store
     )
 
-    # Native wakeup adapter (stateless)
+    # 系统级唤醒适配器（无状态）
     app_state.system_scheduler = SystemScheduler(APP_ROOT_DIR)
 
-    # APS manager (paused until converge completes)
+    # APS 先暂停，等 OS 注册 converge 完成后再 resume，避免竞态
     app_state.scheduler_manager = SchedulerManager(
         SCHEDULER_DB_PATH,
         system_scheduler=app_state.system_scheduler,
@@ -234,7 +239,7 @@ async def lifespan(app: FastAPI):
     app_state.scheduler_manager.set_worker(app_state.worker)
     await app_state.scheduler_manager.initialize(paused=True)
 
-    # Converge OS registrations to APS desired set
+    # 将 OS 注册收敛到 APS 期望集合（enabled + wakeup_enabled）
     try:
         all_tasks = await app_state.scheduler_manager.get_all_tasks()
         desired = [t for t in all_tasks if t.wakeup_enabled and t.enabled]
@@ -252,7 +257,7 @@ async def lifespan(app: FastAPI):
     app_state.scheduler_manager.resume()
     app_state.send_log("调度器已恢复派发")
 
-    # Cold-start native wake: run after resume as background task
+    # 冷启动 native 唤醒：resume 后作为后台任务执行
     pending_id = app_state.pending_scheduled_task_id
     if pending_id and app_state.execution_coordinator is not None:
 
@@ -482,7 +487,7 @@ def get_resource(controller_type: str | None = Query(default=None)):
 
 @app.post("/api/resource")
 async def set_resource(name: str):
-    # 设置资源
+    """为已连接设备加载指定资源。"""
     if app_state.worker is None:
         msg = "Worker未初始化"
         app_state.send_log(msg)
@@ -645,8 +650,10 @@ def check_update():
 
 @app.get("/api/update")
 async def perform_update():
+    """下载并后台执行更新；有活跃任务时拒绝，并置 update 闸门。"""
     try:
         coordinator = app_state.execution_coordinator
+        # 与任务准入互斥，避免更新过程中再开任务
         if coordinator is not None and coordinator.active_run() is not None:
             msg = "任务执行中，无法更新"
             app_state.send_log(msg)
@@ -804,6 +811,7 @@ def test_notification():
 
 @app.post("/api/start")
 async def start(payload: ManualStartPayload):
+    """手动启动：经 ExecutionCoordinator 准入，冲突时返回 conflict。"""
     if app_state.execution_coordinator is None:
         msg = "执行协调器未初始化"
         app_state.send_log(msg)
@@ -827,6 +835,7 @@ async def start(payload: ManualStartPayload):
 
 @app.post("/api/stop")
 async def stop():
+    """停止当前活跃运行（经协调器，非直接操作 worker）。"""
     if app_state.execution_coordinator is None:
         msg = "执行协调器未初始化"
         app_state.send_log(msg)
@@ -900,7 +909,7 @@ async def get_scheduler_tasks():
 
 @app.post("/api/scheduler/tasks")
 async def create_scheduler_task(task_create: ScheduledTaskCreate):
-    """创建定时任务（native 物化内联在 SchedulerManager）"""
+    """创建定时任务；OS native 注册由 SchedulerManager 内联处理。"""
     if app_state.scheduler_manager is None:
         msg = "调度器未初始化"
         app_state.send_log(msg)
@@ -923,7 +932,7 @@ async def create_scheduler_task(task_create: ScheduledTaskCreate):
 
 @app.put("/api/scheduler/tasks/{task_id}")
 async def update_scheduler_task(task_id: str, task_update: ScheduledTaskUpdate):
-    """更新定时任务（native register/unregister 在 manager 内联）"""
+    """更新定时任务；native 注册/注销在 manager 内联。"""
     if app_state.scheduler_manager is None:
         msg = "调度器未初始化"
         app_state.send_log(msg)
@@ -1010,7 +1019,7 @@ async def resume_scheduler_task(task_id: str):
 
 @app.get("/api/scheduler/executions")
 async def get_scheduler_executions(limit: int = 50):
-    """获取执行历史"""
+    """获取执行历史（读 ExecutionStore，不再经 SchedulerManager）。"""
     if app_state.execution_store is None:
         msg = "执行存储未初始化"
         app_state.send_log(msg)
@@ -1028,13 +1037,15 @@ async def get_scheduler_executions(limit: int = 50):
 
 
 class NativeDispatchRequest(BaseModel):
+    """native 二次进程移交请求：任务 id + 本机 token。"""
+
     task_id: str
     token: str
 
 
 @app.post("/api/internal/scheduler/native-dispatch")
 async def native_dispatch(body: NativeDispatchRequest):
-    """OS-native second process hands off to the running MWU instance."""
+    """OS native 二次进程把任务移交给已运行的 MWU 实例。"""
     if not app_state.native_token or body.token != app_state.native_token:
         return JSONResponse(
             status_code=401,

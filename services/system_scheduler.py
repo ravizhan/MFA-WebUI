@@ -1,8 +1,7 @@
 """
-SystemScheduler: stateless OS native wakeup materialization + startup convergence.
+系统计划任务入口：将 APS 期望集物化为 OS 原生唤醒注册。
 
-No JSON state, no asyncio lock, no compensation state machine.
-APS desired set (wakeup_enabled tasks) is the sole source of truth.
+无 JSON 状态、无锁、无补偿状态机；以 wakeup_enabled 任务列表为唯一真相源。
 """
 
 from __future__ import annotations
@@ -25,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ConvergeReport:
-    """Result of one converge() pass."""
+    """一次 converge() 的结果汇总。"""
 
     registered: list[str] = field(default_factory=list)
     unregistered: list[str] = field(default_factory=list)
@@ -33,7 +32,7 @@ class ConvergeReport:
 
 
 class SystemScheduler:
-    """Stateless adapter: ScheduledTask → OS native registration."""
+    """无状态适配器：ScheduledTask → OS 原生注册。"""
 
     def __init__(
         self,
@@ -48,21 +47,20 @@ class SystemScheduler:
         return self._backend
 
     def register(self, task: ScheduledTask) -> None:
-        """Parse cron and register with OS (create-or-update). Raises ValueError / RuntimeError."""
+        """解析 cron 并 create-or-update 注册到 OS。失败抛 ValueError / RuntimeError。"""
         spec = self._build_spec(task)
         self._backend.register(spec)
         logger.info("native register ok: %s", task.id)
 
     def unregister(self, task_id: str) -> None:
-        """Unregister OS native task. Propagates backend errors."""
+        """注销 OS 原生任务；后端错误原样向上抛。"""
         self._backend.unregister(task_id)
         logger.info("native unregister ok: %s", task_id)
 
     def converge(self, desired: list[ScheduledTask]) -> ConvergeReport:
-        """Materialize desired set: register each desired, unregister observed orphans.
+        """按期望集收敛：注册目标、清理孤儿。
 
-        Backend register is create-or-update. Exceptions are collected into
-        report.failed so one bad task does not abort the rest of startup converge.
+        单任务失败记入 report.failed，不中断其余项（启动收敛用）。
         """
         report = ConvergeReport()
         desired_by_id = {t.id: t for t in desired}
@@ -71,7 +69,7 @@ class SystemScheduler:
         try:
             observed = set(self._backend.list_registered_task_ids())
         except Exception as e:
-            # Cannot list → cannot safely unregister orphans; still try register each.
+            # 列表失败则无法安全删孤儿，仍尽量逐个注册
             logger.warning("list_registered_task_ids failed: %s", e)
             observed = set()
             report.failed.append(("*", f"list_registered_task_ids: {e}"))
