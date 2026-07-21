@@ -58,7 +58,7 @@
               class="hidden shrink-0 text-base md:block"
               aria-hidden="true"
             />
-            <span class="whitespace-nowrap">{{ section.label }}</span>
+            <span class="whitespace-nowrap text-base">{{ section.label }}</span>
           </button>
         </nav>
 
@@ -68,7 +68,7 @@
         >
           <!-- Basic info -->
           <fieldset v-if="activeSection === 'basic'" class="fieldset p-0">
-            <legend class="fieldset-legend flex items-center gap-1.5">
+            <legend class="fieldset-legend text-base font-medium flex items-center gap-1.5">
               <Icon icon="mdi:form-textbox" class="text-base opacity-70" aria-hidden="true" />
               {{ t("settings.scheduler.dialog.taskName") }}
             </legend>
@@ -82,7 +82,7 @@
           </fieldset>
 
           <fieldset v-if="activeSection === 'basic'" class="fieldset p-0">
-            <legend class="fieldset-legend flex items-center gap-1.5">
+            <legend class="fieldset-legend text-base font-medium flex items-center gap-1.5">
               <Icon icon="mdi:text" class="text-base opacity-70" aria-hidden="true" />
               {{ t("settings.scheduler.dialog.taskDesc") }}
             </legend>
@@ -96,7 +96,7 @@
 
           <!-- Schedule: trigger type -->
           <fieldset v-if="activeSection === 'schedule'" class="fieldset p-0">
-            <legend class="fieldset-legend flex items-center gap-1.5">
+            <legend class="fieldset-legend text-base font-medium flex items-center gap-1.5">
               <Icon icon="mdi:lightning-bolt" class="text-base opacity-70" aria-hidden="true" />
               {{ t("settings.scheduler.dialog.triggerType") }}
             </legend>
@@ -123,7 +123,7 @@
             v-if="activeSection === 'schedule' && currentTriggerType === 'cron'"
             class="fieldset p-0"
           >
-            <legend class="fieldset-legend">
+            <legend class="fieldset-legend text-base font-medium">
               {{ t("settings.scheduler.dialog.cronExpression") }}
             </legend>
             <input
@@ -160,11 +160,11 @@
             v-if="activeSection === 'schedule' && currentTriggerType === 'cron'"
             class="flex flex-col gap-1"
           >
-            <label class="flex cursor-pointer items-center gap-2">
+            <label class="flex cursor-pointer items-center gap-3">
               <input
                 v-model="wakeupEnabled"
                 type="checkbox"
-                class="checkbox checkbox-primary checkbox-sm"
+                class="toggle toggle-primary toggle-sm"
                 :disabled="!isNativeCronEligible(cronConfig.cron)"
               />
               <span class="text-sm">{{ t("settings.scheduler.dialog.runWhenClosed") }}</span>
@@ -182,7 +182,7 @@
             v-if="activeSection === 'schedule' && currentTriggerType === 'date'"
             class="fieldset p-0"
           >
-            <legend class="fieldset-legend">
+            <legend class="fieldset-legend text-base font-medium">
               {{ t("settings.scheduler.dialog.executionTime") }}
             </legend>
             <input
@@ -202,7 +202,7 @@
             v-if="activeSection === 'schedule' && currentTriggerType === 'interval'"
             class="fieldset p-0"
           >
-            <legend class="fieldset-legend">
+            <legend class="fieldset-legend text-base font-medium">
               {{ t("settings.scheduler.dialog.intervalTime") }}
             </legend>
             <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -289,7 +289,7 @@
             class="grid grid-cols-1 gap-3 sm:grid-cols-2"
           >
             <fieldset class="fieldset p-0">
-              <legend class="fieldset-legend">
+              <legend class="fieldset-legend text-base font-medium">
                 {{ t("settings.scheduler.dialog.startTime") }}
               </legend>
               <input
@@ -304,7 +304,7 @@
               />
             </fieldset>
             <fieldset class="fieldset p-0">
-              <legend class="fieldset-legend">
+              <legend class="fieldset-legend text-base font-medium">
                 {{ t("settings.scheduler.dialog.endTime") }}
               </legend>
               <input
@@ -322,24 +322,29 @@
 
           <!-- Environment -->
           <fieldset v-if="activeSection === 'environment'" class="fieldset p-0">
-            <legend class="fieldset-legend flex items-center gap-1.5">
+            <legend class="fieldset-legend text-base font-medium flex items-center gap-1.5">
               <Icon icon="mdi:gamepad-variant" class="text-base opacity-70" aria-hidden="true" />
               {{ t("settings.scheduler.dialog.controller") }}
             </legend>
             <select
               v-model="formData.controller_name"
               class="select select-bordered w-full"
-              :disabled="loadingDevices"
+              :disabled="loadingCapabilities || loadingDevices"
             >
-              <option value="">{{ t("panel.selectDeviceType") }}</option>
-              <option v-for="opt in deviceControllerOptions" :key="opt.value" :value="opt.value">
+              <option value="" disabled>{{ t("panel.selectDeviceType") }}</option>
+              <option
+                v-for="opt in deviceControllerOptions"
+                :key="opt.value"
+                :value="opt.value"
+                :disabled="opt.disabled"
+              >
                 {{ opt.label }}
               </option>
             </select>
           </fieldset>
 
           <fieldset v-if="activeSection === 'environment'" class="fieldset p-0">
-            <legend class="fieldset-legend flex items-center gap-1.5">
+            <legend class="fieldset-legend text-base font-medium flex items-center gap-1.5">
               <Icon icon="mdi:cellphone-link" class="text-base opacity-70" aria-hidden="true" />
               {{ t("settings.scheduler.dialog.deviceAddress") }}
             </legend>
@@ -351,21 +356,19 @@
               :placeholder="t('panel.playcoverAddress')"
               :disabled="!formData.controller_name"
             />
-            <select
+            <CreatableSelect
               v-else
-              v-model="selectedDeviceAddress"
-              class="select select-bordered w-full"
+              :model-value="selectedDeviceAddress"
+              :options="deviceAddressOptions"
+              :placeholder="t('panel.selectDevice')"
               :disabled="!formData.controller_name || loadingDevices"
-            >
-              <option value="">{{ t("panel.selectDevice") }}</option>
-              <option v-for="opt in deviceAddressOptions" :key="opt.value" :value="opt.value">
-                {{ opt.label }}
-              </option>
-            </select>
+              @update:model-value="selectedDeviceAddress = $event"
+              @create="handleCreateDeviceAddress"
+            />
           </fieldset>
 
           <fieldset v-if="activeSection === 'environment'" class="fieldset p-0">
-            <legend class="fieldset-legend flex items-center gap-1.5">
+            <legend class="fieldset-legend text-base font-medium flex items-center gap-1.5">
               <Icon icon="mdi:folder-cog" class="text-base opacity-70" aria-hidden="true" />
               {{ t("settings.scheduler.dialog.resource") }}
             </legend>
@@ -374,7 +377,7 @@
               class="select select-bordered w-full"
               :disabled="!formData.controller_name || loadingResources"
             >
-              <option value="">{{ t("panel.selectResource") }}</option>
+              <option value="" disabled>{{ t("panel.selectResource") }}</option>
               <option v-for="opt in resourceOptions" :key="opt.value" :value="opt.value">
                 {{ opt.label }}
               </option>
@@ -429,17 +432,17 @@
               <div v-if="activeTab === 'pre-tasks'">
                 <PreTaskList v-model="formData.preTasks" embedded />
               </div>
-              <div v-if="activeTab === 'task-list'">
+              <div v-if="activeTab === 'task-list'" class="shadow-sm max-h-70 overflow-y-auto rounded-lg border border-base-300">
                 <TaskSelectList
-                  :tasks="taskListData"
-                  :selected-tasks="formData.task_list"
-                  :controller-name="formData.controller_name"
-                  :resource-name="formData.resource_name"
-                  :hide-incompatible="true"
-                  @update:tasks="handleTasksUpdate"
-                  @update:selected-tasks="handleSelectedTasksUpdate"
-                  @config="openTaskSettings"
-                />
+                    :tasks="taskListData"
+                    :selected-tasks="formData.task_list"
+                    :controller-name="formData.controller_name"
+                    :resource-name="formData.resource_name"
+                    :hide-incompatible="true"
+                    @update:tasks="handleTasksUpdate"
+                    @update:selected-tasks="handleSelectedTasksUpdate"
+                    @config="openTaskSettings"
+                  />
               </div>
               <div v-if="activeTab === 'task-settings'">
                 <TaskOptionPanel
@@ -495,9 +498,14 @@ import type { TaskListItem } from "@/types/taskConfigModel"
 import TaskSelectList from "@/components/panel/task/TaskSelectList.vue"
 import TaskOptionPanel from "@/components/panel/task/TaskOptionPanel.vue"
 import PreTaskList from "@/components/panel/task/PreTaskList.vue"
+import CreatableSelect from "@/components/common/CreatableSelect.vue"
 import { resolveInterfaceText } from "@/utils/interface/content"
 import { getDevices, getResource } from "@/services/api"
-import type { ConnectableDevice, DeviceControllerType } from "@/services/api"
+import type {
+  ConnectableDevice,
+  DeviceControllerCapability,
+  DeviceControllerType,
+} from "@/services/api"
 import { buildDeviceLabel } from "@/utils/panel/device"
 import type { PanelLastConnectedDevice } from "@/types/settingsModel"
 import type {
@@ -544,8 +552,10 @@ const suppressFormInit = ref(false)
 
 const availableDevices = ref<ConnectableDevice[]>([])
 const availableResources = ref<Array<{ name: string; label?: string; controller?: string[] }>>([])
+const controllerCapabilities = ref<DeviceControllerCapability[]>([])
 const loadingDevices = ref(false)
 const loadingResources = ref(false)
+const loadingCapabilities = ref(false)
 
 const wakeupEnabled = ref(false)
 
@@ -553,14 +563,22 @@ const currentTriggerType = computed(() => formData.value.trigger_config.type)
 
 function setTriggerType(type: TriggerType) {
   formData.value.trigger_config = getTriggerConfigByType(type)
+  if (type !== "cron") {
+    wakeupEnabled.value = false
+  }
 }
 
+/** A cron part is an integer literal (not "*", lists, ranges, or steps). */
+function isSingleNumber(part: string): boolean {
+  return /^\d+$/.test(part)
+}
+
+/** A native-eligible cron is 5 single-number fields where minute is a number
+ *  and day-of-week/day-of-month are not both restricted. */
 function isNativeCronEligible(cron: string): boolean {
   const parts = cron.trim().split(/\s+/)
   if (parts.length !== 5) return false
-  for (const part of parts) {
-    if (part !== "*" && !/^\d+$/.test(part)) return false
-  }
+  if (!parts.every(isSingleNumber)) return false
   if (parts[0] === "*") return false
   if (parts[2] !== "*" && parts[4] !== "*") return false
   if (parts[4] !== "*" && (parts[2] !== "*" || parts[3] !== "*")) return false
@@ -652,16 +670,12 @@ const selectedControllerType = computed(() => {
 const isPlayCover = computed(() => selectedControllerType.value === "PlayCover")
 
 const deviceControllerOptions = computed(() =>
-  (interfaceStore.interface?.controller || [])
-    .filter((controller) => isDeviceControllerType(controller.type))
-    .map((controller) => ({
-      label: resolveInterfaceText(
-        interfaceStore.interface,
-        locale.value,
-        controller.label,
-        controller.name,
-      ),
-      value: controller.name,
+  controllerCapabilities.value
+    .filter((item) => isDeviceControllerType(item.type))
+    .map((item) => ({
+      label: item.display_label,
+      value: item.name,
+      disabled: !item.enabled,
     })),
 )
 
@@ -770,6 +784,7 @@ watch(
     }
     activeSection.value = "basic"
     wakeupEnabled.value = task?.wakeup_enabled === true
+    void fetchControllerCapabilities()
   },
 )
 
@@ -1066,6 +1081,15 @@ function buildStoredDeviceLabel(device: PanelLastConnectedDevice): string {
   return device.address
 }
 
+/** Handle user-typed custom device address from CreatableSelect's @create event. */
+function handleCreateDeviceAddress(rawAddress: string) {
+  const address = rawAddress.trim()
+  if (!address) {
+    return
+  }
+  selectedDeviceAddress.value = address
+}
+
 async function fetchDevices(controllerName: string) {
   loadingDevices.value = true
   const [data, err] = await tryCatch(() => getDevices(controllerName))
@@ -1088,6 +1112,18 @@ async function fetchResources(controllerType: string) {
     return
   }
   availableResources.value = data
+}
+
+async function fetchControllerCapabilities() {
+  loadingCapabilities.value = true
+  const [data, err] = await tryCatch(() => getDevices())
+  loadingCapabilities.value = false
+  if (err) {
+    console.error("Failed to fetch controller capabilities:", err)
+    controllerCapabilities.value = []
+    return
+  }
+  controllerCapabilities.value = data.controllers
 }
 
 function validateName(): boolean {
@@ -1175,6 +1211,35 @@ function validateInterval(): boolean {
   return true
 }
 
+function validateTriggerType(): boolean {
+  const triggerType = formData.value.trigger_config.type
+  if (triggerType !== "cron" && triggerType !== "date" && triggerType !== "interval") {
+    showGlobalMessage("error", t("settings.scheduler.rules.triggerTypeRequired"))
+    activeSection.value = "schedule"
+    return false
+  }
+  return true
+}
+
+function validateEnvironment(): boolean {
+  if (!formData.value.controller_name) {
+    showGlobalMessage("error", t("settings.scheduler.rules.controllerRequired"))
+    activeSection.value = "environment"
+    return false
+  }
+  if (!formData.value.device?.device_address) {
+    showGlobalMessage("error", t("settings.scheduler.rules.deviceAddressRequired"))
+    activeSection.value = "environment"
+    return false
+  }
+  if (!formData.value.resource_name) {
+    showGlobalMessage("error", t("settings.scheduler.rules.resourceRequired"))
+    activeSection.value = "environment"
+    return false
+  }
+  return true
+}
+
 function validateTaskList(): boolean {
   if (formData.value.task_list.length === 0) {
     showGlobalMessage("error", t("settings.scheduler.rules.taskListRequired"))
@@ -1189,6 +1254,9 @@ function validateForm(): boolean {
   if (!validateName()) {
     return false
   }
+  if (!validateTriggerType()) {
+    return false
+  }
   const trigger_type = formData.value.trigger_config.type
   if (trigger_type === "cron" && !validateCron()) {
     return false
@@ -1199,6 +1267,9 @@ function validateForm(): boolean {
   if (trigger_type === "interval" && !validateInterval()) {
     return false
   }
+  if (!validateEnvironment()) {
+    return false
+  }
   return validateTaskList()
 }
 
@@ -1207,7 +1278,8 @@ async function saveTaskPayload(): Promise<{ taskId: string; success: boolean }> 
     ...formData.value,
     ...configStore.buildExecutionPayload(formData.value.task_list, formData.value.task_options),
     preTasks: formData.value.preTasks ?? [],
-    wakeup_enabled: wakeupEnabled.value,
+    wakeup_enabled:
+      formData.value.trigger_config.type === "cron" ? wakeupEnabled.value : false,
   }
 
   if (isEditMode.value && task) {

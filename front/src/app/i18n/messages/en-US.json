@@ -96,7 +96,7 @@
       "noTasks": "No scheduled tasks",
       "trigger": "Trigger",
       "nextRun": "Next Run",
-      "history": "Execution History",
+      "execHistory": "Execution History",
       "noHistory": "No execution records",
       "deleteConfirm": "Are you sure you want to delete this task?",
       "deleted": "Task deleted",
@@ -173,18 +173,22 @@
           "environment": "Environment",
           "content": "Tasks"
         },
-        "runWhenClosed": "Run when MWU is closed",
+        "runWhenClosed": "Register as system scheduled task (runs after app closes)",
         "runWhenClosedIneligible": "Only available for single-value 5-field cron. Minute must be a number; day and day-of-week cannot both be restricted."
       },
       "rules": {
         "nameRequired": "Please enter task name",
         "nameLength": "Task name length must be 1-100 characters",
+        "triggerTypeRequired": "Please select trigger type",
         "cronRequired": "Please enter Cron expression",
         "cronInvalid": "Invalid Cron expression format",
         "dateRequired": "Please select execution time",
         "dateInPast": "Execution time cannot be in the past",
         "intervalRequired": "Interval must be greater than 0",
         "endBeforeStart": "End time cannot be earlier than start time",
+        "controllerRequired": "Please select controller type",
+        "deviceAddressRequired": "Please select device address",
+        "resourceRequired": "Please select resource",
         "taskListRequired": "Please select at least one task"
       },
       "origin": {

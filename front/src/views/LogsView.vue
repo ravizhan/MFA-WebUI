@@ -1,7 +1,7 @@
 <template>
   <div class="flex flex-col lg:flex-row gap-4 logs-view max-w-screen-xl mx-auto">
     <!-- Left: Monitoring (Live Preview) -->
-    <div class="flex-1 min-h-0 flex items-center justify-center">
+    <div class="flex-1 min-h-0 min-w-0 flex items-center justify-center">
       <div class="card bg-base-100 shadow-xl w-full">
         <div class="card-body p-4 flex flex-col">
           <!-- Header with controls -->
@@ -59,7 +59,7 @@
     </div>
 
     <!-- Right: Log Stream -->
-    <div class="flex-1 min-h-0">
+    <div class="flex-1 min-h-0 min-w-0">
       <div class="card bg-base-100 shadow-xl h-full logs-log-card">
         <div class="card-body p-4 h-full flex flex-col">
           <div class="flex items-center justify-between mb-3 shrink-0">
@@ -88,7 +88,7 @@
             ref="logContainer"
             class="flex-1 min-h-0 log-panel bg-base-200 rounded-xl p-4 overflow-y-auto"
           >
-            <pre v-if="log">{{ log }}</pre>
+            <pre v-if="log" class="max-w-full min-w-0">{{ log }}</pre>
             <div v-else class="text-center opacity-50 py-12">
               <Icon icon="mdi:text-box-outline" class="text-3xl mx-auto mb-2" />
               <p>{{ t("panel.empty") }}</p>
