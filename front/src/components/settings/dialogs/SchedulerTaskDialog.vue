@@ -568,17 +568,21 @@ function setTriggerType(type: TriggerType) {
   }
 }
 
-/** A cron part is an integer literal (not "*", lists, ranges, or steps). */
-function isSingleNumber(part: string): boolean {
-  return /^\d+$/.test(part)
+/** A cron part is an integer literal or "*". Lists, ranges, steps, and names
+ *  are rejected — mirrors services.native_cron._parse_field accept rules. */
+function isSingleNumberOrStar(part: string): boolean {
+  return part === "*" || /^\d+$/.test(part)
 }
 
-/** A native-eligible cron is 5 single-number fields where minute is a number
- *  and day-of-week/day-of-month are not both restricted. */
+/** A native-eligible cron has 5 fields, each either "*" or a single integer.
+ *  Minute must be a number; day-of-month and day-of-week must not both be
+ *  restricted; if day-of-week is restricted, day and month must be "*".
+ *  Mirrors services.native_cron.parse_native_cron — UI hint only; backend
+ *  also enforces numeric ranges. */
 function isNativeCronEligible(cron: string): boolean {
   const parts = cron.trim().split(/\s+/)
   if (parts.length !== 5) return false
-  if (!parts.every(isSingleNumber)) return false
+  if (!parts.every(isSingleNumberOrStar)) return false
   if (parts[0] === "*") return false
   if (parts[2] !== "*" && parts[4] !== "*") return false
   if (parts[4] !== "*" && (parts[2] !== "*" || parts[3] !== "*")) return false
