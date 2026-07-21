@@ -25,6 +25,7 @@ from scheduler_job_codec import (
     build_trigger,
     decode_job_to_scheduled_task,
     decode_pre_tasks_from_job_kwargs,
+    decode_scheduled_task_from_kwargs,
     decode_trigger,
     encode_execution_kwargs,
 )
@@ -32,42 +33,42 @@ from services.system_scheduler import SystemScheduler
 
 logger = logging.getLogger(__name__)
 
+# APS 持久化回调只能序列化全局可导入 callable；运行时绑定规范 AppState
+_callback_runtime_state: Any | None = None
+
+
+def _bind_callback_runtime(state: Any) -> None:
+    """绑定回调用的规范 AppState 引用（非所有权）。"""
+    global _callback_runtime_state
+    _callback_runtime_state = state
+
+
+def _clear_callback_runtime() -> None:
+    """关闭调度器时清空回调运行时引用。"""
+    global _callback_runtime_state
+    _callback_runtime_state = None
+
 
 async def scheduled_job_fired(**kwargs: Any) -> None:
-    """APS 任务入口：解码后交给 ExecutionCoordinator。
+    """APS 任务入口：从 kwargs 解码后交给 ExecutionCoordinator。
 
+    不 import main；不依赖 manager.get_task（DateTrigger 到期后 job 可能已删除）。
     wakeup 任务由系统原生调度负责，应用内触发直接跳过。
     """
-    try:
-        import main as main_mod
-    except Exception:
-        logger.error("scheduled_job_fired: 无法导入 main，跳过派发")
-        return
-
-    app_state = getattr(main_mod, "app_state", None)
+    app_state = _callback_runtime_state
     if app_state is None:
-        logger.error("scheduled_job_fired: app_state 不可用")
+        logger.error("scheduled_job_fired: 回调运行时 state 未绑定，跳过派发")
         return
 
     coordinator = getattr(app_state, "execution_coordinator", None)
-    manager = getattr(app_state, "scheduler_manager", None)
-    if coordinator is None or manager is None:
-        logger.error("scheduled_job_fired: coordinator/manager 未初始化，跳过")
-        return
-
-    task_id = kwargs.get("task_id")
-    if not isinstance(task_id, str) or not task_id:
-        logger.error("scheduled_job_fired: 缺少 task_id")
+    if coordinator is None:
+        logger.error("scheduled_job_fired: execution_coordinator 未初始化，跳过")
         return
 
     try:
-        task = await manager.get_task(task_id)
+        task = decode_scheduled_task_from_kwargs(kwargs)
     except Exception as e:
-        logger.error("scheduled_job_fired: 解码任务 %s 失败: %s", task_id, e)
-        return
-
-    if task is None:
-        logger.error("scheduled_job_fired: 任务不存在 %s", task_id)
+        logger.error("scheduled_job_fired: 解码 kwargs 失败: %s", e)
         return
 
     # 原生唤醒任务不在此路径执行，避免与 OS 调度重复派发
@@ -75,14 +76,14 @@ async def scheduled_job_fired(**kwargs: Any) -> None:
         logger.info(
             "scheduled_job_fired: skip in-app dispatch for wakeup task %s "
             "(native owns execution)",
-            task_id,
+            task.id,
         )
         return
 
     try:
         await coordinator.submit_scheduled(task, origin="in_app")
     except Exception as e:
-        logger.error("scheduled_job_fired: 提交执行失败 %s: %s", task_id, e)
+        logger.error("scheduled_job_fired: 提交执行失败 %s: %s", task.id, e)
 
 
 class SchedulerManager:
@@ -90,16 +91,22 @@ class SchedulerManager:
 
     def __init__(
         self,
+        state: Any,
         db_path: Path,
         system_scheduler: SystemScheduler | None = None,
     ) -> None:
+        # 构造契约：SchedulerManager(state, db_path, system_scheduler=None)
+        self._state = state
         self.scheduler: Optional[AsyncIOScheduler] = None
-        self._worker = None
         self._db_path = Path(db_path)
         self._system_scheduler = system_scheduler
+        # 构造时即绑定，供持久化 job 反序列化后回调使用
+        _bind_callback_runtime(state)
 
-    def set_worker(self, worker) -> None:
-        self._worker = worker
+    @property
+    def _worker(self):
+        """从规范 AppState 取 worker（main 不再单独 set_worker）。"""
+        return getattr(self._state, "worker", None)
 
     def set_system_scheduler(self, system_scheduler: SystemScheduler | None) -> None:
         """注入跨平台系统调度后端（可为空）。"""
@@ -107,6 +114,7 @@ class SchedulerManager:
 
     async def initialize(self, *, paused: bool = True) -> None:
         """启动 APS；db_path 由 main 注入，paused 时先不派发。"""
+        _bind_callback_runtime(self._state)
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         db_url = f"sqlite:///{self._db_path.resolve().as_posix()}"
         self.scheduler = AsyncIOScheduler(
@@ -131,11 +139,12 @@ class SchedulerManager:
             logger.info("调度器已恢复派发")
 
     async def shutdown(self) -> None:
-        """关闭 APS 并清空引用。"""
+        """关闭 APS 并清空回调运行时引用。"""
         if self.scheduler:
             self.scheduler.shutdown()
             logger.info("调度器已关闭")
             self.scheduler = None
+        _clear_callback_runtime()
 
     def _normalize_task_payload(
         self,
@@ -144,7 +153,8 @@ class SchedulerManager:
         pre_tasks: Any = None,
     ) -> tuple[list[str], TaskOptionsByTask, list]:
         """按 interface 规范化任务载荷；无 worker 时仅做去重。"""
-        if not self._worker or not getattr(self._worker, "interface", None):
+        worker = self._worker
+        if not worker or not getattr(worker, "interface", None):
             normalized_task_list: list[str] = []
             if isinstance(task_list, list):
                 seen_task_ids: set[str] = set()
@@ -161,7 +171,7 @@ class SchedulerManager:
         return normalize_task_execution_payload(
             task_list,
             task_options,
-            self._worker.interface,
+            worker.interface,
             pre_tasks,
         )
 
@@ -437,8 +447,9 @@ class SchedulerManager:
             raise
         except Exception as e:
             logger.error("更新任务失败: %s", e)
-            if self._worker:
-                self._worker.events.send_log(f"更新任务失败: {e}")
+            worker = self._worker
+            if worker:
+                worker.events.send_log(f"更新任务失败: {e}")
             return None
 
     async def delete_task(self, task_id: str) -> bool:
@@ -460,8 +471,9 @@ class SchedulerManager:
             if name == "JobLookupError" or "JobLookupError" in name:
                 return False
             logger.error("删除任务失败: %s", e)
-            if self._worker:
-                self._worker.events.send_log(f"删除任务失败: {e}")
+            worker = self._worker
+            if worker:
+                worker.events.send_log(f"删除任务失败: {e}")
             return False
 
     async def pause_task(self, task_id: str) -> bool:
@@ -481,8 +493,9 @@ class SchedulerManager:
             return True
         except Exception as e:
             logger.error("暂停任务失败: %s", e)
-            if self._worker:
-                self._worker.events.send_log(f"暂停任务失败: {e}")
+            worker = self._worker
+            if worker:
+                worker.events.send_log(f"暂停任务失败: {e}")
             return False
 
     async def resume_task(self, task_id: str) -> bool:
@@ -502,6 +515,7 @@ class SchedulerManager:
             return True
         except Exception as e:
             logger.error("恢复任务失败: %s", e)
-            if self._worker:
-                self._worker.events.send_log(f"恢复任务失败: {e}")
+            worker = self._worker
+            if worker:
+                worker.events.send_log(f"恢复任务失败: {e}")
             return False

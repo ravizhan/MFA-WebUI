@@ -1,4 +1,4 @@
-"""Focused tests for scheduler APS job encode/decode codec (Lane A)."""
+"""Focused tests for scheduler APS job encode/decode codec."""
 
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ from scheduler_job_codec import (
     compute_occurrence,
     decode_job_to_scheduled_task,
     decode_pre_tasks_from_job_kwargs,
+    decode_scheduled_task_from_kwargs,
     decode_trigger,
     encode_execution_kwargs,
 )
@@ -32,10 +33,29 @@ CANONICAL_PRE = [
 ]
 
 LOCAL_TZ = ZoneInfo("Asia/Shanghai")
+UTC = timezone.utc
 
 
 def _identity_normalize(task_list, task_options, pre_tasks):
     return list(task_list or []), dict(task_options or {}), list(pre_tasks or [])
+
+
+def _cron_fire_weekdays(cron: str, *, start: datetime, count: int = 14) -> list[str]:
+    """收集 cron 触发日的英文星期缩写，用于语义对比。"""
+    trigger = build_trigger(CronTriggerConfig(cron=cron), timezone=start.tzinfo)
+    fires: list[str] = []
+    last = None
+    cursor = start
+    for _ in range(count * 2):
+        nxt = trigger.get_next_fire_time(last, cursor)
+        if nxt is None:
+            break
+        fires.append(nxt.strftime("%a"))
+        last = nxt
+        cursor = nxt
+        if len(fires) >= count:
+            break
+    return fires
 
 
 # ---------------------------------------------------------------------------
@@ -109,7 +129,80 @@ def test_interval_trigger_round_trip_with_bounds():
 
 
 # ---------------------------------------------------------------------------
-# encode_execution_kwargs
+# DOW set expansion — semantic fire dates (not endpoint-only mapping)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("dow_expr", "expected_weekdays"),
+    [
+        # Unix 0-2 = Sun,Mon,Tue
+        ("0-2", {"Sun", "Mon", "Tue"}),
+        # Unix 5-7 = Fri,Sat,Sun (7→0)
+        ("5-7", {"Fri", "Sat", "Sun"}),
+        # Unix */2 = 0,2,4,6 = Sun,Tue,Thu,Sat
+        ("*/2", {"Sun", "Tue", "Thu", "Sat"}),
+    ],
+)
+def test_dow_set_expansion_semantic_fire_dates(
+    dow_expr: str, expected_weekdays: set[str]
+):
+    cron = f"0 12 * * {dow_expr}"
+    # 从周日开始收集两周触发日
+    start = datetime(2026, 7, 19, 0, 0, tzinfo=UTC)  # Sunday
+    fires = _cron_fire_weekdays(cron, start=start, count=14)
+    assert set(fires) == expected_weekdays
+    # 构建触发器本身不应因 6-1 之类非法 range 失败
+    trigger = build_trigger(CronTriggerConfig(cron=cron), timezone=UTC)
+    field_map = {f.name: str(f) for f in trigger.fields}
+    # 展开后应为逗号列表而非跨周非法 range
+    assert (
+        "-" not in field_map["day_of_week"] or field_map["day_of_week"].count("-") == 0
+    )
+
+
+def test_dow_0_2_not_endpoint_mapped_to_illegal_range():
+    """旧 endpoint 映射会把 0-2 变成 APS 6-1 并 ValueError。"""
+    trigger = build_trigger(CronTriggerConfig(cron="0 12 * * 0-2"), timezone=UTC)
+    field_map = {f.name: str(f) for f in trigger.fields}
+    # APS: Sun=6, Mon=0, Tue=1 → "0,1,6"
+    assert set(field_map["day_of_week"].split(",")) == {"0", "1", "6"}
+
+
+def test_dow_mixed_named_numeric_mon_and_zero():
+    """Unix mon,0 = Monday + Sunday；名称保留、数字映射为 APS 6。"""
+    cron = "0 12 * * mon,0"
+    start = datetime(2026, 7, 19, 0, 0, tzinfo=UTC)  # Sunday
+    fires = _cron_fire_weekdays(cron, start=start, count=14)
+    assert set(fires) == {"Mon", "Sun"}
+
+    trigger = build_trigger(CronTriggerConfig(cron=cron), timezone=UTC)
+    field_map = {f.name: str(f) for f in trigger.fields}
+    # mon 原样；Unix 0 → APS 6
+    parts = field_map["day_of_week"].split(",")
+    assert "mon" in parts
+    assert "6" in parts
+    # 旧逻辑整串透传 mon,0 在 APS 下只等于 Monday
+    assert set(fires) != {"Mon"}
+
+
+def test_dow_mixed_named_numeric_mon_and_range():
+    """Unix mon,0-2 = Monday + Sun/Mon/Tue → 语义为 Sun,Mon,Tue。"""
+    cron = "0 12 * * mon,0-2"
+    start = datetime(2026, 7, 19, 0, 0, tzinfo=UTC)
+    fires = _cron_fire_weekdays(cron, start=start, count=14)
+    assert set(fires) == {"Sun", "Mon", "Tue"}
+
+    trigger = build_trigger(CronTriggerConfig(cron=cron), timezone=UTC)
+    field_map = {f.name: str(f) for f in trigger.fields}
+    parts = field_map["day_of_week"].split(",")
+    assert "mon" in parts
+    # Unix 0-2 → APS 0,1,6
+    assert {"0", "1", "6"}.issubset(set(parts))
+
+
+# ---------------------------------------------------------------------------
+# encode_execution_kwargs + kwargs decoder
 # ---------------------------------------------------------------------------
 
 
@@ -137,6 +230,8 @@ def test_encode_execution_kwargs_pre_tasks_key_round_trip():
     assert "preTasks" not in kwargs
     assert kwargs["pre_tasks"][0]["command"] == "echo hi"
     assert kwargs["wakeup_enabled"] is False
+    assert kwargs["trigger_config"]["type"] == "cron"
+    assert kwargs["trigger_config"]["cron"] == "0 9 * * *"
 
     # decode path only reads pre_tasks
     assert decode_pre_tasks_from_job_kwargs(kwargs) == kwargs["pre_tasks"]
@@ -183,6 +278,51 @@ def test_encode_execution_kwargs_wakeup_cron_ok():
         trigger_config=CronTriggerConfig(cron="0 9 * * *"),
     )
     assert kwargs["wakeup_enabled"] is True
+    assert kwargs["trigger_config"]["cron"] == "0 9 * * *"
+
+
+def test_decode_scheduled_task_from_kwargs_complete():
+    run_date = datetime(2026, 7, 20, 15, 0, tzinfo=UTC)
+    kwargs = encode_execution_kwargs(
+        task_id="job-date",
+        task_name="once",
+        task_description="d",
+        task_list=["Main"],
+        task_options={"Main": {}},
+        pre_tasks=CANONICAL_PRE,
+        controller_name="ADB",
+        device={
+            "controller_name": "ADB",
+            "device_type": "Adb",
+            "device_address": "127.0.0.1:5555",
+        },
+        resource_name="Official",
+        wakeup_enabled=False,
+        trigger_config=DateTriggerConfig(run_date=run_date),
+    )
+    task = decode_scheduled_task_from_kwargs(kwargs)
+    assert task.id == "job-date"
+    assert task.name == "once"
+    assert isinstance(task.trigger_config, DateTriggerConfig)
+    assert task.trigger_config.run_date == run_date
+    assert task.device is not None
+    assert task.device.device_address == "127.0.0.1:5555"
+    assert len(task.preTasks) == 1
+    assert task.wakeup_enabled is False
+
+
+def test_decode_scheduled_task_from_kwargs_missing_trigger_raises():
+    with pytest.raises(SchedulerJobDecodeError, match="trigger_config"):
+        decode_scheduled_task_from_kwargs(
+            {
+                "task_id": "x",
+                "task_name": "n",
+                "task_list": ["Main"],
+                "task_options": {},
+                "pre_tasks": [],
+                "wakeup_enabled": False,
+            }
+        )
 
 
 def test_decode_job_to_scheduled_task_no_trigger_type_field():

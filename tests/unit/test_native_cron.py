@@ -16,7 +16,7 @@ from services.native_cron import (
 
 
 # ---------------------------------------------------------------------------
-# parse_native_cron — representative accept / reject
+# parse_native_cron — Windows-exact accept / reject
 # ---------------------------------------------------------------------------
 
 
@@ -50,6 +50,13 @@ def test_parse_accept(expr: str, expected: NativeCron):
         "0 9 * * 8",  # dow out of range
         "0 9 * *",  # not 5 fields
         "0 mon * * *",  # name token
+        # hour=* 却限制 day/month/dow → Windows HOURLY 会丢约束
+        "0 * 1 * *",
+        "0 * * * 1",
+        "0 * * 1 *",
+        # month 无 day → 会落成 DAILY 丢月份
+        "0 9 * 1 *",
+        "15 8 * 12 *",
     ],
 )
 def test_parse_reject(expr: str):
@@ -60,6 +67,18 @@ def test_parse_reject(expr: str):
 def test_parse_reject_messages_are_chinese():
     with pytest.raises(ValueError, match="minute") as ei:
         parse_native_cron("* 9 * * *")
+    assert any("\u4e00" <= ch <= "\u9fff" for ch in str(ei.value))
+
+
+def test_parse_reject_wildcard_hour_with_constraints_message():
+    with pytest.raises(ValueError, match="hour") as ei:
+        parse_native_cron("0 * 1 * *")
+    assert any("\u4e00" <= ch <= "\u9fff" for ch in str(ei.value))
+
+
+def test_parse_reject_month_without_day_message():
+    with pytest.raises(ValueError, match="month") as ei:
+        parse_native_cron("0 9 * 1 *")
     assert any("\u4e00" <= ch <= "\u9fff" for ch in str(ei.value))
 
 

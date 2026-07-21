@@ -631,9 +631,7 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
       return this.StartTask()
     },
 
-    resolveStartDevice():
-      | { ok: true; device: ConnectableDevice }
-      | { ok: false; message: string } {
+    resolveStartDevice(): { ok: true; device: ConnectableDevice } | { ok: false; message: string } {
       const t = i18n.global.t
       const selectedCapability = this.selectedControllerCapability
       if (!selectedCapability || this.selectedControllerDisabled) {
@@ -656,7 +654,6 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
 
     async StartTask(): Promise<boolean> {
       const t = i18n.global.t
-      const indexStore = useIndexStore()
       const interfaceStore = useInterfaceStore()
       const configStore = useTaskConfigStore()
 
@@ -703,7 +700,7 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
       const payload: ManualStartPayload = {
         task_list: execution.task_list,
         task_options: execution.task_options,
-        preTasks: [],
+        preTasks: execution.preTasks,
         controller_name: selectedCapability.name,
         device: {
           controller_name: selectedCapability.name,
@@ -716,7 +713,6 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
       const result = await startTask(payload)
       if (result.accepted) {
         this.startConflict = null
-        indexStore.setTaskRunning(true)
         return true
       }
       if (result.conflict) {

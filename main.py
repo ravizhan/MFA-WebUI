@@ -171,7 +171,7 @@ def ensure_native_token() -> str:
 def delegate_native_dispatch(task_id: str) -> int:
     """
     本实例抢锁失败时，将 native 唤醒委托给已运行实例。
-    约 30s 内重试；超时仍返回 0，避免 OS 调度器反复失败重试。
+    仅 2xx 视为成功；4xx/5xx/重试耗尽均返回 EXIT_DELEGATE_FAILED。
     """
     if not NATIVE_TOKEN_FILE.exists():
         print("native_token 不存在，无法委托", file=sys.stderr)
@@ -189,20 +189,21 @@ def delegate_native_dispatch(task_id: str) -> int:
         try:
             with httpx.Client(timeout=5.0) as client:
                 resp = client.post(url, json=payload)
-            if resp.status_code < 500:
-                # 2xx/4xx 表示对端已响应，不再重试
-                if resp.status_code >= 400:
-                    print(
-                        f"native-dispatch 响应 {resp.status_code}: {resp.text}",
-                        file=sys.stderr,
-                    )
+            # 2xx 成功；4xx 不重试；5xx 继续重试
+            if 200 <= resp.status_code < 300:
                 return EXIT_SUCCESS
+            if 400 <= resp.status_code < 500:
+                print(
+                    f"native-dispatch 响应 {resp.status_code}: {resp.text}",
+                    file=sys.stderr,
+                )
+                return EXIT_DELEGATE_FAILED
             last_err = f"HTTP {resp.status_code}"
         except Exception as e:
             last_err = str(e)
         time.sleep(2.0)
     print(f"native-dispatch 委托失败（已重试）: {last_err}", file=sys.stderr)
-    return EXIT_SUCCESS
+    return EXIT_DELEGATE_FAILED
 
 
 @asynccontextmanager
@@ -232,11 +233,12 @@ async def lifespan(app: FastAPI):
     app_state.system_scheduler = SystemScheduler(APP_ROOT_DIR)
 
     # APS 先暂停，等 OS 注册 converge 完成后再 resume，避免竞态
+    # 构造契约：SchedulerManager(state, db_path, system_scheduler=None)
     app_state.scheduler_manager = SchedulerManager(
+        app_state,
         SCHEDULER_DB_PATH,
         system_scheduler=app_state.system_scheduler,
     )
-    app_state.scheduler_manager.set_worker(app_state.worker)
     await app_state.scheduler_manager.initialize(paused=True)
 
     # 将 OS 注册收敛到 APS 期望集合（enabled + wakeup_enabled）
@@ -271,6 +273,12 @@ async def lifespan(app: FastAPI):
                         f"启动参数 --scheduled-task 任务不存在: {pending_id}"
                     )
                     return
+                # 冷启动 native 仅接受 enabled + wakeup_enabled
+                if not task.enabled or not task.wakeup_enabled:
+                    app_state.send_log(
+                        f"启动参数 --scheduled-task 任务未启用原生唤醒: {pending_id}"
+                    )
+                    return
                 await app_state.execution_coordinator.submit_scheduled(
                     task, origin="native"
                 )
@@ -282,15 +290,35 @@ async def lifespan(app: FastAPI):
     monitor_task = asyncio.create_task(log_monitor())
     webbrowser.open_new("http://127.0.0.1:5566")
     yield
+    await teardown_runtime(monitor_task)
+
+
+async def teardown_runtime(monitor_task: asyncio.Task) -> None:
+    """
+    正常关闭顺序：停调度器 → 等待活跃执行落库清理 → worker → log_monitor。
+    运行时锁在 finally 中释放，避免中途异常泄漏。
+    """
     app_state.is_shutting_down = True
-    monitor_task.cancel()
-    with suppress(asyncio.CancelledError):
-        await monitor_task
-    if app_state.worker:
-        app_state.worker.shutdown()
-    if app_state.scheduler_manager:
-        await app_state.scheduler_manager.shutdown()
-    release_runtime_ownership()
+    try:
+        # 1. 先停 APS，阻止新的 scheduled 回调入场
+        if app_state.scheduler_manager is not None:
+            await app_state.scheduler_manager.shutdown()
+
+        # 2. 有活跃执行则请求停止并等待后台完成协程（含 store.finish / 清槽）
+        coordinator = app_state.execution_coordinator
+        if coordinator is not None and coordinator.active_run() is not None:
+            await coordinator.stop_active()
+
+        # 3. 执行结束后再关 worker
+        if app_state.worker is not None:
+            app_state.worker.shutdown()
+
+        # 4. 最后停日志监视
+        monitor_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await monitor_task
+    finally:
+        release_runtime_ownership()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -664,8 +692,8 @@ async def perform_update():
             app_state.send_log(msg)
             return {"status": "failed", "message": msg}
 
-        if coordinator is not None:
-            coordinator.set_update_in_progress()
+        # 直接持有更新闸门；普通失败释放，code 10 / 成功 0 保持
+        app_state.update_in_progress = True
 
         update_package_path = app_state.update_info["file_name"]
         download_url = app_state.update_info["download_url"]
@@ -697,6 +725,7 @@ async def perform_update():
                     if sha256_hash != file_hash:
                         raise ValueError("文件哈希校验失败，下载的文件可能已损坏。")
         except Exception as e:
+            app_state.update_in_progress = False
             msg = f"下载失败: {e}"
             app_state.send_log(msg)
             app_state.update_status = {"status": "failed", "message": msg}
@@ -738,6 +767,7 @@ async def perform_update():
                             except json.JSONDecodeError:
                                 pass
                 except Exception as e:
+                    app_state.update_in_progress = False
                     msg = f"启动更新器失败: {e}"
                     app_state.send_log(msg)
                     app_state.update_status = {
@@ -749,24 +779,27 @@ async def perform_update():
                 process.wait()
 
                 if process.returncode == 10:
+                    # 自更新交接：保持闸门
                     app_state.update_status = {
                         "status": "updating",
                         "message": "更新器自更新完成，正在重启更新器...",
                     }
                     continue
-                else:
-                    if process.returncode != 0:
-                        msg = f"更新器异常退出: {process.returncode}，请查看updater.log"
-                        app_state.send_log(msg)
-                        app_state.update_status = {
-                            "status": "failed",
-                            "message": msg,
-                        }
-                    break
+                if process.returncode != 0:
+                    app_state.update_in_progress = False
+                    msg = f"更新器异常退出: {process.returncode}，请查看updater.log"
+                    app_state.send_log(msg)
+                    app_state.update_status = {
+                        "status": "failed",
+                        "message": msg,
+                    }
+                # returncode == 0：成功交接，保持 update_in_progress
+                break
 
         threading.Thread(target=run_updater_loop, daemon=True).start()
         return {"status": "success", "message": "正在后台更新程序..."}
     except Exception as e:
+        app_state.update_in_progress = False
         msg = str(e)
         app_state.send_log(f"更新失败: {msg}")
         app_state.update_status = {"status": "failed", "message": msg}
@@ -1055,9 +1088,7 @@ async def native_dispatch(body: NativeDispatchRequest):
             content={"status": "failed", "message": "invalid token"},
         )
     if app_state.scheduler_manager is None or app_state.execution_coordinator is None:
-        app_state.send_log(
-            f"native-dispatch 拒绝 task_id={body.task_id}：调度器未就绪"
-        )
+        app_state.send_log(f"native-dispatch 拒绝 task_id={body.task_id}：调度器未就绪")
         return JSONResponse(
             status_code=503,
             content={"status": "failed", "message": "scheduler not ready"},
@@ -1070,6 +1101,19 @@ async def native_dispatch(body: NativeDispatchRequest):
         return JSONResponse(
             status_code=404,
             content={"status": "failed", "message": "task not found"},
+        )
+    # HTTP native 仅接受 enabled + wakeup_enabled；否则扁平 409
+    if not task.enabled or not task.wakeup_enabled:
+        app_state.send_log(
+            f"native-dispatch 拒绝 task_id={body.task_id}："
+            f"enabled={task.enabled} wakeup_enabled={task.wakeup_enabled}"
+        )
+        return JSONResponse(
+            status_code=409,
+            content={
+                "status": "failed",
+                "message": "task not enabled for native wakeup",
+            },
         )
     admission = await app_state.execution_coordinator.submit_scheduled(
         task, origin="native"

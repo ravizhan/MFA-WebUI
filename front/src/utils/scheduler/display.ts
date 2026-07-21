@@ -93,23 +93,23 @@ export function getStatusType(
 export function getStatusIcon(status: ExecutionStatus): string {
   switch (status) {
     case "success":
-      return "i-mdi-check-circle"
+      return "mdi:check-circle"
     case "failed":
-      return "i-mdi-close-circle"
+      return "mdi:close-circle"
     case "running":
-      return "i-mdi-loading"
+      return "mdi:loading"
     case "stopped":
-      return "i-mdi-pause-circle"
+      return "mdi:pause-circle"
     case "skipped_busy_manual":
-      return "i-mdi-account-alert"
+      return "mdi:account-alert"
     case "skipped_busy_scheduled":
-      return "i-mdi-calendar-alert"
+      return "mdi:calendar-alert"
     case "skipped_update_in_progress":
-      return "i-mdi-update"
+      return "mdi:update"
     case "missed_deadline":
-      return "i-mdi-clock-alert"
+      return "mdi:clock-alert"
     default:
-      return "i-mdi-help-circle"
+      return "mdi:help-circle"
   }
 }
 

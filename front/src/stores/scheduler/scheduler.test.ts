@@ -154,18 +154,49 @@ describe("useSchedulerStore", () => {
   })
 
   describe("toggleTask", () => {
-    it("enables via resume and disables via pause", async () => {
+    it("enables via resume and disables via pause, then refetches tasks", async () => {
       vi.mocked(api.resumeSchedulerTask).mockResolvedValue({ status: "success" })
       vi.mocked(api.pauseSchedulerTask).mockResolvedValue({ status: "success" })
+      vi.mocked(api.getSchedulerTasks)
+        .mockResolvedValueOnce({ status: "success", tasks: [mockTask("1", true)] })
+        .mockResolvedValueOnce({ status: "success", tasks: [mockTask("1", false)] })
       const store = useSchedulerStore()
       store.tasks = [mockTask("1", false)]
 
       expect(await store.toggleTask("1", true)).toBe(true)
       expect(api.resumeSchedulerTask).toHaveBeenCalledWith("1")
+      expect(api.getSchedulerTasks).toHaveBeenCalledTimes(1)
       expect(store.tasks[0].enabled).toBe(true)
 
       expect(await store.toggleTask("1", false)).toBe(true)
       expect(api.pauseSchedulerTask).toHaveBeenCalledWith("1")
+      expect(api.getSchedulerTasks).toHaveBeenCalledTimes(2)
+      expect(store.tasks[0].enabled).toBe(false)
+    })
+
+    it("returns false and sets error on toggle failure without refetching", async () => {
+      vi.mocked(api.resumeSchedulerTask).mockResolvedValue({
+        status: "failed",
+        message: "resume failed",
+      })
+      const store = useSchedulerStore()
+      store.tasks = [mockTask("1", false)]
+
+      expect(await store.toggleTask("1", true)).toBe(false)
+      expect(store.error).toBe("resume failed")
+      expect(api.getSchedulerTasks).not.toHaveBeenCalled()
+    })
+
+    it("leaves prior state when toggle succeeds but refetch fails", async () => {
+      vi.mocked(api.resumeSchedulerTask).mockResolvedValue({ status: "success" })
+      vi.mocked(api.getSchedulerTasks).mockRejectedValueOnce(new Error("network"))
+      const store = useSchedulerStore()
+      store.tasks = [mockTask("1", false)]
+
+      expect(await store.toggleTask("1", true)).toBe(true)
+      expect(api.resumeSchedulerTask).toHaveBeenCalledWith("1")
+      expect(api.getSchedulerTasks).toHaveBeenCalledTimes(1)
+      expect(store.error).toBe("网络错误，请稍后重试")
       expect(store.tasks[0].enabled).toBe(false)
     })
   })

@@ -200,7 +200,7 @@
         "runsWhenClosed": "关闭后执行"
       },
       "history": {
-        "skippedBy": "已跳过：{origin} 任务「{name}」正在运行"
+        "skippedBy": "已跳过：任务「{name}」正在运行"
       },
       "conflict": {
         "title": "已有任务在运行",

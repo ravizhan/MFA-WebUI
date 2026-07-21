@@ -70,7 +70,7 @@ class Admission:
 
 
 class ExecutionCoordinator:
-    """调度执行编排：入场裁决、状态推进、与 ExecutionStore 交互。"""
+    """调度执行编排：入场裁决、后台完成、与 ExecutionStore 交互。"""
 
     def __init__(self, state: AppState, store: ExecutionStore) -> None:
         self._state = state
@@ -78,9 +78,6 @@ class ExecutionCoordinator:
 
     def active_run(self) -> ActiveRun | None:
         return self._state.active_run
-
-    def set_update_in_progress(self) -> None:
-        self._state.update_in_progress = True
 
     def _conflict_for_active(self, active: ActiveRun) -> StartConflict:
         if active.origin == "manual":
@@ -107,8 +104,85 @@ class ExecutionCoordinator:
             active_origin=active.origin if active else "manual",
         )
 
+    def _is_stop_requested(self, run_id: str) -> bool:
+        active = self._state.active_run
+        return (
+            active is not None
+            and active.run_id == run_id
+            and active.stop_requested
+        )
+
+    def _spawn_completion(
+        self,
+        *,
+        run_id: str,
+        task_list: list[str],
+        task_options: TaskOptionsByTask,
+        pre_tasks: Any,
+        controller_name: str | None,
+        device: ScheduledTaskDeviceConfig | dict[str, Any] | None,
+        resource_name: str | None,
+        log_label: str,
+    ) -> None:
+        """创建并保留后台完成协程；入场路径立即返回。"""
+        task = asyncio.create_task(
+            self._complete_run(
+                run_id=run_id,
+                task_list=task_list,
+                task_options=task_options,
+                pre_tasks=pre_tasks,
+                controller_name=controller_name,
+                device=device,
+                resource_name=resource_name,
+                log_label=log_label,
+            )
+        )
+        self._state.active_execution_task = task
+
+    async def _complete_run(
+        self,
+        *,
+        run_id: str,
+        task_list: list[str],
+        task_options: TaskOptionsByTask,
+        pre_tasks: Any,
+        controller_name: str | None,
+        device: ScheduledTaskDeviceConfig | dict[str, Any] | None,
+        resource_name: str | None,
+        log_label: str,
+    ) -> None:
+        """后台完成：prepare/run → finish → 无条件清理 active 槽位。"""
+        try:
+            try:
+                status, error = await self._prepare_and_run(
+                    task_list=task_list,
+                    task_options=task_options,
+                    pre_tasks=pre_tasks,
+                    controller_name=controller_name,
+                    device=device,
+                    resource_name=resource_name,
+                    run_id=run_id,
+                    log_label=log_label,
+                )
+                await asyncio.to_thread(self._store.finish, run_id, status, error)
+            except Exception as e:
+                logger.error("任务 %s 后台完成失败: %s", log_label, e)
+                try:
+                    await asyncio.to_thread(
+                        self._store.finish, run_id, "failed", str(e)
+                    )
+                except Exception as finish_err:
+                    logger.error(
+                        "任务 %s 写入失败状态异常: %s", log_label, finish_err
+                    )
+        finally:
+            if self._state.active_run and self._state.active_run.run_id == run_id:
+                self._state.active_run = None
+            if self._state.active_execution_task is asyncio.current_task():
+                self._state.active_execution_task = None
+
     async def submit_manual(self, payload: ManualStartPayload) -> Admission:
-        """手动启动：忙/更新中直接冲突；否则占 active_run 并执行。"""
+        """手动启动：准入后立即返回；实际执行在后台完成协程中。"""
         run_id = str(uuid.uuid4())
         if self._state.update_in_progress:
             return Admission(accepted=False, conflict=self._update_conflict())
@@ -125,40 +199,40 @@ class ExecutionCoordinator:
         )
 
         now = _utc_now()
-        await asyncio.to_thread(
-            self._store.add,
-            TaskExecution(
-                id=run_id,
-                task_id=None,
-                task_name=MANUAL_TASK_NAME,
-                origin="manual",
-                status="running",
-                started_at=now,
-            ),
-        )
         try:
-            status, error = await self._prepare_and_run(
-                task_list=payload.task_list,
-                task_options=payload.task_options,
-                pre_tasks=payload.preTasks,
-                controller_name=payload.controller_name,
-                device=payload.device,
-                resource_name=payload.resource_name,
-                run_id=run_id,
-                log_label=MANUAL_TASK_NAME,
+            await asyncio.to_thread(
+                self._store.add,
+                TaskExecution(
+                    id=run_id,
+                    task_id=None,
+                    task_name=MANUAL_TASK_NAME,
+                    origin="manual",
+                    status="running",
+                    started_at=now,
+                ),
             )
-            await asyncio.to_thread(self._store.finish, run_id, status, error)
-            return Admission(accepted=True, run_id=run_id)
-        finally:
-            if self._state.active_run and self._state.active_run.run_id == run_id:
-                self._state.active_run = None
+        except Exception:
+            self._state.active_run = None
+            raise
+
+        self._spawn_completion(
+            run_id=run_id,
+            task_list=payload.task_list,
+            task_options=payload.task_options,
+            pre_tasks=payload.preTasks,
+            controller_name=payload.controller_name,
+            device=payload.device,
+            resource_name=payload.resource_name,
+            log_label=MANUAL_TASK_NAME,
+        )
+        return Admission(accepted=True, run_id=run_id)
 
     async def submit_scheduled(
         self,
         task: ScheduledTask,
         origin: Literal["in_app", "native"],
     ) -> Admission:
-        """定时/原生唤醒入场：计算 occurrence，超时/忙碌记 skip，否则执行。"""
+        """定时/原生唤醒入场：超时/忙碌记 skip，否则占槽并后台执行。"""
         now_local = _local_now()
         now_utc = _utc_now()
         scheduled_for = compute_occurrence(task.trigger_config, now_local)
@@ -234,44 +308,48 @@ class ExecutionCoordinator:
                 skip_status=skip_status,
             )
 
-        await asyncio.to_thread(
-            self._store.add,
-            TaskExecution(
-                id=run_id,
-                task_id=task.id,
-                task_name=task.name,
-                origin=origin,
-                occurrence_id=occurrence_id,
-                scheduled_for=scheduled_for_utc,
-                status="running",
-                started_at=_utc_now(),
-            ),
-        )
         try:
-            status, error = await self._prepare_and_run(
-                task_list=task.task_list,
-                task_options=task.task_options,
-                pre_tasks=task.preTasks,
-                controller_name=task.controller_name,
-                device=task.device,
-                resource_name=task.resource_name,
-                run_id=run_id,
-                log_label=task.id,
+            await asyncio.to_thread(
+                self._store.add,
+                TaskExecution(
+                    id=run_id,
+                    task_id=task.id,
+                    task_name=task.name,
+                    origin=origin,
+                    occurrence_id=occurrence_id,
+                    scheduled_for=scheduled_for_utc,
+                    status="running",
+                    started_at=_utc_now(),
+                ),
             )
-            await asyncio.to_thread(self._store.finish, run_id, status, error)
-            return Admission(accepted=True, run_id=run_id)
-        finally:
-            if self._state.active_run and self._state.active_run.run_id == run_id:
-                self._state.active_run = None
+        except Exception:
+            self._state.active_run = None
+            raise
+
+        self._spawn_completion(
+            run_id=run_id,
+            task_list=task.task_list,
+            task_options=task.task_options,
+            pre_tasks=task.preTasks,
+            controller_name=task.controller_name,
+            device=task.device,
+            resource_name=task.resource_name,
+            log_label=task.id,
+        )
+        return Admission(accepted=True, run_id=run_id)
 
     async def stop_active(self) -> bool:
-        """请求停止当前活跃任务。"""
-        if self._state.active_run is None:
+        """请求停止并等待后台完成协程清理 active 槽位。"""
+        active = self._state.active_run
+        if active is None:
             return False
+        active.stop_requested = True
         worker = self._state.worker
-        if worker is None:
-            return False
-        worker.tasks.stop()
+        completion = self._state.active_execution_task
+        if worker is not None:
+            await asyncio.to_thread(worker.tasks.stop)
+        if completion is not None:
+            await completion
         return True
 
     def _normalize_task_payload(
@@ -315,11 +393,13 @@ class ExecutionCoordinator:
         log_label: str,
     ) -> tuple[str, str | None]:
         """连接设备 → 启动任务 → 轮询结束；返回 (status, error_message)，不碰 ActiveRun。"""
-        del run_id  # 预留给后续关联/日志
         worker = self._state.worker
         if not worker:
             logger.error("Worker 未就绪，无法执行任务 %s", log_label)
             return "failed", "Worker 未就绪"
+
+        if self._is_stop_requested(run_id):
+            return "stopped", "任务已终止"
 
         device_dict = _device_as_dict(device)
         device_state = self._state.device
@@ -339,6 +419,9 @@ class ExecutionCoordinator:
                     else [],
                 )
                 return "failed", "设备或资源配置缺失"
+
+            if self._is_stop_requested(run_id):
+                return "stopped", "任务已终止"
 
             # 已锁定且控制器/资源匹配则可复用连接
             device_controller_name = (
@@ -368,6 +451,8 @@ class ExecutionCoordinator:
 
                 connect_success = False
                 for attempt in range(1, max_retry + 1):
+                    if self._is_stop_requested(run_id):
+                        return "stopped", "任务已终止"
                     try:
                         connected = await asyncio.to_thread(
                             worker.device.connect, device_model
@@ -393,6 +478,8 @@ class ExecutionCoordinator:
                             )
 
                 if not connect_success:
+                    if self._is_stop_requested(run_id):
+                        return "stopped", "任务已终止"
                     _settings = load_settings()
                     worker.events.send_notification(
                         "连接失败",
@@ -406,11 +493,17 @@ class ExecutionCoordinator:
                     await asyncio.to_thread(worker.device.reset_connection_state)
                     return "failed", "设备连接失败"
 
+            if self._is_stop_requested(run_id):
+                return "stopped", "任务已终止"
+
             normalized_task_list, normalized_task_options, normalized_pre_tasks = (
                 self._normalize_task_payload(task_list, task_options, pre_tasks)
             )
             if not normalized_task_list:
                 return "failed", "任务列表为空"
+
+            if self._is_stop_requested(run_id):
+                return "stopped", "任务已终止"
 
             if not worker.tasks.start(
                 normalized_task_list,

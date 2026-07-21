@@ -62,6 +62,7 @@ import SchedulerTaskDialog from "@/components/settings/dialogs/SchedulerTaskDial
 import SchedulerTaskList from "@/components/settings/scheduler/SchedulerTaskList.vue"
 import SchedulerExecutionHistory from "@/components/settings/scheduler/SchedulerExecutionHistory.vue"
 import { useSchedulerStore } from "@/stores"
+import { showGlobalMessage } from "@/services/feedback/message"
 import type { ScheduledTask } from "@/types/schedulerModel"
 
 const { t } = useI18n()
@@ -86,14 +87,20 @@ function openEditTaskDialog(task: ScheduledTask) {
 }
 
 async function handleToggleTask(taskId: string, enabled: boolean) {
-  await schedulerStore.toggleTask(taskId, enabled)
+  const success = await schedulerStore.toggleTask(taskId, enabled)
+  if (!success) {
+    showGlobalMessage("error", schedulerStore.error || t("common.fail"))
+  }
 }
 
 async function handleDeleteTask(taskId: string) {
   if (!confirm(t("settings.scheduler.deleteConfirm"))) {
     return
   }
-  await schedulerStore.deleteTask(taskId)
+  const success = await schedulerStore.deleteTask(taskId)
+  if (!success) {
+    showGlobalMessage("error", schedulerStore.error || t("common.fail"))
+  }
 }
 
 function handleTaskSaved() {

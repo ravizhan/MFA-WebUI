@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -79,6 +80,13 @@ def _fake_worker():
         events=events,
         interface=None,
     )
+
+
+async def _await_completion(state: AppState) -> None:
+    """等待后台完成协程清理 active 槽位。"""
+    task = state.active_execution_task
+    if task is not None:
+        await task
 
 
 @pytest.fixture
@@ -193,9 +201,9 @@ async def test_two_scheduled_different_tasks_skipped_busy_scheduled(
 
 @pytest.mark.asyncio
 async def test_update_gate_manual_conflict_and_scheduled_skip(
-    coord: ExecutionCoordinator, store: ExecutionStore
+    coord: ExecutionCoordinator, state: AppState, store: ExecutionStore
 ):
-    coord.set_update_in_progress()
+    state.update_in_progress = True
 
     manual = await coord.submit_manual(_manual_payload())
     assert manual.accepted is False
@@ -212,12 +220,59 @@ async def test_update_gate_manual_conflict_and_scheduled_skip(
 
 
 @pytest.mark.asyncio
+async def test_manual_admission_immediate_while_execution_active(
+    coord: ExecutionCoordinator, state: AppState, store: ExecutionStore, monkeypatch
+):
+    """入场立即返回；执行仍在后台活跃时可再次冲突。"""
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_prepare(**kwargs):
+        del kwargs
+        started.set()
+        await release.wait()
+        return "success", None
+
+    monkeypatch.setattr(coord, "_prepare_and_run", slow_prepare)
+
+    result = await coord.submit_manual(_manual_payload())
+    assert result.accepted is True
+    assert result.run_id is not None
+    await asyncio.wait_for(started.wait(), timeout=1.0)
+    assert state.active_run is not None
+    assert state.active_run.run_id == result.run_id
+    assert state.active_execution_task is not None
+    assert not state.active_execution_task.done()
+
+    # 执行中写入 running 行
+    rows = store.list()
+    assert len(rows) == 1
+    assert rows[0].status == "running"
+
+    # 二次入场冲突
+    conflict = await coord.submit_manual(_manual_payload())
+    assert conflict.accepted is False
+    assert conflict.conflict is not None
+    assert conflict.conflict.code == "busy_manual"
+
+    release.set()
+    await _await_completion(state)
+    assert state.active_run is None
+    assert state.active_execution_task is None
+    rows = store.list()
+    assert len(rows) == 1
+    assert rows[0].status == "success"
+    assert rows[0].finished_at is not None
+
+
+@pytest.mark.asyncio
 async def test_manual_success_writes_origin_manual(
-    coord: ExecutionCoordinator, store: ExecutionStore, worker
+    coord: ExecutionCoordinator, state: AppState, store: ExecutionStore, worker
 ):
     result = await coord.submit_manual(_manual_payload())
     assert result.accepted is True
     assert result.run_id is not None
+    await _await_completion(state)
     rows = store.list()
     assert len(rows) == 1
     assert rows[0].origin == "manual"
@@ -227,6 +282,23 @@ async def test_manual_success_writes_origin_manual(
     assert rows[0].finished_at is not None
     worker.tasks.start.assert_called_once()
     assert coord.active_run() is None
+    assert state.active_execution_task is None
+
+
+@pytest.mark.asyncio
+async def test_store_add_failure_clears_active_run(
+    coord: ExecutionCoordinator, state: AppState, store: ExecutionStore, monkeypatch
+):
+    """store.add 失败时清 active_run 并向上抛出。"""
+
+    def boom(*_args, **_kwargs):
+        raise RuntimeError("db write failed")
+
+    monkeypatch.setattr(store, "add", boom)
+    with pytest.raises(RuntimeError, match="db write failed"):
+        await coord.submit_manual(_manual_payload())
+    assert state.active_run is None
+    assert state.active_execution_task is None
 
 
 @pytest.mark.asyncio
@@ -263,22 +335,84 @@ async def test_native_late_missed_deadline(
 
 
 @pytest.mark.asyncio
-async def test_stop_active_calls_worker_stop(
-    coord: ExecutionCoordinator, state: AppState, worker
+async def test_stop_active_waits_then_restart_possible(
+    coord: ExecutionCoordinator, state: AppState, worker, monkeypatch
+):
+    """stop 等待后台清理完成后可再次启动。"""
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_prepare(**kwargs):
+        del kwargs
+        started.set()
+        await release.wait()
+        return "stopped", "任务已终止"
+
+    monkeypatch.setattr(coord, "_prepare_and_run", slow_prepare)
+
+    first = await coord.submit_manual(_manual_payload())
+    assert first.accepted is True
+    await asyncio.wait_for(started.wait(), timeout=1.0)
+
+    async def release_soon():
+        await asyncio.sleep(0.05)
+        release.set()
+
+    asyncio.create_task(release_soon())
+    stopped = await coord.stop_active()
+    assert stopped is True
+    worker.tasks.stop.assert_called_once()
+    assert state.active_run is None
+    assert state.active_execution_task is None
+
+    # 清理后可再次入场
+    second = await coord.submit_manual(_manual_payload())
+    assert second.accepted is True
+    await _await_completion(state)
+    assert state.active_run is None
+
+
+@pytest.mark.asyncio
+async def test_stop_during_prepare_returns_stopped(
+    coord: ExecutionCoordinator,
+    state: AppState,
+    store: ExecutionStore,
+    worker,
+    monkeypatch,
+):
+    """prepare 阶段 stop_requested 则返回 stopped，不启动任务。"""
+    original_prepare = coord._prepare_and_run
+
+    async def prepare_with_stop(**kwargs):
+        # 模拟 setup 中途被 stop
+        active = state.active_run
+        assert active is not None
+        active.stop_requested = True
+        return await original_prepare(**kwargs)
+
+    monkeypatch.setattr(coord, "_prepare_and_run", prepare_with_stop)
+
+    result = await coord.submit_manual(_manual_payload())
+    assert result.accepted is True
+    await _await_completion(state)
+    rows = store.list()
+    assert len(rows) == 1
+    assert rows[0].status == "stopped"
+    # 因 stop 在 start 前返回，tasks.start 不应被调用
+    worker.tasks.start.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_stop_active_no_run_returns_false(
+    coord: ExecutionCoordinator, worker
 ):
     assert await coord.stop_active() is False
     worker.tasks.stop.assert_not_called()
 
-    state.active_run = ActiveRun(
-        run_id="r1", origin="manual", task_name=MANUAL_TASK_NAME, occurrence_id=None
-    )
-    assert await coord.stop_active() is True
-    worker.tasks.stop.assert_called_once()
-
 
 @pytest.mark.asyncio
 async def test_in_app_success_path(
-    coord: ExecutionCoordinator, store: ExecutionStore, monkeypatch
+    coord: ExecutionCoordinator, state: AppState, store: ExecutionStore, monkeypatch
 ):
     fixed = datetime(2026, 7, 19, 9, 2, 0, tzinfo=timezone.utc)
     monkeypatch.setattr(
@@ -295,6 +429,7 @@ async def test_in_app_success_path(
     )
     result = await coord.submit_scheduled(_scheduled(), origin="in_app")
     assert result.accepted is True
+    await _await_completion(state)
     rows = store.list()
     assert len(rows) == 1
     assert rows[0].origin == "in_app"

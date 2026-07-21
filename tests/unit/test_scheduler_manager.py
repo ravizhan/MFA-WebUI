@@ -1,15 +1,29 @@
-"""Unit tests for SchedulerManager single-trigger ownership and delete order."""
+"""Unit tests for SchedulerManager callback runtime and delete order."""
 
 from __future__ import annotations
 
+import asyncio
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from models.scheduler import CronTriggerConfig, ScheduledTask, ScheduledTaskCreate
-from scheduler_manager import SchedulerManager, scheduled_job_fired
+from models.scheduler import (
+    CronTriggerConfig,
+    DateTriggerConfig,
+    ScheduledTask,
+    ScheduledTaskCreate,
+)
+import scheduler_manager as sm
+from scheduler_job_codec import encode_execution_kwargs
+from scheduler_manager import (
+    SchedulerManager,
+    _bind_callback_runtime,
+    _clear_callback_runtime,
+    scheduled_job_fired,
+)
 
 
 def _create(
@@ -46,51 +60,196 @@ def _task(
     )
 
 
+def _state(coordinator=None) -> SimpleNamespace:
+    return SimpleNamespace(
+        worker=None,
+        execution_coordinator=coordinator,
+        scheduler_manager=None,
+    )
+
+
 @pytest.fixture
 async def manager(tmp_path: Path):
-    m = SchedulerManager(tmp_path / "jobs.sqlite", system_scheduler=None)
+    state = _state()
+    m = SchedulerManager(state, tmp_path / "jobs.sqlite", system_scheduler=None)
     await m.initialize(paused=True)
     yield m
     await m.shutdown()
 
 
 # ---------------------------------------------------------------------------
-# scheduled_job_fired — single trigger authority
+# scheduled_job_fired — kwargs 解码 + 规范 state 绑定
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_scheduled_job_fired_skips_wakeup_task(main_module):
-    task = _task(wakeup_enabled=True)
+async def test_scheduled_job_fired_skips_wakeup_task():
     coordinator = SimpleNamespace(submit_scheduled=AsyncMock())
-    manager = SimpleNamespace(get_task=AsyncMock(return_value=task))
-    app_state = SimpleNamespace(
-        execution_coordinator=coordinator,
-        scheduler_manager=manager,
-    )
-    with patch.object(main_module, "app_state", app_state, create=True):
-        await scheduled_job_fired(task_id=task.id)
+    state = _state(coordinator)
+    _bind_callback_runtime(state)
+    try:
+        kwargs = encode_execution_kwargs(
+            task_id="task-1",
+            task_name="n",
+            task_description="",
+            task_list=["Main"],
+            task_options={},
+            pre_tasks=[],
+            controller_name=None,
+            device=None,
+            resource_name=None,
+            wakeup_enabled=True,
+            trigger_config=CronTriggerConfig(cron="0 9 * * *"),
+        )
+        await scheduled_job_fired(**kwargs)
+    finally:
+        _clear_callback_runtime()
 
     coordinator.submit_scheduled.assert_not_awaited()
-    manager.get_task.assert_awaited_once_with(task.id)
 
 
 @pytest.mark.asyncio
-async def test_scheduled_job_fired_dispatches_non_wakeup_task(main_module):
-    task = _task(wakeup_enabled=False)
+async def test_scheduled_job_fired_dispatches_non_wakeup_task():
     coordinator = SimpleNamespace(submit_scheduled=AsyncMock())
-    manager = SimpleNamespace(get_task=AsyncMock(return_value=task))
-    app_state = SimpleNamespace(
-        execution_coordinator=coordinator,
-        scheduler_manager=manager,
-    )
-    with patch.object(main_module, "app_state", app_state, create=True):
-        await scheduled_job_fired(task_id=task.id)
+    state = _state(coordinator)
+    _bind_callback_runtime(state)
+    try:
+        kwargs = encode_execution_kwargs(
+            task_id="task-1",
+            task_name="n",
+            task_description="",
+            task_list=["Main"],
+            task_options={},
+            pre_tasks=[],
+            controller_name=None,
+            device=None,
+            resource_name=None,
+            wakeup_enabled=False,
+            trigger_config=CronTriggerConfig(cron="0 9 * * *"),
+        )
+        await scheduled_job_fired(**kwargs)
+    finally:
+        _clear_callback_runtime()
 
     coordinator.submit_scheduled.assert_awaited_once()
     args, kwargs = coordinator.submit_scheduled.await_args
-    assert args[0].id == task.id
+    assert args[0].id == "task-1"
     assert kwargs.get("origin") == "in_app" or (len(args) > 1 and args[1] == "in_app")
+
+
+@pytest.mark.asyncio
+async def test_scheduled_job_fired_uses_canonical_bound_state():
+    """回调只读模块级绑定的规范 state，不 import main。"""
+    coordinator = SimpleNamespace(submit_scheduled=AsyncMock())
+    state = _state(coordinator)
+    _bind_callback_runtime(state)
+    try:
+        assert sm._callback_runtime_state is state
+        kwargs = encode_execution_kwargs(
+            task_id="canon-1",
+            task_name="canon",
+            task_description="",
+            task_list=["Main"],
+            task_options={},
+            pre_tasks=[],
+            controller_name=None,
+            device=None,
+            resource_name=None,
+            wakeup_enabled=False,
+            trigger_config=CronTriggerConfig(cron="0 9 * * *"),
+        )
+        await scheduled_job_fired(**kwargs)
+    finally:
+        _clear_callback_runtime()
+
+    coordinator.submit_scheduled.assert_awaited_once()
+    assert sm._callback_runtime_state is None
+
+
+@pytest.mark.asyncio
+async def test_manager_binds_and_clears_callback_runtime(tmp_path: Path):
+    state = _state()
+    m = SchedulerManager(state, tmp_path / "bind.sqlite")
+    assert sm._callback_runtime_state is state
+    await m.initialize(paused=True)
+    assert sm._callback_runtime_state is state
+    await m.shutdown()
+    assert sm._callback_runtime_state is None
+
+
+@pytest.mark.asyncio
+async def test_due_date_trigger_dispatches_once_despite_job_removal(tmp_path: Path):
+    """DateTrigger 到期后 APS 会先删 job；回调必须靠 kwargs 仍能派发一次。"""
+    coordinator = SimpleNamespace(submit_scheduled=AsyncMock())
+    state = _state(coordinator)
+    m = SchedulerManager(state, tmp_path / "date.sqlite")
+    await m.initialize(paused=True)
+
+    run_date = datetime.now(timezone.utc) - timedelta(seconds=2)
+    created = await m.create_task(
+        ScheduledTaskCreate(
+            name="once",
+            enabled=True,
+            wakeup_enabled=False,
+            trigger_config=DateTriggerConfig(run_date=run_date),
+            task_list=["Main"],
+            task_options={},
+            preTasks=[],
+        )
+    )
+    job = m.scheduler.get_job(created.id)
+    assert job is not None
+    job_kwargs = dict(job.kwargs or {})
+
+    # 模拟 APS 在回调前移除已到期的 DateTrigger job
+    m.scheduler.remove_job(created.id)
+    assert m.scheduler.get_job(created.id) is None
+
+    await scheduled_job_fired(**job_kwargs)
+
+    coordinator.submit_scheduled.assert_awaited_once()
+    submitted = coordinator.submit_scheduled.await_args.args[0]
+    assert submitted.id == created.id
+    assert submitted.name == "once"
+    assert isinstance(submitted.trigger_config, DateTriggerConfig)
+
+    await m.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_live_due_date_trigger_fires_via_scheduler(tmp_path: Path):
+    """真实 APS 到期：job 被移除后仍通过 kwargs 派发一次。"""
+    coordinator = SimpleNamespace(submit_scheduled=AsyncMock())
+    state = _state(coordinator)
+    m = SchedulerManager(state, tmp_path / "live_date.sqlite")
+    await m.initialize(paused=False)
+
+    run_date = datetime.now(timezone.utc) - timedelta(seconds=1)
+    created = await m.create_task(
+        ScheduledTaskCreate(
+            name="live-once",
+            enabled=True,
+            wakeup_enabled=False,
+            trigger_config=DateTriggerConfig(run_date=run_date),
+            task_list=["Main"],
+            task_options={},
+            preTasks=[],
+        )
+    )
+
+    # 等待 APS 处理 due job（misfire_grace 内应提交）
+    for _ in range(50):
+        if coordinator.submit_scheduled.await_count >= 1:
+            break
+        await asyncio.sleep(0.05)
+
+    assert coordinator.submit_scheduled.await_count == 1
+    submitted = coordinator.submit_scheduled.await_args.args[0]
+    assert submitted.id == created.id
+    # DateTrigger 无下次触发后 job 应被移除
+    assert m.scheduler.get_job(created.id) is None
+
+    await m.shutdown()
 
 
 # ---------------------------------------------------------------------------
@@ -166,3 +325,17 @@ async def test_delete_enabled_wakeup_native_fail_keeps_aps(manager: SchedulerMan
     assert ok is False
     assert manager.scheduler.get_job(created.id) is not None
     sys_sched.unregister.assert_called_once_with(created.id)
+
+
+@pytest.mark.asyncio
+async def test_create_persists_trigger_config_in_kwargs(manager: SchedulerManager):
+    created = await manager.create_task(_create(cron="15 8 * * 1"))
+    job = manager.scheduler.get_job(created.id)
+    assert job is not None
+    assert job.kwargs["trigger_config"]["type"] == "cron"
+    assert job.kwargs["trigger_config"]["cron"] == "15 8 * * 1"
+    assert job.kwargs["wakeup_enabled"] is False
+    # 全局可导入回调（SQLAlchemyJobStore 序列化要求）
+    assert job.func is scheduled_job_fired or job.func_ref.endswith(
+        "scheduled_job_fired"
+    )

@@ -123,11 +123,8 @@ export const useSchedulerStore = defineStore("scheduler", () => {
       return false
     }
     if (response.status === "success") {
-      const task = tasks.value.find((t) => t.id === taskId)
-      if (task) {
-        task.enabled = enabled
-      }
       loading.value = false
+      await fetchTasks()
       return true
     }
     error.value = response.message || (enabled ? "启用任务失败" : "暂停任务失败")

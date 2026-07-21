@@ -108,6 +108,7 @@
               >
                 <input
                   type="radio"
+                  name="triggerType"
                   class="radio radio-primary radio-sm"
                   :checked="currentTriggerType === option.value"
                   @change="setTriggerType(option.value)"
@@ -165,14 +166,11 @@
                 v-model="wakeupEnabled"
                 type="checkbox"
                 class="toggle toggle-primary toggle-sm"
-                :disabled="!isNativeCronEligible(cronConfig.cron)"
+                :disabled="!isCronNativeEligible.value"
               />
               <span class="text-sm">{{ t("settings.scheduler.dialog.runWhenClosed") }}</span>
             </label>
-            <p
-              v-if="!isNativeCronEligible(cronConfig.cron)"
-              class="text-xs text-warning"
-            >
+            <p v-if="!isCronNativeEligible.value" class="text-xs text-warning">
               {{ t("settings.scheduler.dialog.runWhenClosedIneligible") }}
             </p>
           </div>
@@ -432,17 +430,20 @@
               <div v-if="activeTab === 'pre-tasks'">
                 <PreTaskList v-model="formData.preTasks" embedded />
               </div>
-              <div v-if="activeTab === 'task-list'" class="shadow-sm max-h-70 overflow-y-auto rounded-lg border border-base-300">
+              <div
+                v-if="activeTab === 'task-list'"
+                class="shadow-sm max-h-72 overflow-y-auto rounded-lg border border-base-300"
+              >
                 <TaskSelectList
-                    :tasks="taskListData"
-                    :selected-tasks="formData.task_list"
-                    :controller-name="formData.controller_name"
-                    :resource-name="formData.resource_name"
-                    :hide-incompatible="true"
-                    @update:tasks="handleTasksUpdate"
-                    @update:selected-tasks="handleSelectedTasksUpdate"
-                    @config="openTaskSettings"
-                  />
+                  :tasks="taskListData"
+                  :selected-tasks="formData.task_list"
+                  :controller-name="formData.controller_name"
+                  :resource-name="formData.resource_name"
+                  :hide-incompatible="true"
+                  @update:tasks="handleTasksUpdate"
+                  @update:selected-tasks="handleSelectedTasksUpdate"
+                  @config="openTaskSettings"
+                />
               </div>
               <div v-if="activeTab === 'task-settings'">
                 <TaskOptionPanel
@@ -574,20 +575,93 @@ function isSingleNumberOrStar(part: string): boolean {
   return part === "*" || /^\d+$/.test(part)
 }
 
-/** A native-eligible cron has 5 fields, each either "*" or a single integer.
- *  Minute must be a number; day-of-month and day-of-week must not both be
- *  restricted; if day-of-week is restricted, day and month must be "*".
- *  Mirrors services.native_cron.parse_native_cron — UI hint only; backend
- *  also enforces numeric ranges. */
-function isNativeCronEligible(cron: string): boolean {
+interface CronFields {
+  minute: number | null
+  hour: number | null
+  day: number | null
+  month: number | null
+  dow: number | null
+}
+
+/** Convert a cron part to null ("*") or a bounded number. Returns undefined
+ *  when the value is outside the allowed range. */
+function toBoundedNumber(part: string, min: number, max: number): number | null | undefined {
+  if (part === "*") return null
+  const n = Number(part)
+  if (n < min || n > max) return undefined
+  return n
+}
+
+/** Parse a 5-field cron into bounded fields. Returns null for invalid format
+ *  or any value outside its allowed range. "*" maps to null. */
+function parseCronFields(cron: string): CronFields | null {
   const parts = cron.trim().split(/\s+/)
-  if (parts.length !== 5) return false
-  if (!parts.every(isSingleNumberOrStar)) return false
-  if (parts[0] === "*") return false
-  if (parts[2] !== "*" && parts[4] !== "*") return false
-  if (parts[4] !== "*" && (parts[2] !== "*" || parts[3] !== "*")) return false
+  if (parts.length !== 5) return null
+  if (!parts.every(isSingleNumberOrStar)) return null
+
+  const bounds = [
+    toBoundedNumber(parts[0], 0, 59),
+    toBoundedNumber(parts[1], 0, 23),
+    toBoundedNumber(parts[2], 1, 31),
+    toBoundedNumber(parts[3], 1, 12),
+    toBoundedNumber(parts[4], 0, 7),
+  ]
+  if (bounds.some((v) => v === undefined)) return null
+
+  return {
+    minute: bounds[0],
+    hour: bounds[1],
+    day: bounds[2],
+    month: bounds[3],
+    dow: bounds[4],
+  }
+}
+
+function hourStarWithOtherRestriction(f: CronFields): boolean {
+  if (f.hour !== null) return false
+  return f.day !== null || f.month !== null || f.dow !== null
+}
+
+function monthWithoutDay(f: CronFields): boolean {
+  return f.month !== null && f.day === null
+}
+
+function dowWithDayOrMonth(f: CronFields): boolean {
+  return f.dow !== null && (f.day !== null || f.month !== null)
+}
+
+function dayAndDowRestricted(f: CronFields): boolean {
+  return f.day !== null && f.dow !== null
+}
+
+/** Native-eligible cron contract (mirrors backend parse_native_cron):
+ *  - minute must be concrete
+ *  - hour "*" only when day/month/dow are all "*"
+ *  - restricted month requires restricted day
+ *  - restricted dow requires day and month "*"
+ *  - day and dow cannot both be restricted */
+function checkCronNativeEligibility(cron: string): boolean {
+  const f = parseCronFields(cron)
+  if (!f) return false
+  if (f.minute === null) return false
+  if (hourStarWithOtherRestriction(f)) return false
+  if (monthWithoutDay(f)) return false
+  if (dowWithDayOrMonth(f)) return false
+  if (dayAndDowRestricted(f)) return false
   return true
 }
+
+const isCronNativeEligible = computed(() => {
+  const config = formData.value.trigger_config
+  if (config.type !== "cron") return false
+  return checkCronNativeEligibility(config.cron)
+})
+
+watch(isCronNativeEligible, (eligible) => {
+  if (!eligible) {
+    wakeupEnabled.value = false
+  }
+})
 
 const sections = computed(() => [
   {
@@ -664,12 +738,17 @@ const showDialog = computed({
 const isEditMode = computed(() => !!task)
 const availableTasks = computed(() => configStore.taskList)
 
-const selectedControllerType = computed(() => {
-  const controller = interfaceStore.interface?.controller?.find(
-    (item) => item.name === formData.value.controller_name,
+const selectedControllerCapability = computed(() => {
+  if (!formData.value.controller_name) {
+    return null
+  }
+  return (
+    controllerCapabilities.value.find((item) => item.name === formData.value.controller_name) ||
+    null
   )
-  return controller?.type || null
 })
+
+const selectedControllerType = computed(() => selectedControllerCapability.value?.type || null)
 
 const isPlayCover = computed(() => selectedControllerType.value === "PlayCover")
 
@@ -724,20 +803,18 @@ const resourceOptions = computed(() =>
 const selectedDeviceAddress = computed<string | null>({
   get: () => formData.value.device?.device_address ?? null,
   set: (value) => {
-    const controller = interfaceStore.interface?.controller?.find(
-      (item) => item.name === formData.value.controller_name,
-    )
-    if (!controller || !value) {
+    const capability = selectedControllerCapability.value
+    if (!capability || !value) {
       formData.value.device = null
       return
     }
-    if (!isDeviceControllerType(controller.type)) {
+    if (!isDeviceControllerType(capability.type)) {
       formData.value.device = null
       return
     }
     formData.value.device = {
-      controller_name: controller.name,
-      device_type: controller.type,
+      controller_name: capability.name,
+      device_type: capability.type,
       device_address: value,
     }
   },
@@ -803,6 +880,7 @@ watch(
   (newTask) => {
     suppressFormInit.value = true
     formData.value = initFormData(newTask)
+    wakeupEnabled.value = newTask?.wakeup_enabled === true
     syncTaskListData(formData.value.task_list)
     void nextTick(() => {
       suppressFormInit.value = false
@@ -811,19 +889,16 @@ watch(
 )
 
 watch(
-  () => formData.value.controller_name,
-  (newVal, oldVal) => {
-    const controller = interfaceStore.interface?.controller?.find((item) => item.name === newVal)
-    const type = controller?.type
-
-    if (!suppressFormInit.value && oldVal != null && oldVal !== newVal) {
+  [() => formData.value.controller_name, selectedControllerType],
+  ([newName, newType], [oldName]) => {
+    if (!suppressFormInit.value && oldName != null && oldName !== newName) {
       formData.value.device = null
       formData.value.resource_name = null
     }
 
-    if (newVal && type) {
-      void fetchDevices(newVal)
-      void fetchResources(type)
+    if (newName && newType) {
+      void fetchDevices(newName)
+      void fetchResources(newType)
       return
     }
     availableDevices.value = []
@@ -1123,7 +1198,7 @@ async function fetchControllerCapabilities() {
   const [data, err] = await tryCatch(() => getDevices())
   loadingCapabilities.value = false
   if (err) {
-    console.error("Failed to fetch controller capabilities:", err)
+    showGlobalMessage("error", t("settings.networkError"))
     controllerCapabilities.value = []
     return
   }
@@ -1283,7 +1358,9 @@ async function saveTaskPayload(): Promise<{ taskId: string; success: boolean }> 
     ...configStore.buildExecutionPayload(formData.value.task_list, formData.value.task_options),
     preTasks: formData.value.preTasks ?? [],
     wakeup_enabled:
-      formData.value.trigger_config.type === "cron" ? wakeupEnabled.value : false,
+      formData.value.trigger_config.type === "cron" && isCronNativeEligible.value
+        ? wakeupEnabled.value
+        : false,
   }
 
   if (isEditMode.value && task) {

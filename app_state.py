@@ -85,6 +85,8 @@ class ActiveRun:
     origin: ExecutionOrigin
     task_name: str
     occurrence_id: str | None
+    # 停止请求：prepare 阶段与 stop_active 共用
+    stop_requested: bool = False
 
 
 class LogBroadcaster:
@@ -159,6 +161,8 @@ class AppState:
         self.task = TaskRuntimeState()
         self.agent = AgentRuntimeState()
         self.active_run: ActiveRun | None = None
+        # 当前后台完成协程；stop_active 等待其清理完毕
+        self.active_execution_task: asyncio.Task[None] | None = None
         self.update_in_progress = False
 
     def send_event(self, event: RealtimeEvent):

@@ -1,6 +1,7 @@
 """原生 OS 调度用 cron 解析/校验/转换（纯函数）。
 
 星期语义为 Unix：0 与 7 = 周日；APS 侧为 0 = 周一。
+接受的形状必须能在 Windows 上精确表达，避免 silently drop 字段。
 """
 
 from __future__ import annotations
@@ -73,11 +74,20 @@ def _parse_field(name: str, raw: str, lo: int, hi: int) -> int | None:
 
 
 def parse_native_cron(cron: str) -> NativeCron:
-    """解析并校验原生唤醒 cron（严格单值，供 OS 定时器注册）。
+    """解析并校验原生唤醒 cron（严格单值，且与 Windows 表达一一对应）。
 
-    约束：5 字段；每字段仅 ``*`` 或单整数；minute 必须具体；
-    day 与 dow 不可同时受限；dow 受限时 day/month 须为 ``*``；
-    dow=7 归一为 0。
+    允许：
+    - 纯小时：``M * * * *``
+    - 每日：``M H * * *``
+    - 每周：``M H * * D``
+    - 每月日：``M H D * *``
+    - 每月日+月：``M H D M *``
+
+    拒绝：
+    - list/range/step/名称；minute 为 ``*``
+    - day 与 dow 同时受限
+    - hour 为 ``*`` 却同时限制 day/month/dow（会变成纯 HOURLY 丢约束）
+    - 指定 month 却未指定 day（会变成 DAILY 丢月份）
     """
     if not isinstance(cron, str) or not cron.strip():
         raise ValueError("原生 cron 表达式不能为空")
@@ -106,6 +116,16 @@ def parse_native_cron(cron: str) -> NativeCron:
     if dow is not None and (day is not None or month is not None):
         # day 与 dow 同时受限已在上方拒绝；此处主要拦截 month 受限
         raise ValueError("原生 cron 在 day-of-week 受限时，day 与 month 必须为 '*'")
+
+    # hour=* 只能是纯小时任务，否则 Windows HOURLY 会丢掉 day/month/dow
+    if hour is None and (day is not None or month is not None or dow is not None):
+        raise ValueError(
+            "原生 cron 在 hour 为 '*' 时，day/month/day-of-week 必须均为 '*'"
+        )
+
+    # month 受限必须带 day，否则会落成 DAILY 丢月份
+    if month is not None and day is None:
+        raise ValueError("原生 cron 指定 month 时必须同时指定 day")
 
     return NativeCron(minute=minute, hour=hour, day=day, month=month, dow=dow)
 

@@ -1,17 +1,8 @@
 <template>
-  <dialog
-    v-if="conflict"
-    ref="dialogRef"
-    class="modal modal-middle"
-    @close="onNativeClose"
-  >
+  <dialog v-if="conflict" ref="dialogRef" class="modal modal-middle" @close="onNativeClose">
     <div class="modal-box max-w-md">
       <div class="flex items-start gap-3">
-        <Icon
-          icon="mdi:alert-circle"
-          class="text-warning shrink-0 text-2xl"
-          aria-hidden="true"
-        />
+        <Icon icon="mdi:alert-circle" class="text-warning shrink-0 text-2xl" aria-hidden="true" />
         <div class="flex-1">
           <h3 class="font-semibold text-base">
             {{ t("settings.scheduler.conflict.title") }}
@@ -21,10 +12,12 @@
               {{ t("settings.scheduler.conflict.messageUpdate") }}
             </template>
             <template v-else>
-              {{ t("settings.scheduler.conflict.message", {
-                taskName: conflict.active_task_name,
-                origin: getOriginLabel(t, conflict.active_origin),
-              }) }}
+              {{
+                t("settings.scheduler.conflict.message", {
+                  taskName: conflict.active_task_name,
+                  origin: getOriginLabel(t, conflict.active_origin),
+                })
+              }}
             </template>
           </p>
         </div>
@@ -52,11 +45,13 @@
 <script setup lang="ts">
 import { ref, computed, watch, nextTick, useTemplateRef } from "vue"
 import { useI18n } from "vue-i18n"
+import { useRouter } from "vue-router"
 import { Icon } from "@iconify/vue"
 import { useDeviceConnectionStore } from "@/stores"
 import { getOriginLabel } from "@/utils/scheduler/display"
 
 const { t } = useI18n()
+const router = useRouter()
 const deviceStore = useDeviceConnectionStore()
 const dialogRef = useTemplateRef<HTMLDialogElement>("dialogRef")
 const closingFromUi = ref(false)
@@ -82,9 +77,12 @@ watch(
   { immediate: true },
 )
 
-function handleStopAndStart() {
+async function handleStopAndStart() {
   closingFromUi.value = true
-  deviceStore.stopActiveAndRestart()
+  const restarted = await deviceStore.stopActiveAndRestart()
+  if (restarted) {
+    await router.push({ name: "logs" })
+  }
 }
 
 function handleCancel() {

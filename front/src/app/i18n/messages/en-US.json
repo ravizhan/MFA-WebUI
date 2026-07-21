@@ -200,7 +200,7 @@
         "runsWhenClosed": "Runs when closed"
       },
       "history": {
-        "skippedBy": "Skipped: {origin} task '{name}' running"
+        "skippedBy": "Skipped: task '{name}' running"
       },
       "conflict": {
         "title": "Task already running",

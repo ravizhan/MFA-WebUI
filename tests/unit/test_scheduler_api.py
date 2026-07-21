@@ -50,6 +50,22 @@ def _manual_body(**overrides) -> dict:
     return body
 
 
+def _wakeup_task(
+    task_id: str = "task-1",
+    *,
+    enabled: bool = True,
+    wakeup_enabled: bool = True,
+) -> ScheduledTask:
+    return ScheduledTask(
+        id=task_id,
+        name="每日",
+        enabled=enabled,
+        wakeup_enabled=wakeup_enabled,
+        trigger_config=CronTriggerConfig(cron="0 9 * * *"),
+        task_list=["Startup"],
+    )
+
+
 def test_start_returns_conflict_structure(client):
     c, main = client
     conflict = StartConflict(
@@ -107,15 +123,47 @@ def test_native_dispatch_task_not_found_404(client):
     main.app_state.execution_coordinator.submit_scheduled.assert_not_called()
 
 
+def test_native_dispatch_disabled_409(client):
+    c, main = client
+    main.app_state.native_token = "tok"
+    task = _wakeup_task(enabled=False, wakeup_enabled=True)
+    manager = SimpleNamespace(get_task=AsyncMock(return_value=task))
+    coord = SimpleNamespace(submit_scheduled=AsyncMock())
+    main.app_state.scheduler_manager = manager
+    main.app_state.execution_coordinator = coord
+
+    resp = c.post(
+        "/api/internal/scheduler/native-dispatch",
+        json={"task_id": "task-1", "token": "tok"},
+    )
+    assert resp.status_code == 409
+    data = resp.json()
+    assert data["status"] == "failed"
+    coord.submit_scheduled.assert_not_called()
+
+
+def test_native_dispatch_wakeup_disabled_409(client):
+    c, main = client
+    main.app_state.native_token = "tok"
+    task = _wakeup_task(enabled=True, wakeup_enabled=False)
+    manager = SimpleNamespace(get_task=AsyncMock(return_value=task))
+    coord = SimpleNamespace(submit_scheduled=AsyncMock())
+    main.app_state.scheduler_manager = manager
+    main.app_state.execution_coordinator = coord
+
+    resp = c.post(
+        "/api/internal/scheduler/native-dispatch",
+        json={"task_id": "task-1", "token": "tok"},
+    )
+    assert resp.status_code == 409
+    assert resp.json()["status"] == "failed"
+    coord.submit_scheduled.assert_not_called()
+
+
 def test_native_dispatch_ok_calls_submit_scheduled(client):
     c, main = client
     main.app_state.native_token = "tok"
-    task = ScheduledTask(
-        id="task-1",
-        name="每日",
-        trigger_config=CronTriggerConfig(cron="0 9 * * *"),
-        task_list=["Startup"],
-    )
+    task = _wakeup_task()
     manager = SimpleNamespace(get_task=AsyncMock(return_value=task))
     coord = SimpleNamespace(
         submit_scheduled=AsyncMock(
@@ -224,3 +272,89 @@ def test_start_success_returns_run_id(client):
     resp = c.post("/api/start", json=_manual_body())
     assert resp.status_code == 200
     assert resp.json() == {"status": "success", "run_id": "run-ok"}
+
+
+def test_delegate_native_dispatch_2xx_success(main_module, tmp_path, monkeypatch):
+    token_file = tmp_path / "native_token"
+    token_file.write_text("tok", encoding="utf-8")
+    monkeypatch.setattr(main_module, "NATIVE_TOKEN_FILE", token_file)
+
+    class _Resp:
+        status_code = 200
+        text = "ok"
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, url, json=None):
+            return _Resp()
+
+    monkeypatch.setattr(main_module.httpx, "Client", _Client)
+    assert main_module.delegate_native_dispatch("t1") == main_module.EXIT_SUCCESS
+
+
+def test_delegate_native_dispatch_4xx_failed(main_module, tmp_path, monkeypatch):
+    token_file = tmp_path / "native_token"
+    token_file.write_text("tok", encoding="utf-8")
+    monkeypatch.setattr(main_module, "NATIVE_TOKEN_FILE", token_file)
+
+    class _Resp:
+        status_code = 409
+        text = "conflict"
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, url, json=None):
+            return _Resp()
+
+    monkeypatch.setattr(main_module.httpx, "Client", _Client)
+    assert (
+        main_module.delegate_native_dispatch("t1") == main_module.EXIT_DELEGATE_FAILED
+    )
+
+
+def test_delegate_native_dispatch_retry_exhaustion(main_module, tmp_path, monkeypatch):
+    token_file = tmp_path / "native_token"
+    token_file.write_text("tok", encoding="utf-8")
+    monkeypatch.setattr(main_module, "NATIVE_TOKEN_FILE", token_file)
+
+    class _Resp:
+        status_code = 503
+        text = "busy"
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, url, json=None):
+            return _Resp()
+
+    # 跳过真实 sleep / 缩短截止
+    monkeypatch.setattr(main_module.httpx, "Client", _Client)
+    monkeypatch.setattr(main_module.time, "sleep", lambda *_: None)
+    times = iter([0.0, 0.0, 40.0])  # 第一次循环后立即超时
+    monkeypatch.setattr(main_module.time, "monotonic", lambda: next(times, 40.0))
+    assert (
+        main_module.delegate_native_dispatch("t1") == main_module.EXIT_DELEGATE_FAILED
+    )

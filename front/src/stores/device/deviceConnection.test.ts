@@ -188,7 +188,7 @@ describe("useDeviceConnectionStore", () => {
     const expectedStartPayload: ManualStartPayload = {
       task_list: ["task1"],
       task_options: {},
-      preTasks: [],
+      preTasks: [{ id: "pre-1", command: "echo pre", timeout: 5, enabled: true }],
       controller_name: "adb",
       device: {
         controller_name: "adb",
@@ -242,13 +242,13 @@ describe("useDeviceConnectionStore", () => {
       vi.spyOn(configStore, "buildExecutionPayload").mockReturnValue({
         task_list: ["task1"],
         task_options: {},
-        preTasks: [],
+        preTasks: [{ id: "pre-1", command: "echo pre", timeout: 5, enabled: true }],
       })
       vi.mocked(api.startTask).mockResolvedValueOnce({ accepted: true, runId: "run-1" })
       expect(await store.StartTask()).toBe(true)
       expect(api.startTask).toHaveBeenCalledWith(expectedStartPayload)
       expect(store.startConflict).toBeNull()
-      expect(indexStore.TaskRunning).toBe(true)
+      expect(indexStore.TaskRunning).toBe(false)
 
       const conflict: StartConflict = {
         code: "busy_manual",
@@ -276,7 +276,7 @@ describe("useDeviceConnectionStore", () => {
       vi.spyOn(configStore, "buildExecutionPayload").mockReturnValue({
         task_list: ["task1"],
         task_options: {},
-        preTasks: [],
+        preTasks: [{ id: "pre-1", command: "echo pre", timeout: 5, enabled: true }],
       })
       vi.mocked(api.stopTask).mockResolvedValueOnce(true)
       vi.mocked(api.startTask).mockResolvedValueOnce({ accepted: true, runId: "run-2" })
@@ -285,7 +285,7 @@ describe("useDeviceConnectionStore", () => {
       expect(api.stopTask).toHaveBeenCalledOnce()
       expect(api.startTask).toHaveBeenCalledWith(expectedStartPayload)
       expect(store.startConflict).toBeNull()
-      expect(indexStore.TaskRunning).toBe(true)
+      expect(indexStore.TaskRunning).toBe(false)
 
       store.startConflict = conflict
       vi.mocked(api.stopTask).mockResolvedValueOnce(false)

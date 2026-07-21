@@ -10,7 +10,7 @@
         :class="statusBgClass(exec.status)"
       >
         <Icon
-          :icon="statusIcon(exec.status)"
+          :icon="getStatusIcon(exec.status)"
           class="text-lg"
           :class="statusTextClass(exec.status)"
         />
@@ -32,10 +32,11 @@
           </span>
         </div>
         <div v-if="exec.blocker_task_name" class="text-xs text-warning opacity-80">
-          {{ t("settings.scheduler.history.skippedBy", {
-            origin: getOriginLabelText(exec.origin),
-            name: exec.blocker_task_name,
-          }) }}
+          {{
+            t("settings.scheduler.history.skippedBy", {
+              name: exec.blocker_task_name,
+            })
+          }}
         </div>
         <div v-if="exec.error_message" class="text-xs text-error opacity-80">
           {{ exec.error_message }}
@@ -73,17 +74,6 @@ function getStatusLabelText(status: ExecutionStatus): string {
 
 function getOriginLabelText(origin: ExecutionOrigin): string {
   return getOriginLabel(t, origin)
-}
-
-function statusIcon(status: ExecutionStatus): string {
-  const map: Record<string, string> = {
-    "i-mdi-check-circle": "mdi:check-circle",
-    "i-mdi-close-circle": "mdi:close-circle",
-    "i-mdi-loading": "mdi:loading",
-    "i-mdi-pause-circle": "mdi:pause-circle",
-    "i-mdi-help-circle": "mdi:help-circle",
-  }
-  return map[getStatusIcon(status)] || "mdi:help-circle"
 }
 
 function statusBgClass(status: ExecutionStatus): string {

@@ -93,11 +93,16 @@ describe("status and origin mapping", () => {
     // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
     expect(getStatusType("unknown" as ExecutionStatus)).toBe("default")
 
-    expect(getStatusIcon("success")).toBe("i-mdi-check-circle")
-    expect(getStatusIcon("failed")).toBe("i-mdi-close-circle")
-    expect(getStatusIcon("missed_deadline")).toBe("i-mdi-clock-alert")
+    expect(getStatusIcon("success")).toBe("mdi:check-circle")
+    expect(getStatusIcon("failed")).toBe("mdi:close-circle")
+    expect(getStatusIcon("missed_deadline")).toBe("mdi:clock-alert")
+    expect(getStatusIcon("running")).toBe("mdi:loading")
+    expect(getStatusIcon("stopped")).toBe("mdi:pause-circle")
+    expect(getStatusIcon("skipped_busy_manual")).toBe("mdi:account-alert")
+    expect(getStatusIcon("skipped_busy_scheduled")).toBe("mdi:calendar-alert")
+    expect(getStatusIcon("skipped_update_in_progress")).toBe("mdi:update")
     // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
-    expect(getStatusIcon("unknown" as ExecutionStatus)).toBe("i-mdi-help-circle")
+    expect(getStatusIcon("unknown" as ExecutionStatus)).toBe("mdi:help-circle")
 
     expect(getStatusLabel(t, "success")).toBe("settings.scheduler.status.success")
     expect(getStatusLabel(t, "skipped_busy_scheduled")).toBe(
