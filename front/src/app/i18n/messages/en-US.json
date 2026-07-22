@@ -174,7 +174,11 @@
           "content": "Tasks"
         },
         "runWhenClosed": "Register as system scheduled task (runs after app closes)",
-        "runWhenClosedIneligible": "Only available for single-value 5-field cron. Minute must be a number; day and day-of-week cannot both be restricted."
+        "runWhenClosedIneligible": "This Cron cannot be used for a system scheduled task",
+        "aiHelp": "AI Help",
+        "aiHelpTitle": "Generate Cron Prompt",
+        "aiHelpPrompt": "Please write a 5-field Cron expression that can be used as a system scheduled task, following these rules:\n\n- Exactly 5 fields: minute hour day month day-of-week\n- Each field must be a single number or *, no lists, ranges, steps, or names\n- Minute must be a concrete number, not *\n- If hour is *, day, month, and day-of-week must all be *\n- If month is restricted, day must also be restricted\n- If day-of-week is restricted, day and month must be *\n- Day and day-of-week cannot both be restricted\n\nMy schedule need: ________\nPlease reply with only the final 5-field Cron expression, no explanation.",
+        "aiHelpGuidance": "1. Fill in your specific need in the prompt below; 2. Click \"Copy\"; 3. Paste it into any AI application (e.g., ChatGPT, Claude) to get your Cron expression."
       },
       "rules": {
         "nameRequired": "Please enter task name",

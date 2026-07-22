@@ -76,8 +76,11 @@
               v-model="formData.name"
               type="text"
               class="input input-bordered w-full"
+              :class="{ 'input-error': showInvalid('name') }"
               :placeholder="t('settings.scheduler.dialog.taskNamePlaceholder')"
               autocomplete="off"
+              :aria-invalid="showInvalid('name') || undefined"
+              @blur="markTouched('name')"
             />
           </fieldset>
 
@@ -131,16 +134,19 @@
               :value="cronConfig.cron"
               type="text"
               class="input input-bordered w-full font-mono text-sm"
+              :class="{ 'input-error': showInvalid('cron') }"
               :placeholder="t('settings.scheduler.dialog.cronPlaceholder')"
               spellcheck="false"
+              :aria-invalid="showInvalid('cron') || undefined"
+              @blur="markTouched('cron')"
               @input="updateTriggerConfig({ cron: getInputValue($event) })"
             />
           </fieldset>
           <div
             v-if="activeSection === 'schedule' && currentTriggerType === 'cron'"
-            class="flex flex-wrap gap-2"
+            class="flex flex-wrap items-center gap-2"
           >
-            <span class="text-base-content/50 self-center text-xs">
+            <span class="text-base-content/50 text-xs">
               {{ t("settings.scheduler.dialog.quickSelect") }}
             </span>
             <button type="button" class="btn btn-outline btn-xs" @click="setCronPreset('daily')">
@@ -155,6 +161,10 @@
             <button type="button" class="btn btn-outline btn-xs" @click="setCronPreset('hourly')">
               {{ t("settings.scheduler.dialog.presets.hourly") }}
             </button>
+            <button type="button" class="btn btn-ghost btn-xs gap-1" @click="showAiDialog = true">
+              <Icon icon="mdi:robot" class="text-base" aria-hidden="true" />
+              {{ t("settings.scheduler.dialog.aiHelp") }}
+            </button>
           </div>
 
           <div
@@ -166,11 +176,11 @@
                 v-model="wakeupEnabled"
                 type="checkbox"
                 class="toggle toggle-primary toggle-sm"
-                :disabled="!isCronNativeEligible.value"
+                :disabled="!isCronNativeEligible"
               />
               <span class="text-sm">{{ t("settings.scheduler.dialog.runWhenClosed") }}</span>
             </label>
-            <p v-if="!isCronNativeEligible.value" class="text-xs text-warning">
+            <p v-if="!isCronNativeEligible" class="text-xs text-warning">
               {{ t("settings.scheduler.dialog.runWhenClosedIneligible") }}
             </p>
           </div>
@@ -186,7 +196,10 @@
             <input
               type="datetime-local"
               class="input input-bordered w-full max-w-xs"
+              :class="{ 'input-error': showInvalid('run_date') }"
               :value="dateConfigLocal"
+              :aria-invalid="showInvalid('run_date') || undefined"
+              @blur="markTouched('run_date')"
               @input="
                 updateTriggerConfig({
                   run_date: toIsoOrEmpty(getInputValue($event)),
@@ -210,7 +223,9 @@
                   :value="intervalConfig.weeks"
                   type="number"
                   class="input input-bordered w-full"
+                  :class="{ 'input-error': showInvalid('interval') }"
                   min="0"
+                  @blur="markTouched('interval')"
                   @input="
                     updateTriggerConfig({
                       weeks: Number(getInputValue($event)) || 0,
@@ -224,7 +239,9 @@
                   :value="intervalConfig.days"
                   type="number"
                   class="input input-bordered w-full"
+                  :class="{ 'input-error': showInvalid('interval') }"
                   min="0"
+                  @blur="markTouched('interval')"
                   @input="
                     updateTriggerConfig({
                       days: Number(getInputValue($event)) || 0,
@@ -238,7 +255,9 @@
                   :value="intervalConfig.hours"
                   type="number"
                   class="input input-bordered w-full"
+                  :class="{ 'input-error': showInvalid('interval') }"
                   min="0"
+                  @blur="markTouched('interval')"
                   @input="
                     updateTriggerConfig({
                       hours: Number(getInputValue($event)) || 0,
@@ -254,7 +273,9 @@
                   :value="intervalConfig.minutes"
                   type="number"
                   class="input input-bordered w-full"
+                  :class="{ 'input-error': showInvalid('interval') }"
                   min="0"
+                  @blur="markTouched('interval')"
                   @input="
                     updateTriggerConfig({
                       minutes: Number(getInputValue($event)) || 0,
@@ -270,7 +291,9 @@
                   :value="intervalConfig.seconds"
                   type="number"
                   class="input input-bordered w-full"
+                  :class="{ 'input-error': showInvalid('interval') }"
                   min="0"
+                  @blur="markTouched('interval')"
                   @input="
                     updateTriggerConfig({
                       seconds: Number(getInputValue($event)) || 0,
@@ -327,7 +350,10 @@
             <select
               v-model="formData.controller_name"
               class="select select-bordered w-full"
+              :class="{ 'select-error': showInvalid('controller_name') }"
               :disabled="loadingCapabilities || loadingDevices"
+              :aria-invalid="showInvalid('controller_name') || undefined"
+              @blur="markTouched('controller_name')"
             >
               <option value="" disabled>{{ t("panel.selectDeviceType") }}</option>
               <option
@@ -351,18 +377,28 @@
               v-model="selectedDeviceAddress"
               type="text"
               class="input input-bordered w-full"
+              :class="{ 'input-error': showInvalid('device_address') }"
               :placeholder="t('panel.playcoverAddress')"
               :disabled="!formData.controller_name"
+              :aria-invalid="showInvalid('device_address') || undefined"
+              @blur="markTouched('device_address')"
             />
-            <CreatableSelect
+            <div
               v-else
-              :model-value="selectedDeviceAddress"
-              :options="deviceAddressOptions"
-              :placeholder="t('panel.selectDevice')"
-              :disabled="!formData.controller_name || loadingDevices"
-              @update:model-value="selectedDeviceAddress = $event"
-              @create="handleCreateDeviceAddress"
-            />
+              :class="{
+                'ring-2 ring-error rounded': showInvalid('device_address'),
+              }"
+            >
+              <CreatableSelect
+                :model-value="selectedDeviceAddress"
+                :options="deviceAddressOptions"
+                :placeholder="t('panel.selectDevice')"
+                :disabled="!formData.controller_name || loadingDevices"
+                @update:model-value="selectedDeviceAddress = $event"
+                @create="handleCreateDeviceAddress"
+                @blur="markTouched('device_address')"
+              />
+            </div>
           </fieldset>
 
           <fieldset v-if="activeSection === 'environment'" class="fieldset p-0">
@@ -373,7 +409,10 @@
             <select
               v-model="formData.resource_name"
               class="select select-bordered w-full"
+              :class="{ 'select-error': showInvalid('resource_name') }"
               :disabled="!formData.controller_name || loadingResources"
+              :aria-invalid="showInvalid('resource_name') || undefined"
+              @blur="markTouched('resource_name')"
             >
               <option value="" disabled>{{ t("panel.selectResource") }}</option>
               <option v-for="opt in resourceOptions" :key="opt.value" :value="opt.value">
@@ -432,7 +471,12 @@
               </div>
               <div
                 v-if="activeTab === 'task-list'"
-                class="shadow-sm max-h-72 overflow-y-auto rounded-lg border border-base-300"
+                class="shadow-sm max-h-72 overflow-y-auto rounded-lg border"
+                :class="{
+                  'border-base-300': !showInvalid('task_list'),
+                  'border-error': showInvalid('task_list'),
+                }"
+                @click="markTouched('task_list')"
               >
                 <TaskSelectList
                   :tasks="taskListData"
@@ -483,6 +527,36 @@
       <button type="submit">{{ t("common.cancel") }}</button>
     </form>
   </dialog>
+
+  <!-- AI Help Dialog -->
+  <dialog
+    v-if="showAiDialog"
+    ref="aiDialogRef"
+    class="modal modal-middle"
+    @close="onAiDialogClose"
+  >
+    <div class="modal-box max-w-lg">
+      <h3 class="font-bold text-lg">{{ t("settings.scheduler.dialog.aiHelpTitle") }}</h3>
+      <p class="text-xs text-base-content/60 mt-1">
+        {{ t("settings.scheduler.dialog.aiHelpGuidance") }}
+      </p>
+      <div class="mt-3 rounded-lg bg-base-200 p-3">
+        <pre class="whitespace-pre-wrap break-words text-sm">{{ aiPrompt }}</pre>
+      </div>
+      <div class="modal-action flex justify-end gap-2">
+        <button type="button" class="btn btn-ghost btn-sm" @click="closeAiDialog">
+          {{ t("common.cancel") }}
+        </button>
+        <button type="button" class="btn btn-primary btn-sm" @click="copyAiPrompt">
+          <Icon icon="mdi:content-copy" class="text-base" aria-hidden="true" />
+          {{ t("common.copy") }}
+        </button>
+      </div>
+    </div>
+    <form method="dialog" class="modal-backdrop">
+      <button type="submit">{{ t("common.cancel") }}</button>
+    </form>
+  </dialog>
 </template>
 
 <script setup lang="ts">
@@ -501,6 +575,7 @@ import TaskOptionPanel from "@/components/panel/task/TaskOptionPanel.vue"
 import PreTaskList from "@/components/panel/task/PreTaskList.vue"
 import CreatableSelect from "@/components/common/CreatableSelect.vue"
 import { resolveInterfaceText } from "@/utils/interface/content"
+import { checkCronNativeEligibility } from "@/utils/scheduler/cronNative"
 import { getDevices, getResource } from "@/services/api"
 import type {
   ConnectableDevice,
@@ -559,6 +634,42 @@ const loadingResources = ref(false)
 const loadingCapabilities = ref(false)
 
 const wakeupEnabled = ref(false)
+const formData = ref<ScheduledTaskCreate>(initFormData(task))
+const touchedFields = ref<Record<string, boolean>>({})
+const showAiDialog = ref(false)
+const aiDialogRef = useTemplateRef<HTMLDialogElement>("aiDialogRef")
+const closingAiDialogFromUi = ref(false)
+
+function syncAiDialogVisibility(open: boolean) {
+  const el = aiDialogRef.value
+  if (!el) return
+  if (open) {
+    if (!el.open) el.showModal()
+    return
+  }
+  if (el.open) el.close()
+}
+
+watch(
+  showAiDialog,
+  async (val) => {
+    await nextTick()
+    syncAiDialogVisibility(val)
+  },
+)
+
+function closeAiDialog() {
+  closingAiDialogFromUi.value = true
+  showAiDialog.value = false
+}
+
+function onAiDialogClose() {
+  if (closingAiDialogFromUi.value) {
+    closingAiDialogFromUi.value = false
+    return
+  }
+  showAiDialog.value = false
+}
 
 const currentTriggerType = computed(() => formData.value.trigger_config.type)
 
@@ -569,86 +680,51 @@ function setTriggerType(type: TriggerType) {
   }
 }
 
-/** A cron part is an integer literal or "*". Lists, ranges, steps, and names
- *  are rejected — mirrors services.native_cron._parse_field accept rules. */
-function isSingleNumberOrStar(part: string): boolean {
-  return part === "*" || /^\d+$/.test(part)
+function markTouched(key: string) {
+  touchedFields.value = { ...touchedFields.value, [key]: true }
 }
 
-interface CronFields {
-  minute: number | null
-  hour: number | null
-  day: number | null
-  month: number | null
-  dow: number | null
+function isIntervalInvalid(): boolean {
+  const cfg = intervalConfig.value
+  return (
+    nonNegative(cfg.weeks) +
+    nonNegative(cfg.days) +
+    nonNegative(cfg.hours) +
+    nonNegative(cfg.minutes) +
+    nonNegative(cfg.seconds) <=
+    0
+  )
 }
 
-/** Convert a cron part to null ("*") or a bounded number. Returns undefined
- *  when the value is outside the allowed range. */
-function toBoundedNumber(part: string, min: number, max: number): number | null | undefined {
-  if (part === "*") return null
-  const n = Number(part)
-  if (n < min || n > max) return undefined
-  return n
+const validators: Record<string, () => boolean> = {
+  name: () => !formData.value.name.trim(),
+  cron: () => currentTriggerType.value === "cron" && !cronConfig.value.cron.trim(),
+  run_date: () => currentTriggerType.value === "date" && !dateConfig.value.run_date,
+  interval: () => currentTriggerType.value === "interval" && isIntervalInvalid(),
+  controller_name: () => !formData.value.controller_name,
+  device_address: () => !formData.value.device?.device_address,
+  resource_name: () => !formData.value.resource_name,
+  task_list: () => formData.value.task_list.length === 0,
 }
 
-/** Parse a 5-field cron into bounded fields. Returns null for invalid format
- *  or any value outside its allowed range. "*" maps to null. */
-function parseCronFields(cron: string): CronFields | null {
-  const parts = cron.trim().split(/\s+/)
-  if (parts.length !== 5) return null
-  if (!parts.every(isSingleNumberOrStar)) return null
-
-  const bounds = [
-    toBoundedNumber(parts[0], 0, 59),
-    toBoundedNumber(parts[1], 0, 23),
-    toBoundedNumber(parts[2], 1, 31),
-    toBoundedNumber(parts[3], 1, 12),
-    toBoundedNumber(parts[4], 0, 7),
-  ]
-  if (bounds.some((v) => v === undefined)) return null
-
-  return {
-    minute: bounds[0],
-    hour: bounds[1],
-    day: bounds[2],
-    month: bounds[3],
-    dow: bounds[4],
-  }
+function isInvalid(key: string): boolean {
+  return validators[key]?.() ?? false
 }
 
-function hourStarWithOtherRestriction(f: CronFields): boolean {
-  if (f.hour !== null) return false
-  return f.day !== null || f.month !== null || f.dow !== null
+function showInvalid(key: string): boolean {
+  return !!touchedFields.value[key] && isInvalid(key)
 }
 
-function monthWithoutDay(f: CronFields): boolean {
-  return f.month !== null && f.day === null
-}
+const aiPrompt = computed(() => t("settings.scheduler.dialog.aiHelpPrompt"))
 
-function dowWithDayOrMonth(f: CronFields): boolean {
-  return f.dow !== null && (f.day !== null || f.month !== null)
-}
-
-function dayAndDowRestricted(f: CronFields): boolean {
-  return f.day !== null && f.dow !== null
-}
-
-/** Native-eligible cron contract (mirrors backend parse_native_cron):
- *  - minute must be concrete
- *  - hour "*" only when day/month/dow are all "*"
- *  - restricted month requires restricted day
- *  - restricted dow requires day and month "*"
- *  - day and dow cannot both be restricted */
-function checkCronNativeEligibility(cron: string): boolean {
-  const f = parseCronFields(cron)
-  if (!f) return false
-  if (f.minute === null) return false
-  if (hourStarWithOtherRestriction(f)) return false
-  if (monthWithoutDay(f)) return false
-  if (dowWithDayOrMonth(f)) return false
-  if (dayAndDowRestricted(f)) return false
-  return true
+function copyAiPrompt() {
+  void (async () => {
+    const [, err] = await tryCatch(() => navigator.clipboard.writeText(aiPrompt.value))
+    if (err) {
+      return
+    }
+    showGlobalMessage("success", t("panel.copySuccess"))
+  })()
 }
 
 const isCronNativeEligible = computed(() => {
@@ -688,9 +764,9 @@ const sections = computed(() => [
 
 const triggerOptions = computed(() => [
   {
-    value: "cron" as const,
-    label: t("settings.scheduler.dialog.cronExpression"),
-    icon: "mdi:code-braces",
+    value: "interval" as const,
+    label: t("settings.scheduler.dialog.intervalExecution"),
+    icon: "mdi:timer-outline",
   },
   {
     value: "date" as const,
@@ -698,9 +774,9 @@ const triggerOptions = computed(() => [
     icon: "mdi:calendar-month",
   },
   {
-    value: "interval" as const,
-    label: t("settings.scheduler.dialog.intervalExecution"),
-    icon: "mdi:timer-outline",
+    value: "cron" as const,
+    label: t("settings.scheduler.dialog.cronExpression"),
+    icon: "mdi:code-braces",
   },
 ])
 
@@ -836,7 +912,6 @@ const intervalConfig = computed<IntervalTriggerConfig>(() => {
 const intervalStartLocal = computed(() => toDatetimeLocalValue(intervalConfig.value.start_date))
 const intervalEndLocal = computed(() => toDatetimeLocalValue(intervalConfig.value.end_date))
 
-const formData = ref<ScheduledTaskCreate>(initFormData(task))
 const taskListData = ref<TaskListItem[]>([])
 
 function syncDialogVisibility(open: boolean) {
@@ -865,6 +940,7 @@ watch(
     }
     activeSection.value = "basic"
     wakeupEnabled.value = task?.wakeup_enabled === true
+    touchedFields.value = {}
     void fetchControllerCapabilities()
   },
 )
@@ -957,6 +1033,7 @@ function resetForm() {
   activeTab.value = "task-list"
   activeSection.value = "basic"
   wakeupEnabled.value = false
+  touchedFields.value = {}
 }
 
 function syncTaskListData(preferredOrder: string[]) {
@@ -1012,7 +1089,7 @@ function initFormData(task?: ScheduledTask | null): ScheduledTaskCreate {
     name: "",
     description: "",
     enabled: true,
-    trigger_config: getTriggerConfigByType("cron"),
+    trigger_config: getTriggerConfigByType("interval"),
     task_list: [],
     task_options: configStore.buildOptionsForTasks([]),
     preTasks: [],
@@ -1078,7 +1155,7 @@ function getTriggerConfigByType(
     case "interval":
       return buildIntervalConfig(existing)
     default:
-      return buildCronConfig()
+      return buildIntervalConfig()
   }
 }
 

@@ -72,6 +72,7 @@ const modelValue = defineModel<string | null>()
 const emit = defineEmits<{
   (e: "open"): void
   (e: "create", value: string): void
+  (e: "blur"): void
 }>()
 
 const { t } = useI18n()
@@ -136,6 +137,7 @@ function handleBlur() {
   // Close without committing — a new value is only committed by explicitly
   // clicking the creatable option. This prevents a half-typed value from
   // corrupting the bound value on accidental blur.
+  emit("blur")
   setTimeout(() => {
     isOpen.value = false
     inputText.value = ""
