@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Literal
@@ -59,6 +60,20 @@ def _device_as_dict(
     return device
 
 
+@dataclass(frozen=True)
+class RunRequest:
+    """submit_manual/submit_scheduled → _complete_run 的一次执行请求。"""
+
+    run_id: str
+    task_list: list[str]
+    task_options: TaskOptionsByTask
+    pre_tasks: Any
+    controller_name: str | None
+    device: ScheduledTaskDeviceConfig | dict[str, Any] | None
+    resource_name: str | None
+    log_label: str
+
+
 @dataclass
 class Admission:
     """调度入场结果：接受则带 run_id，拒绝则带冲突或跳过状态。"""
@@ -106,77 +121,37 @@ class ExecutionCoordinator:
 
     def _is_stop_requested(self, run_id: str) -> bool:
         active = self._state.active_run
-        return (
-            active is not None
-            and active.run_id == run_id
-            and active.stop_requested
-        )
+        return active is not None and active.run_id == run_id and active.stop_requested
 
-    def _spawn_completion(
-        self,
-        *,
-        run_id: str,
-        task_list: list[str],
-        task_options: TaskOptionsByTask,
-        pre_tasks: Any,
-        controller_name: str | None,
-        device: ScheduledTaskDeviceConfig | dict[str, Any] | None,
-        resource_name: str | None,
-        log_label: str,
-    ) -> None:
-        """创建并保留后台完成协程；入场路径立即返回。"""
-        task = asyncio.create_task(
-            self._complete_run(
-                run_id=run_id,
-                task_list=task_list,
-                task_options=task_options,
-                pre_tasks=pre_tasks,
-                controller_name=controller_name,
-                device=device,
-                resource_name=resource_name,
-                log_label=log_label,
-            )
-        )
-        self._state.active_execution_task = task
-
-    async def _complete_run(
-        self,
-        *,
-        run_id: str,
-        task_list: list[str],
-        task_options: TaskOptionsByTask,
-        pre_tasks: Any,
-        controller_name: str | None,
-        device: ScheduledTaskDeviceConfig | dict[str, Any] | None,
-        resource_name: str | None,
-        log_label: str,
-    ) -> None:
+    async def _complete_run(self, *, req: RunRequest) -> None:
         """后台完成：prepare/run → finish → 无条件清理 active 槽位。"""
         try:
             try:
-                status, error = await self._prepare_and_run(
-                    task_list=task_list,
-                    task_options=task_options,
-                    pre_tasks=pre_tasks,
-                    controller_name=controller_name,
-                    device=device,
-                    resource_name=resource_name,
-                    run_id=run_id,
-                    log_label=log_label,
-                )
-                await asyncio.to_thread(self._store.finish, run_id, status, error)
+                status, error = await self._prepare_and_run(req=req)
+                await asyncio.to_thread(self._store.finish, req.run_id, status, error)
+            except asyncio.CancelledError:
+                # CancelledError 继承自 BaseException（不被下面的 except Exception 捕获），
+                # 但 finally 仍清空 active 槽位——若不显式写终态，DB 行将残留 running。
+                # 用 shield 保护 finish 写入本身不被取消；suppress 避免写入失败掩盖取消语义。
+                with suppress(Exception):
+                    await asyncio.shield(
+                        asyncio.to_thread(
+                            self._store.finish, req.run_id, "stopped", "任务被取消"
+                        )
+                    )
+                raise
             except Exception as e:
-                logger.error("任务 %s 后台完成失败: %s", log_label, e)
+                logger.error("任务 %s 后台完成失败: %s", req.log_label, e)
                 try:
                     await asyncio.to_thread(
-                        self._store.finish, run_id, "failed", str(e)
+                        self._store.finish, req.run_id, "failed", str(e)
                     )
                 except Exception as finish_err:
                     logger.error(
-                        "任务 %s 写入失败状态异常: %s", log_label, finish_err
+                        "任务 %s 写入失败状态异常: %s", req.log_label, finish_err
                     )
         finally:
-            if self._state.active_run and self._state.active_run.run_id == run_id:
+            if self._state.active_run and self._state.active_run.run_id == req.run_id:
                 self._state.active_run = None
             if self._state.active_execution_task is asyncio.current_task():
                 self._state.active_execution_task = None
@@ -215,7 +190,7 @@ class ExecutionCoordinator:
             self._state.active_run = None
             raise
 
-        self._spawn_completion(
+        req = RunRequest(
             run_id=run_id,
             task_list=payload.task_list,
             task_options=payload.task_options,
@@ -224,6 +199,9 @@ class ExecutionCoordinator:
             device=payload.device,
             resource_name=payload.resource_name,
             log_label=MANUAL_TASK_NAME,
+        )
+        self._state.active_execution_task = asyncio.create_task(
+            self._complete_run(req=req)
         )
         return Admission(accepted=True, run_id=run_id)
 
@@ -326,7 +304,7 @@ class ExecutionCoordinator:
             self._state.active_run = None
             raise
 
-        self._spawn_completion(
+        req = RunRequest(
             run_id=run_id,
             task_list=task.task_list,
             task_options=task.task_options,
@@ -335,6 +313,9 @@ class ExecutionCoordinator:
             device=task.device,
             resource_name=task.resource_name,
             log_label=task.id,
+        )
+        self._state.active_execution_task = asyncio.create_task(
+            self._complete_run(req=req)
         )
         return Admission(accepted=True, run_id=run_id)
 
@@ -349,7 +330,9 @@ class ExecutionCoordinator:
         if worker is not None:
             await asyncio.to_thread(worker.tasks.stop)
         if completion is not None:
-            await completion
+            # shield 防止调用方（main.py wait_for）超时取消传播到 completion 本身，
+            # 避免提前写 stopped 并释放 active_run，而底层 MAA 线程仍活。
+            await asyncio.shield(completion)
         return True
 
     def _normalize_task_payload(
@@ -358,22 +341,17 @@ class ExecutionCoordinator:
         task_options: Any,
         pre_tasks: Any = None,
     ) -> tuple[list[str], TaskOptionsByTask, list]:
-        """有 interface 时走完整规范化；否则仅去重 task_id。"""
+        """始终走完整规范化：去重 task_id 并透传 options 与 pre_tasks。
+
+        worker.interface 在生产中恒为有效 InterfaceModel（main.py 启动期已校验，
+        load_interface_model 失败即 exit(1)）。若 interface 缺失则 normalizer 内部
+        抛出 AttributeError，由 _prepare_and_run 的外层异常处理转为 "failed" 终态——
+        优于静默以空 options 执行任务（旧 fallback 会无条件丢弃 options/pre_tasks）。
+        """
         worker = self._state.worker
-        if not worker or not getattr(worker, "interface", None):
-            normalized_task_list: list[str] = []
-            if isinstance(task_list, list):
-                seen: set[str] = set()
-                for task_id in task_list:
-                    if not isinstance(task_id, str) or task_id in seen:
-                        continue
-                    normalized_task_list.append(task_id)
-                    seen.add(task_id)
-            return (
-                normalized_task_list,
-                {tid: {} for tid in normalized_task_list},
-                [],
-            )
+        # _prepare_and_run 入口已 `if not worker: return "failed"`，此处仅为类型收窄。
+        if worker is None:  # pragma: no cover - 调用方契约保证
+            raise RuntimeError("worker 未就绪")
         return normalize_task_execution_payload(
             task_list,
             task_options,
@@ -381,18 +359,16 @@ class ExecutionCoordinator:
             pre_tasks,
         )
 
-    async def _prepare_and_run(
-        self,
-        task_list: list[str],
-        task_options: TaskOptionsByTask,
-        pre_tasks: Any,
-        controller_name: str | None,
-        device: ScheduledTaskDeviceConfig | dict[str, Any] | None,
-        resource_name: str | None,
-        run_id: str,
-        log_label: str,
-    ) -> tuple[str, str | None]:
+    async def _prepare_and_run(self, *, req: RunRequest) -> tuple[str, str | None]:
         """连接设备 → 启动任务 → 轮询结束；返回 (status, error_message)，不碰 ActiveRun。"""
+        run_id = req.run_id
+        task_list = req.task_list
+        task_options = req.task_options
+        pre_tasks = req.pre_tasks
+        controller_name = req.controller_name
+        device = req.device
+        resource_name = req.resource_name
+        log_label = req.log_label
         worker = self._state.worker
         if not worker:
             logger.error("Worker 未就绪，无法执行任务 %s", log_label)
@@ -436,7 +412,11 @@ class ExecutionCoordinator:
             ):
                 need_connect = False
 
-            if need_connect and device_state.configuration_locked:
+            if need_connect:
+                # 重连前无条件清干净：connected=True 但 locked=False 的残留状态
+                # （上次 run 在 stop 路径提前返回，或只调过 connect 未调 set_resource）
+                # 同样会让下面的 connect 留下未注册 sink 的 controller。
+                # 无 reason 调用是幂等且静默的（device_service.reset_connection_state）。
                 await asyncio.to_thread(worker.device.reset_connection_state)
 
             if need_connect:
@@ -467,6 +447,12 @@ class ExecutionCoordinator:
                         connect_success = True
                         break
                     except Exception as e:
+                        # 每次尝试必须独立：connect 成功但 set_resource 失败/抛错会
+                        # 残留 connected=True + 活的 controller（sink 已注册）。下次
+                        # connect 会新建 controller，而 register_controller_sink 因
+                        # _controller_sink_id 已占用提前返回 → 新 controller 无 sink，
+                        # 控制器侧事件静默丢失，且旧 sink id 会被错误地从新 controller 摘除。
+                        await asyncio.to_thread(worker.device.reset_connection_state)
                         if attempt < max_retry:
                             worker.events.send_log(
                                 f"连接失败，第 {attempt} 次重试...: {e}"
@@ -514,11 +500,27 @@ class ExecutionCoordinator:
                 worker.events.send_log(f"任务 {log_label} 已被跳过：任务已在运行")
                 return "stopped", "任务已在运行"
 
-            while worker and task_state.running:
-                await asyncio.sleep(1)
+            while task_state.running:
+                # 活线程：继续等待；stop_requested 仅是停止意图，不等于任务已停止。
+                thread = task_state.thread
+                if thread is not None and thread.is_alive():
+                    await asyncio.sleep(1)
+                    continue
+                # 死/缺失线程：收敛 stale 残留（running=True 但线程已死）为终态，清 running/thread。
+                last_status = task_state.last_status
+                if last_status not in ("success", "stopped", "failed"):
+                    if self._is_stop_requested(run_id):
+                        task_state.last_status = "stopped"
+                        task_state.last_error = "任务已终止"
+                    else:
+                        task_state.last_status = "failed"
+                        task_state.last_error = "任务执行线程异常退出"
+                task_state.running = False
+                task_state.thread = None
+                break
 
-            task_status = getattr(task_state, "last_status", "failed")
-            task_error = getattr(task_state, "last_error", None)
+            task_status = task_state.last_status
+            task_error = task_state.last_error
 
             if task_status == "success":
                 logger.info("任务 %s 执行成功", log_label)

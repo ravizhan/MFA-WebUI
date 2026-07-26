@@ -1,4 +1,4 @@
-"""Process lock unit tests: RuntimeOwnership metadata and Python-Go interop."""
+"""Process lock unit tests: RuntimeOwnership lifecycle and Python-Go interop."""
 
 import shutil
 import subprocess
@@ -11,29 +11,24 @@ from services.process_lock import (
     AdvisoryFileLock,
     LockBusyError,
     RuntimeOwnership,
+    UpdateLockBusyError,
     lock_paths,
-    pid_metadata_path,
 )
 
 
-def test_runtime_ownership_pid_after_lock(tmp_path: Path):
+def test_runtime_ownership_lock_files_survive_release(tmp_path: Path):
     ownership = RuntimeOwnership(tmp_path)
     ownership.acquire()
     try:
-        pid_path = pid_metadata_path(tmp_path)
-        assert pid_path.exists()
-        data = pid_path.read_text(encoding="utf-8")
-        assert "owner_token" in data
-        assert str(ownership.owner_token) in data
         runtime, update = lock_paths(tmp_path)
         assert runtime.exists()
         assert update.exists()
     finally:
         ownership.release()
-    # Owner removes PID; lock files remain
-    assert not pid_metadata_path(tmp_path).exists()
-    runtime, _ = lock_paths(tmp_path)
+    # 稳定锁文件在释放后依然存在（不删除）
+    runtime, update = lock_paths(tmp_path)
     assert runtime.exists()
+    assert update.exists()
 
 
 def test_runtime_ownership_busy(tmp_path: Path):
@@ -45,6 +40,48 @@ def test_runtime_ownership_busy(tmp_path: Path):
             second.acquire()
     finally:
         first.release()
+
+
+def test_runtime_ownership_update_lock_busy_raises_specific_type(tmp_path: Path):
+    """update 锁被占时 RuntimeOwnership.acquire 抛 UpdateLockBusyError 子类。
+
+    这是替代 main.py 原 `"update" in str(e).lower()` 字面耦合的承重变更：
+    退出码选择由该异常类型驱动。缩短超时避免 30s 阻塞（复用既有
+    UPDATE_LOCK_TIMEOUT 旋钮，非依赖注入）。
+    """
+    _, update_path = lock_paths(tmp_path)
+    holder = AdvisoryFileLock(update_path)
+    holder.acquire()
+    try:
+        ownership = RuntimeOwnership(tmp_path)
+        ownership.UPDATE_LOCK_TIMEOUT = 0.01  # 缩短超时，避免测试阻塞 30s
+        with pytest.raises(UpdateLockBusyError) as excinfo:
+            ownership.acquire()
+        # 子类关系成立：仍是一种 LockBusyError
+        assert isinstance(excinfo.value, LockBusyError)
+        assert not ownership.is_acquired
+    finally:
+        holder.release()
+
+
+def test_runtime_ownership_runtime_lock_busy_stays_plain(tmp_path: Path):
+    """runtime 锁被占（update 锁空闲）时抛普通 LockBusyError，非 UpdateLockBusyError。
+
+    这条路径对应“应用已在运行”/ 委托给运行中实例（exit 4），必须与
+    UpdateLockBusyError（exit 5）严格区分。
+    """
+    runtime_path, _ = lock_paths(tmp_path)
+    holder = AdvisoryFileLock(runtime_path)
+    holder.acquire()
+    try:
+        ownership = RuntimeOwnership(tmp_path)
+        with pytest.raises(LockBusyError) as excinfo:
+            ownership.acquire()
+        # 关键：不是 UpdateLockBusyError 子类
+        assert not isinstance(excinfo.value, UpdateLockBusyError)
+        assert not ownership.is_acquired
+    finally:
+        holder.release()
 
 
 def test_python_go_lockhelper_interop(tmp_path: Path):

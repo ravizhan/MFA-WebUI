@@ -111,7 +111,7 @@ async def test_teardown_waits_for_prepare_completion_before_worker(
 
     asyncio.create_task(release_soon())
 
-    await main_module.teardown_runtime(monitor_task)
+    await main_module.teardown_runtime(monitor_task, None)
 
     # store 已终态、槽位已清
     rows = store.list()
@@ -159,7 +159,7 @@ async def test_teardown_no_active_run_still_shuts_down(
 
     monitor_task = asyncio.create_task(fake_monitor())
     await asyncio.sleep(0)  # 让 monitor 进入 wait，便于观察 cancel 路径
-    await main_module.teardown_runtime(monitor_task)
+    await main_module.teardown_runtime(monitor_task, None)
 
     assert order == ["scheduler", "worker", "monitor", "lock"]
     assert state.runtime_ownership is None

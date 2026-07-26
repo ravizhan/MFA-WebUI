@@ -22,7 +22,9 @@ class TestLoadDelegation:
     """load/loads delegate to pyjson5."""
 
     def test_loads_delegates_to_pyjson5(self):
-        with patch.object(json.pyjson5, "loads", return_value={"delegated": True}) as mock_loads:
+        with patch.object(
+            json.pyjson5, "loads", return_value={"delegated": True}
+        ) as mock_loads:
             result = json.loads('{"a": 1}')
             mock_loads.assert_called_once_with('{"a": 1}')
             assert result == {"delegated": True}

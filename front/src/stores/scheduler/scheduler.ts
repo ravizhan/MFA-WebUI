@@ -78,12 +78,12 @@ export const useSchedulerStore = defineStore("scheduler", () => {
       return false
     }
     if (response.status === "success" && response.task) {
-      const index = tasks.value.findIndex((t) => t.id === taskId)
-      if (index !== -1) {
-        tasks.value[index] = response.task
-      }
+      // Mutation response is authoritative for the mutated row; never refetch.
+      // Missing local id → don't silently return true with a stale list.
+      const updated = response.task
+      tasks.value = tasks.value.map((t) => (t.id === taskId ? updated : t))
       loading.value = false
-      return true
+      return tasks.value.some((t) => t.id === taskId)
     }
     error.value = response.message || "更新任务失败"
     loading.value = false

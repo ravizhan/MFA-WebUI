@@ -11,6 +11,7 @@ from sqlalchemy import (
     String,
     create_engine,
     delete,
+    func,
     select,
     update,
 )
@@ -124,9 +125,36 @@ class ExecutionStore:
         self._session_factory = sessionmaker(self._engine)
 
     def init(self) -> None:
-        """创建表与索引。"""
+        """创建表与索引，并崩溃恢复残留的 running 记录为 failed。
+
+        进程异常退出（崩溃 / kill / 断电）后，残留的 ``status='running'`` 且
+        ``finished_at IS NULL`` 的行会让后续入场永远 busy，故在此归档为
+        ``failed`` 终态；仅在 ``error_message`` 当前为 NULL 时写入
+        ``应用异常退出``，避免覆盖既有错误信息。
+        """
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         _Base.metadata.create_all(self._engine)
+        # 崩溃恢复：上次进程异常退出后，残留 running 行（finished_at IS NULL）
+        # 会让后续入场永远 busy；归档为 failed 终态。
+        finished_at = _to_iso(_utc_now())
+        with self._session_factory() as session:
+            result = session.execute(
+                update(SchedulerExecution)
+                .where(SchedulerExecution.finished_at.is_(None))
+                .values(
+                    status="failed",
+                    finished_at=finished_at,
+                    error_message=func.coalesce(
+                        SchedulerExecution.error_message, "应用异常退出"
+                    ),
+                )
+            )
+            reconciled = result.rowcount  # type: ignore[attr-defined]
+            session.commit()
+        if reconciled > 0:
+            logger.info(
+                "execution_store: 崩溃恢复归档 %d 条残留 running 记录", reconciled
+            )
 
     def add(self, execution: TaskExecution) -> None:
         """插入一条记录，并在同一事务内裁剪至最多 EXECUTIONS_MAX_RECORDS 条。"""
@@ -156,12 +184,15 @@ class ExecutionStore:
         if error is not None:
             values["error_message"] = error
         with self._session_factory() as session:
-            session.execute(
+            result = session.execute(
                 update(SchedulerExecution)
                 .where(SchedulerExecution.id == run_id)
                 .values(**values)
             )
+            reconciled = result.rowcount  # type: ignore[attr-defined]
             session.commit()
+        if reconciled == 0:
+            logger.warning("finish: 未找到 run_id=%s，未更新任何执行记录", run_id)
 
     def list(self, limit: int = 50) -> List[TaskExecution]:
         """按 started_at/id 倒序取最近 limit 条。"""

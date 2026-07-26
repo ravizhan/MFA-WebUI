@@ -58,7 +58,7 @@ class SystemScheduler:
         logger.info("native unregister ok: %s", task_id)
 
     def converge(self, desired: list[ScheduledTask]) -> ConvergeReport:
-        """按期望集收敛：注册目标、清理孤儿。
+        """注册目标、清理孤儿。
 
         单任务失败记入 report.failed，不中断其余项（启动收敛用）。
         """

@@ -9,6 +9,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from apscheduler.triggers.combining import OrTrigger
+from apscheduler.triggers.cron import CronTrigger
 
 from models.scheduler import (
     CronTriggerConfig,
@@ -17,7 +19,7 @@ from models.scheduler import (
     ScheduledTaskCreate,
 )
 import scheduler_manager as sm
-from scheduler_job_codec import encode_execution_kwargs
+from scheduler_job_codec import SchedulerJobDecodeError, encode_execution_kwargs
 from scheduler_manager import (
     SchedulerManager,
     _bind_callback_runtime,
@@ -339,3 +341,115 @@ async def test_create_persists_trigger_config_in_kwargs(manager: SchedulerManage
     assert job.func is scheduled_job_fired or job.func_ref.endswith(
         "scheduled_job_fired"
     )
+
+
+# ---------------------------------------------------------------------------
+# Undecodable job — delete/pause/resume must not be blocked by decode failure
+#
+# A persisted job whose kwargs decode fine but whose APS trigger object does not
+# is the "zombie" scenario: strict `_decode_job` reads `job.trigger` and raises
+# (OrTrigger is not Cron/Date/Interval), while the lenient
+# `decode_scheduled_task_from_kwargs` reads `kwargs["trigger_config"]` and
+# succeeds — so `scheduled_job_fired` still dispatches the job. Before the fix
+# this job was invisible (get_all_tasks skips it), undeletable, unpausable and
+# unresumable, yet still firing.
+# ---------------------------------------------------------------------------
+
+
+def _persist_undecodable_job(
+    manager: SchedulerManager, task_id: str = "undecodable-1"
+) -> str:
+    """Persist a job whose strict `_decode_job` raises but lenient decode succeeds.
+
+    `OrTrigger` is a real, picklable APS trigger; `decode_trigger` only handles
+    Cron/Date/Interval, so the strict path raises SchedulerJobDecodeError while
+    kwargs carry a valid `trigger_config`, so `scheduled_job_fired` would still
+    fire the job.
+    """
+    trigger_config = CronTriggerConfig(cron="0 9 * * *")
+    kwargs = encode_execution_kwargs(
+        task_id=task_id,
+        task_name="undecodable",
+        task_description="",
+        task_list=["Main"],
+        task_options={},
+        pre_tasks=[],
+        controller_name=None,
+        device=None,
+        resource_name=None,
+        wakeup_enabled=False,
+        trigger_config=trigger_config,
+    )
+    or_trigger = OrTrigger(
+        [CronTrigger(minute="0", hour="9", day="*", month="*", day_of_week="*")]
+    )
+    manager.scheduler.add_job(
+        scheduled_job_fired, trigger=or_trigger, id=task_id, kwargs=kwargs
+    )
+    return task_id
+
+
+@pytest.mark.asyncio
+async def test_get_all_tasks_skips_undecodable_job(manager: SchedulerManager):
+    """Regression guard: the read path must skip (not delete) undecodable jobs."""
+    task_id = _persist_undecodable_job(manager)
+    job = manager.scheduler.get_job(task_id)
+    assert job is not None  # really persisted
+    # sanity: the strict path really does reject this job
+    with pytest.raises(SchedulerJobDecodeError):
+        manager._decode_job(job)
+
+    tasks = await manager.get_all_tasks()
+
+    assert all(t.id != task_id for t in tasks)
+
+
+@pytest.mark.asyncio
+async def test_delete_task_succeeds_despite_decode_failure(manager: SchedulerManager):
+    """Decode failure must not gate APS removal — formerly returned False (zombie)."""
+    task_id = _persist_undecodable_job(manager)
+    sys_sched = MagicMock()
+    manager.set_system_scheduler(sys_sched)
+
+    ok = await manager.delete_task(task_id)
+
+    assert ok is True
+    assert manager.scheduler.get_job(task_id) is None
+    # Defensive native unregister — we cannot know whether a native entry exists.
+    sys_sched.unregister.assert_called_once_with(task_id)
+
+
+@pytest.mark.asyncio
+async def test_pause_task_succeeds_despite_decode_failure(manager: SchedulerManager):
+    """Decode failure must not gate pause — formerly returned False (zombie)."""
+    task_id = _persist_undecodable_job(manager)
+    sys_sched = MagicMock()
+    manager.set_system_scheduler(sys_sched)
+
+    ok = await manager.pause_task(task_id)
+
+    assert ok is True
+    assert manager.scheduler.get_job(task_id) is not None
+    # A paused task must not be woken by the OS — defensive unregister.
+    sys_sched.unregister.assert_called_once_with(task_id)
+
+
+@pytest.mark.asyncio
+async def test_resume_task_succeeds_without_native_register_on_decode_failure(
+    manager: SchedulerManager,
+):
+    """Decode failure must not gate resume, and native wakeup must NOT be restored
+    (wakeup_enabled is unknowable). Formerly returned False (zombie). Must not raise."""
+    task_id = _persist_undecodable_job(manager)
+    sys_sched = MagicMock()
+    manager.set_system_scheduler(sys_sched)
+    # Pause first so resume has observable state to act on.
+    assert await manager.pause_task(task_id) is True
+    sys_sched.reset_mock()  # isolate resume's native side-effects
+
+    ok = await manager.resume_task(task_id)
+
+    assert ok is True  # also proves no exception escaped
+    assert manager.scheduler.get_job(task_id) is not None
+    # Cannot know wakeup_enabled → safer to skip native registration entirely.
+    sys_sched.register.assert_not_called()

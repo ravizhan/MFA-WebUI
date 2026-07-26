@@ -529,12 +529,7 @@
   </dialog>
 
   <!-- AI Help Dialog -->
-  <dialog
-    v-if="showAiDialog"
-    ref="aiDialogRef"
-    class="modal modal-middle"
-    @close="onAiDialogClose"
-  >
+  <dialog v-if="showAiDialog" ref="aiDialogRef" class="modal modal-middle" @close="onAiDialogClose">
     <div class="modal-box max-w-lg">
       <h3 class="font-bold text-lg">{{ t("settings.scheduler.dialog.aiHelpTitle") }}</h3>
       <p class="text-xs text-base-content/60 mt-1">
@@ -650,13 +645,10 @@ function syncAiDialogVisibility(open: boolean) {
   if (el.open) el.close()
 }
 
-watch(
-  showAiDialog,
-  async (val) => {
-    await nextTick()
-    syncAiDialogVisibility(val)
-  },
-)
+watch(showAiDialog, async (val) => {
+  await nextTick()
+  syncAiDialogVisibility(val)
+})
 
 function closeAiDialog() {
   closingAiDialogFromUi.value = true
@@ -688,10 +680,10 @@ function isIntervalInvalid(): boolean {
   const cfg = intervalConfig.value
   return (
     nonNegative(cfg.weeks) +
-    nonNegative(cfg.days) +
-    nonNegative(cfg.hours) +
-    nonNegative(cfg.minutes) +
-    nonNegative(cfg.seconds) <=
+      nonNegative(cfg.days) +
+      nonNegative(cfg.hours) +
+      nonNegative(cfg.minutes) +
+      nonNegative(cfg.seconds) <=
     0
   )
 }
@@ -1429,7 +1421,7 @@ function validateForm(): boolean {
   return validateTaskList()
 }
 
-async function saveTaskPayload(): Promise<{ taskId: string; success: boolean }> {
+async function saveTaskPayload(): Promise<boolean> {
   const taskPayload = {
     ...formData.value,
     ...configStore.buildExecutionPayload(formData.value.task_list, formData.value.task_options),
@@ -1441,18 +1433,11 @@ async function saveTaskPayload(): Promise<{ taskId: string; success: boolean }> 
   }
 
   if (isEditMode.value && task) {
-    const success = await schedulerStore.updateTask(task.id, taskPayload)
-    if (!success) {
-      return { taskId: "", success: false }
-    }
-    return { taskId: task.id, success: true }
+    return schedulerStore.updateTask(task.id, taskPayload)
   }
 
   const createdTask = await schedulerStore.createTask(taskPayload)
-  if (!createdTask) {
-    return { taskId: "", success: false }
-  }
-  return { taskId: createdTask.id, success: true }
+  return createdTask !== null
 }
 
 async function handleSave() {
@@ -1461,7 +1446,7 @@ async function handleSave() {
   }
 
   loading.value = true
-  const { success } = await saveTaskPayload()
+  const success = await saveTaskPayload()
   loading.value = false
 
   if (!success) {

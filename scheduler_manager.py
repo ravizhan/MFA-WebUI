@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 import tzlocal
+from apscheduler.jobstores.base import JobLookupError
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
@@ -152,7 +153,7 @@ class SchedulerManager:
         task_options: Any,
         pre_tasks: Any = None,
     ) -> tuple[list[str], TaskOptionsByTask, list]:
-        """按 interface 规范化任务载荷；无 worker 时仅做去重。"""
+        """按 interface 规范化任务载荷；接口不可用时仅去重 task_list，透传 options 与 pre_tasks。"""
         worker = self._worker
         if not worker or not getattr(worker, "interface", None):
             normalized_task_list: list[str] = []
@@ -163,10 +164,24 @@ class SchedulerManager:
                         continue
                     normalized_task_list.append(task_id)
                     seen_task_ids.add(task_id)
+            # 接口缺失时透传 options/pre_tasks，仅去重 task_list；
+            # 仅当值确实不可用（非 dict / None）才回退到空容器
+            if isinstance(task_options, dict):
+                passthrough_options = {
+                    tid: task_options[tid]
+                    for tid in normalized_task_list
+                    if tid in task_options
+                }
+            else:
+                passthrough_options = {}
+            if isinstance(pre_tasks, list):
+                passthrough_pre_tasks = pre_tasks
+            else:
+                passthrough_pre_tasks = []
             return (
                 normalized_task_list,
-                {tid: {} for tid in normalized_task_list},
-                [],
+                passthrough_options,
+                passthrough_pre_tasks,
             )
         return normalize_task_execution_payload(
             task_list,
@@ -276,17 +291,17 @@ class SchedulerManager:
         return self._decode_job(job)
 
     async def get_all_tasks(self) -> list[ScheduledTask]:
-        """列出全部任务；无法解码的旧/坏 job 直接删除。"""
+        """列出全部任务；无法解码的旧/坏 job 跳过（只读路径不删除）。"""
         if not self.scheduler:
             return []
         tasks: list[ScheduledTask] = []
         for job in self.scheduler.get_jobs():
             try:
                 tasks.append(self._decode_job(job))
-            except SchedulerJobDecodeError:
-                # 不伪造兜底配置，删除后由用户重建
-                logger.warning("删除无法解码的调度任务 %s", job.id, exc_info=True)
-                job.remove()
+            except Exception:
+                # 只读路径不删除 job，避免误删；返回列表直接跳过坏 job
+                logger.warning("跳过无法解码的调度任务 %s", job.id, exc_info=True)
+                continue
         return tasks
 
     async def update_task(
@@ -416,10 +431,9 @@ class SchedulerManager:
                     self._unregister_native(task_id)
 
             trigger = build_trigger(new_trigger_config)
-            self.scheduler.modify_job(
-                task_id,
-                trigger=trigger,
-                kwargs=encode_execution_kwargs(
+            modify_kwargs: dict[str, Any] = {
+                "trigger": trigger,
+                "kwargs": encode_execution_kwargs(
                     task_id=task_id,
                     task_name=new_name,
                     task_description=new_description,
@@ -432,7 +446,14 @@ class SchedulerManager:
                     wakeup_enabled=new_wakeup,
                     trigger_config=new_trigger_config,
                 ),
-            )
+            }
+            # modify_job(trigger=...) 不会重算 next_run_time，需手动设定；
+            # 仅当任务处于启用态（next_run_time 非 None）时设定，避免误反暂停
+            if job.next_run_time is not None:
+                modify_kwargs["next_run_time"] = trigger.get_next_fire_time(
+                    None, datetime.now(self.scheduler.timezone)
+                )
+            self.scheduler.modify_job(task_id, **modify_kwargs)
 
             if task_update.enabled is not None:
                 if task_update.enabled:
@@ -453,23 +474,45 @@ class SchedulerManager:
             return None
 
     async def delete_task(self, task_id: str) -> bool:
-        """删除任务：若在原生注册中则先注销，再移除 APS job。"""
+        """删除任务：若在原生注册中则先注销，再移除 APS job。
+
+        解码失败不得阻断删除——否则会留下「不可见、不可删、仍触发」的僵尸任务。
+        解码仅为决定是否需要注销原生唤醒；解码失败时防御性尝试注销（无法判断
+        是否存在原生注册，若残留则机器会持续唤醒），再移除 APS job。
+        """
         if not self.scheduler:
             return False
         try:
             job = self.scheduler.get_job(task_id)
             if job is None:
                 return False
-            task = self._decode_job(job)
+            try:
+                task = self._decode_job(job)
+            except Exception:
+                logger.warning(
+                    "delete_task: 解码 job 失败，仍尝试注销原生并移除 APS job: %s",
+                    task_id,
+                    exc_info=True,
+                )
+                try:
+                    self._unregister_native(task_id)
+                except Exception:
+                    logger.warning(
+                        "delete_task: 注销原生唤醒失败（job 不可解码）: %s",
+                        task_id,
+                        exc_info=True,
+                    )
+                self.scheduler.remove_job(task_id)
+                logger.info("删除无法解码的定时任务: %s", task_id)
+                return True
             if self._desired_wakeup(task.wakeup_enabled, task.enabled):
                 self._unregister_native(task_id)
             self.scheduler.remove_job(task_id)
             logger.info("删除定时任务: %s", task_id)
             return True
+        except JobLookupError:
+            return False
         except Exception as e:
-            name = type(e).__name__
-            if name == "JobLookupError" or "JobLookupError" in name:
-                return False
             logger.error("删除任务失败: %s", e)
             worker = self._worker
             if worker:
@@ -477,20 +520,45 @@ class SchedulerManager:
             return False
 
     async def pause_task(self, task_id: str) -> bool:
-        """暂停任务；当前需要原生唤醒时先注销再 pause。"""
+        """暂停任务；当前需要原生唤醒时先注销再 pause。
+
+        解码失败不得阻断暂停——否则暂停态的 job 仍可能被 OS 唤醒。
+        解码失败时防御性尝试注销原生（无法判断是否存在，残留则 OS 会绕过
+        暂停继续唤醒），再 pause APS job。
+        """
         if not self.scheduler:
             return False
         try:
             job = self.scheduler.get_job(task_id)
             if job is None:
                 return False
-            task = self._decode_job(job)
+            try:
+                task = self._decode_job(job)
+            except Exception:
+                logger.warning(
+                    "pause_task: 解码 job 失败，仍尝试注销原生并暂停 APS job: %s",
+                    task_id,
+                    exc_info=True,
+                )
+                try:
+                    self._unregister_native(task_id)
+                except Exception:
+                    logger.warning(
+                        "pause_task: 注销原生唤醒失败（job 不可解码）: %s",
+                        task_id,
+                        exc_info=True,
+                    )
+                self.scheduler.pause_job(task_id)
+                logger.info("暂停无法解码的定时任务: %s", task_id)
+                return True
             # 暂停后不应再被 OS 唤醒
             if self._desired_wakeup(task.wakeup_enabled, task.enabled):
                 self._unregister_native(task_id)
             self.scheduler.pause_job(task_id)
             logger.info("暂停定时任务: %s", task_id)
             return True
+        except JobLookupError:
+            return False
         except Exception as e:
             logger.error("暂停任务失败: %s", e)
             worker = self._worker
@@ -499,20 +567,37 @@ class SchedulerManager:
             return False
 
     async def resume_task(self, task_id: str) -> bool:
-        """恢复任务；开启唤醒时先注册原生再 resume。"""
+        """恢复任务；开启唤醒时先注册原生再 resume。
+
+        解码失败不得阻断恢复，但无法判断 wakeup_enabled——为安全起见跳过原生
+        注册（避免给本不该唤醒的任务挂上系统唤醒），仅恢复 APS job 并记录警告。
+        """
         if not self.scheduler:
             return False
         try:
             job = self.scheduler.get_job(task_id)
             if job is None:
                 return False
-            task = self._decode_job(job)
+            try:
+                task = self._decode_job(job)
+            except Exception:
+                logger.warning(
+                    "resume_task: 解码 job 失败，原生唤醒未恢复（wakeup_enabled 未知），"
+                    "仅恢复 APS job: %s",
+                    task_id,
+                    exc_info=True,
+                )
+                self.scheduler.resume_job(task_id)
+                logger.info("恢复无法解码的定时任务（原生唤醒未恢复）: %s", task_id)
+                return True
             # 恢复后需重新挂上系统唤醒
             if task.wakeup_enabled:
                 self._register_native(task)
             self.scheduler.resume_job(task_id)
             logger.info("恢复定时任务: %s", task_id)
             return True
+        except JobLookupError:
+            return False
         except Exception as e:
             logger.error("恢复任务失败: %s", e)
             worker = self._worker

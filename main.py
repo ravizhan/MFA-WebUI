@@ -42,7 +42,12 @@ from models.task_config import (
 from scheduler_manager import SchedulerManager
 from services.execution_coordinator import ExecutionCoordinator
 from services.execution_store import ExecutionStore
-from services.process_lock import LockBusyError, LockError, RuntimeOwnership
+from services.process_lock import (
+    LockBusyError,
+    LockError,
+    RuntimeOwnership,
+    UpdateLockBusyError,
+)
 from services.system_scheduler import SystemScheduler
 from services.update_service import (
     check_github_update,
@@ -155,17 +160,24 @@ def release_runtime_ownership() -> None:
 
 
 def ensure_native_token() -> str:
-    """读取或创建 config/native_token（权限 0600），供 native 二次进程鉴权。"""
+    """读取或创建 config/native_token（权限 0600），供 native 二次进程鉴权。
+
+    存在但内容为空/仅空白的 token 文件视为损坏：重新生成并覆盖写回。
+    读取错误快速失败（不吞 OSError，不加额外容错或日志）。
+    """
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    if not NATIVE_TOKEN_FILE.exists():
-        token = secrets.token_hex(32)
-        NATIVE_TOKEN_FILE.write_text(token, encoding="utf-8")
-        try:
-            os.chmod(NATIVE_TOKEN_FILE, 0o600)
-        except OSError:
-            pass
-        return token
-    return NATIVE_TOKEN_FILE.read_text(encoding="utf-8").strip()
+    # 读取失败直接抛（IsADirectoryError / OSError），由调用方处理
+    if NATIVE_TOKEN_FILE.exists():
+        token = NATIVE_TOKEN_FILE.read_text(encoding="utf-8").strip()
+        if token:
+            return token
+    token = secrets.token_hex(32)
+    NATIVE_TOKEN_FILE.write_text(token, encoding="utf-8")
+    try:
+        os.chmod(NATIVE_TOKEN_FILE, 0o600)
+    except OSError:
+        pass
+    return token
 
 
 def delegate_native_dispatch(task_id: str) -> int:
@@ -204,6 +216,26 @@ def delegate_native_dispatch(task_id: str) -> int:
         time.sleep(2.0)
     print(f"native-dispatch 委托失败（已重试）: {last_err}", file=sys.stderr)
     return EXIT_DELEGATE_FAILED
+
+
+def handle_startup_lock_error(exc: LockError, scheduled_task: str | None):
+    """启动抢锁失败时按异常类型选择退出码并终止进程。
+
+    顺序敏感：UpdateLockBusyError 是 LockBusyError 子类，必须先匹配——
+    否则更新忙会被普通 LockBusyError 分支吞掉走错路径。普通 LockBusyError
+    表示运行时锁被占：有 scheduled_task 则委托给运行中实例（native-dispatch），
+    否则报“应用已在运行”。其他 LockError 视为锁协议失败。
+    """
+    if isinstance(exc, UpdateLockBusyError):
+        print("更新进行中，无法启动")
+        sys.exit(EXIT_UPDATING)
+    if isinstance(exc, LockBusyError):
+        if scheduled_task:
+            sys.exit(delegate_native_dispatch(scheduled_task))
+        print("应用已在运行")
+        sys.exit(EXIT_APP_RUNNING)
+    print(f"锁协议失败: {exc}")
+    sys.exit(EXIT_UPDATING)
 
 
 @asynccontextmanager
@@ -261,6 +293,7 @@ async def lifespan(app: FastAPI):
 
     # 冷启动 native 唤醒：resume 后作为后台任务执行
     pending_id = app_state.pending_scheduled_task_id
+    pending_native_task: asyncio.Task | None = None
     if pending_id and app_state.execution_coordinator is not None:
 
         async def _run_pending_native():
@@ -285,38 +318,65 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 app_state.send_log(f"启动 native 任务失败: {e}")
 
-        asyncio.create_task(_run_pending_native())
+        # 保留强引用：asyncio.create_task 仅被事件循环以弱引用持有，会被 GC
+        # 中途回收，静默丢失冷启动 native 唤醒（本 PR 头号特性）。
+        pending_native_task = asyncio.create_task(_run_pending_native())
 
     monitor_task = asyncio.create_task(log_monitor())
     webbrowser.open_new("http://127.0.0.1:5566")
     yield
-    await teardown_runtime(monitor_task)
+    await teardown_runtime(monitor_task, pending_native_task)
 
 
-async def teardown_runtime(monitor_task: asyncio.Task) -> None:
+async def teardown_runtime(
+    monitor_task: asyncio.Task,
+    pending_native_task: asyncio.Task | None,
+) -> None:
     """
-    正常关闭顺序：停调度器 → 等待活跃执行落库清理 → worker → log_monitor。
-    运行时锁在 finally 中释放，避免中途异常泄漏。
+    正常关闭顺序：取消冷启动 native 唤醒 → 停调度器 → 等待活跃执行落库清理 →
+    worker → log_monitor。运行时锁在 finally 中释放，避免中途异常泄漏。
+
+    每个 await 均有超时上限：MAA worker 可能卡在原生阻塞调用，stop_flag 轮询
+    永不返回；若放任等待，finally 中 release_runtime_ownership() 永不执行，
+    runtime.lock 残留，下次启动以 exit 4 报 "应用已在运行"。超时仅记日志并
+    强制继续关闭流程，确保锁终被释放。
     """
     app_state.is_shutting_down = True
     try:
-        # 1. 先停 APS，阻止新的 scheduled 回调入场
+        # 0. 先取消冷启动 native 唤醒：快关场景下 submit_scheduled 可能已占
+        #    active-run 槽但尚未 store.finish，留下悬空 running 行
+        if pending_native_task is not None:
+            pending_native_task.cancel()
+            # 同时抑制 TimeoutError：协程若不响应 cancel，wait_for 抛的是
+            # TimeoutError 而非 CancelledError，逃逸会让关闭流程报错
+            with suppress(asyncio.CancelledError, TimeoutError):
+                await asyncio.wait_for(pending_native_task, timeout=5)
+
+        # 1. 先停 APS，阻止新的 scheduled 回调入场（有界等待）
         if app_state.scheduler_manager is not None:
-            await app_state.scheduler_manager.shutdown()
+            try:
+                await asyncio.wait_for(
+                    app_state.scheduler_manager.shutdown(), timeout=10
+                )
+            except TimeoutError:
+                app_state.send_log("等待调度器关闭超时，强制继续关闭流程")
 
         # 2. 有活跃执行则请求停止并等待后台完成协程（含 store.finish / 清槽）
         coordinator = app_state.execution_coordinator
         if coordinator is not None and coordinator.active_run() is not None:
-            await coordinator.stop_active()
+            try:
+                await asyncio.wait_for(coordinator.stop_active(), timeout=15)
+            except TimeoutError:
+                app_state.send_log("等待活跃执行停止超时，强制继续关闭流程")
 
         # 3. 执行结束后再关 worker
         if app_state.worker is not None:
             app_state.worker.shutdown()
 
-        # 4. 最后停日志监视
+        # 4. 最后停日志监视（有界等待，防止卡死的 monitor 阻塞锁释放）
         monitor_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await monitor_task
+        with suppress(asyncio.CancelledError, TimeoutError):
+            await asyncio.wait_for(monitor_task, timeout=5)
     finally:
         release_runtime_ownership()
 
@@ -1122,16 +1182,31 @@ async def native_dispatch(body: NativeDispatchRequest):
         app_state.send_log(
             f"native-dispatch 入场 task={task.name} run_id={admission.run_id}"
         )
-    else:
-        app_state.send_log(
-            f"native-dispatch 跳过 task={task.name} 原因={admission.skip_status}"
-        )
-    return {
-        "status": "success",
-        "accepted": admission.accepted,
-        "run_id": admission.run_id,
-        "skip_status": admission.skip_status,
-    }
+        return {
+            "status": "success",
+            "accepted": admission.accepted,
+            "run_id": admission.run_id,
+            "skip_status": admission.skip_status,
+        }
+    # 入场被拒（迟到 / 更新中 / 忙）：返回 409 而非 200，使 CLI 侧
+    # delegate_native_dispatch 映射到非零退出码（否则 OS 调度器历史会显示
+    # 一次从未真正执行的成功运行，无法诊断“为何定时任务没跑”）
+    app_state.send_log(
+        f"native-dispatch 跳过 task={task.name} 原因={admission.skip_status}"
+    )
+    return JSONResponse(
+        status_code=409,
+        content={
+            "status": "failed",
+            "message": f"dispatch skipped: {admission.skip_status}",
+            "accepted": False,
+            "run_id": admission.run_id,
+            "skip_status": admission.skip_status,
+            "conflict": admission.conflict.model_dump(mode="json")
+            if admission.conflict is not None
+            else None,
+        },
+    )
 
 
 if __name__ == "__main__":
@@ -1147,18 +1222,8 @@ if __name__ == "__main__":
 
     try:
         app_state.runtime_ownership = acquire_runtime_ownership()
-    except LockBusyError as e:
-        msg = str(e).lower()
-        if "update" in msg:
-            print("更新进行中，无法启动")
-            sys.exit(EXIT_UPDATING)
-        if args.scheduled_task:
-            sys.exit(delegate_native_dispatch(args.scheduled_task))
-        print("应用已在运行")
-        sys.exit(EXIT_APP_RUNNING)
     except LockError as e:
-        print(f"锁协议失败: {e}")
-        sys.exit(EXIT_UPDATING)
+        handle_startup_lock_error(e, args.scheduled_task)
 
     try:
         uvicorn.run(

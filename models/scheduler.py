@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 TaskOptionValue = str | list[str] | dict[str, str]
@@ -77,6 +77,24 @@ class IntervalTriggerConfig(BaseModel):
     seconds: int | None = Field(None, ge=0, description="秒数")
     start_date: datetime | None = Field(None, description="开始时间")
     end_date: datetime | None = Field(None, description="结束时间")
+
+    @model_validator(mode="after")
+    def validate_total_interval(self) -> "IntervalTriggerConfig":
+        """拒绝总时长为零的间隔配置。
+
+        APScheduler 会把零间隔静默改写为 1 秒，导致任务每秒触发失控。
+        单个字段为 0 合法（如 hours=1, minutes=0），仅总数为零时拒绝。
+        """
+        total_seconds = (
+            (self.weeks or 0) * 7 * 24 * 3600
+            + (self.days or 0) * 24 * 3600
+            + (self.hours or 0) * 3600
+            + (self.minutes or 0) * 60
+            + (self.seconds or 0)
+        )
+        if total_seconds < 1:
+            raise ValueError("间隔触发器总时长不能为零，至少需要 1 秒")
+        return self
 
 
 TriggerConfig = CronTriggerConfig | DateTriggerConfig | IntervalTriggerConfig

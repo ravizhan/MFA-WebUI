@@ -18,7 +18,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -49,23 +48,12 @@ var ErrBusy = errors.New("filelock: lock is busy")
 // ErrTimeout is returned when Acquire exhausts its deadline.
 var ErrTimeout = errors.New("filelock: acquire timed out")
 
-// ErrPermission is returned for access/permission failures (not retried as busy).
-var ErrPermission = errors.New("filelock: permission denied")
-
 // Lock is an open handle to a stable lock file that may hold an exclusive advisory lock.
 // Closing releases any held lock but never deletes the lock file.
 type Lock struct {
 	path   string
 	locked bool
 	fl     *flock.Flock
-}
-
-// Path returns the absolute path of the lock file.
-func (l *Lock) Path() string {
-	if l == nil {
-		return ""
-	}
-	return l.path
 }
 
 // Locked reports whether this handle currently holds the exclusive lock.
@@ -88,25 +76,12 @@ func RuntimeLockPath(appRoot string) string {
 	return filepath.Join(LockDir(appRoot), RuntimeLockName)
 }
 
-// EnsureLockDir creates config/locks under appRoot with ordinary MkdirAll(0755).
-// No sticky bit, no chmod of existing directories, no mode verification.
-func EnsureLockDir(appRoot string) error {
-	if appRoot == "" {
-		return errors.New("filelock: empty app root")
-	}
-	absRoot, err := filepath.Abs(appRoot)
-	if err != nil {
-		return fmt.Errorf("filelock: app root: %w", err)
-	}
-	dir := filepath.Join(absRoot, RelativeLockDir)
-	if err := os.MkdirAll(dir, dirMode); err != nil {
-		return fmt.Errorf("filelock: create lock dir: %w", err)
-	}
-	return nil
-}
-
 // Open creates or opens a stable lock file without truncating and without locking.
 // Missing parent directories are created with 0755; existing parents are never chmod'd.
+// The lock file is created eagerly so observers (including Python process_lock.py)
+// always see a stable path; the exclusive lock itself is taken lazily by TryLock.
+// Open never holds the lock, so no concurrent observer sees a transient busy state
+// and there is no probe-unlock-to-acquire steal window.
 func Open(path string) (*Lock, error) {
 	if path == "" {
 		return nil, errors.New("filelock: empty path")
@@ -119,7 +94,24 @@ func Open(path string) (*Lock, error) {
 	if err := ensureParentExists(parent); err != nil {
 		return nil, err
 	}
-	return openPlatform(abs)
+	// Create/open the stable lock file without locking. flock.New does not touch
+	// the filesystem; without this the file would not exist until TryLock opened
+	// it lazily. Opening here (no lock taken) preserves Open's "creates or opens"
+	// contract without the transient lock and steal window the old probe had.
+	f, err := os.OpenFile(abs, os.O_RDWR|os.O_CREATE, lockFileMode)
+	if err != nil {
+		return nil, fmt.Errorf("filelock: open %s: %w", abs, err)
+	}
+	_ = f.Close()
+	fl := flock.New(abs,
+		// os.OpenFile always applies O_CLOEXEC on supported platforms.
+		flock.SetFlag(os.O_RDWR|os.O_CREATE),
+		flock.SetPermissions(fs.FileMode(lockFileMode)),
+	)
+	return &Lock{
+		path: abs,
+		fl:   fl,
+	}, nil
 }
 
 // ensureParentExists creates missing parents with 0755 and never chmods existing dirs.
@@ -140,40 +132,9 @@ func ensureParentExists(parent string) error {
 	return nil
 }
 
-// openPlatform creates a gofrs Flock handle and verifies the path can be opened.
-// Open must leave the lock unheld: a successful probe TryLock is unlocked immediately.
-func openPlatform(path string) (*Lock, error) {
-	fl := flock.New(path,
-		// os.OpenFile always applies O_CLOEXEC on supported platforms.
-		flock.SetFlag(os.O_RDWR|os.O_CREATE),
-		flock.SetPermissions(fs.FileMode(lockFileMode)),
-	)
-
-	// Probe open by attempting a nonblocking exclusive lock, then release if held.
-	// gofrs opens the fd lazily on TryLock; this creates the stable lock file if needed
-	// without leaving the lock held for the caller.
-	ok, err := fl.TryLock()
-	if err != nil {
-		if isPermissionErr(err) {
-			return nil, fmt.Errorf("%w: open %s: %v", ErrPermission, path, err)
-		}
-		return nil, fmt.Errorf("filelock: open %s: %w", path, err)
-	}
-	if ok {
-		if err := fl.Unlock(); err != nil {
-			return nil, fmt.Errorf("filelock: open probe unlock %s: %w", path, err)
-		}
-	}
-	// ok == false: lock is busy, but open succeeded — return handle for caller's TryLock/Acquire.
-	return &Lock{
-		path: path,
-		fl:   fl,
-	}, nil
-}
-
 // TryLock attempts a nonblocking exclusive lock.
 // Returns ErrBusy if another process holds the lock.
-// Permission errors fail closed and are never treated as busy.
+// Non-busy errors fail closed and are never treated as busy.
 func (l *Lock) TryLock() error {
 	if l == nil {
 		return errors.New("filelock: nil lock")
@@ -181,24 +142,14 @@ func (l *Lock) TryLock() error {
 	if l.locked {
 		return nil
 	}
-	if err := l.tryLockPlatform(); err != nil {
-		return err
-	}
-	l.locked = true
-	return nil
-}
-
-func (l *Lock) tryLockPlatform() error {
 	ok, err := l.fl.TryLock()
 	if err != nil {
-		if isPermissionErr(err) {
-			return fmt.Errorf("%w: flock: %v", ErrPermission, err)
-		}
 		return fmt.Errorf("filelock: flock: %w", err)
 	}
 	if !ok {
 		return ErrBusy
 	}
+	l.locked = true
 	return nil
 }
 
@@ -210,17 +161,10 @@ func (l *Lock) Unlock() error {
 	if !l.locked {
 		return nil
 	}
-	if err := l.unlockPlatform(); err != nil {
-		return err
-	}
-	l.locked = false
-	return nil
-}
-
-func (l *Lock) unlockPlatform() error {
 	if err := l.fl.Unlock(); err != nil {
 		return fmt.Errorf("filelock: flock unlock: %w", err)
 	}
+	l.locked = false
 	return nil
 }
 
@@ -236,36 +180,11 @@ func (l *Lock) Close() error {
 			first = err
 		}
 	}
-	if err := l.closePlatform(); err != nil && first == nil {
-		first = err
+	// gofrs Close() == Unlock(); safe and idempotent when already unlocked.
+	if err := l.fl.Close(); err != nil && first == nil {
+		first = fmt.Errorf("filelock: close: %w", err)
 	}
 	return first
-}
-
-func (l *Lock) closePlatform() error {
-	// gofrs Close() == Unlock(); safe and idempotent when already unlocked.
-	if err := l.fl.Close(); err != nil {
-		return fmt.Errorf("filelock: close: %w", err)
-	}
-	return nil
-}
-
-// isPermissionErr maps OS access denials to ErrPermission (not retried as busy).
-func isPermissionErr(err error) bool {
-	if err == nil {
-		return false
-	}
-	if errors.Is(err, syscall.EACCES) || errors.Is(err, syscall.EPERM) {
-		return true
-	}
-	// Windows ERROR_ACCESS_DENIED = 5; some wrappers expose ErrorCode().
-	type errno interface{ ErrorCode() int }
-	if e, ok := err.(errno); ok {
-		if e.ErrorCode() == 5 {
-			return true
-		}
-	}
-	return false
 }
 
 // Acquire opens path and acquires an exclusive lock with bounded nonblocking retries.
@@ -301,19 +220,15 @@ func Acquire(path string, timeout, interval time.Duration) (*Lock, error) {
 	}
 }
 
-// AcquireUpdateLock ensures the lock dir then acquires update.lock under appRoot.
+// AcquireUpdateLock acquires update.lock under appRoot.
+// The lock directory is created on demand by Open.
 func AcquireUpdateLock(appRoot string, timeout, interval time.Duration) (*Lock, error) {
-	if err := EnsureLockDir(appRoot); err != nil {
-		return nil, err
-	}
 	return Acquire(UpdateLockPath(appRoot), timeout, interval)
 }
 
-// AcquireRuntimeLock ensures the lock dir then acquires runtime.lock under appRoot.
+// AcquireRuntimeLock acquires runtime.lock under appRoot.
+// The lock directory is created on demand by Open.
 func AcquireRuntimeLock(appRoot string, timeout, interval time.Duration) (*Lock, error) {
-	if err := EnsureLockDir(appRoot); err != nil {
-		return nil, err
-	}
 	return Acquire(RuntimeLockPath(appRoot), timeout, interval)
 }
 

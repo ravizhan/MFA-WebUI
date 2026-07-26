@@ -104,7 +104,6 @@ async function handleDeleteTask(taskId: string) {
 }
 
 function handleTaskSaved() {
-  void schedulerStore.fetchTasks()
   void schedulerStore.fetchExecutions()
 }
 </script>

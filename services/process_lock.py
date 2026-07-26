@@ -4,15 +4,11 @@
   config/locks/runtime.lock
   config/locks/update.lock
 
-协议要点：解锁不删稳定锁文件；有界等待靠非阻塞重试；
-PID 元数据仅诊断用途，获 runtime 锁后写入，仅由持有者清理。
+协议要点：解锁不删稳定锁文件；有界等待靠非阻塞重试。
 """
 
 from __future__ import annotations
 
-import json
-import os
-import uuid
 from pathlib import Path
 
 import filelock as _filelock
@@ -26,6 +22,14 @@ class LockBusyError(LockError):
     """排他锁被其他进程持有。"""
 
 
+class UpdateLockBusyError(LockBusyError):
+    """更新锁超时被占（更新器正在运行）。
+
+    与普通 LockBusyError 区分，使启动入口按类型选择退出码，
+    而非解析异常消息文本（原先 `"update" in str(e).lower()` 的字面耦合）。
+    """
+
+
 class LockPermissionError(LockError):
     """无法打开或加锁（权限不足）。"""
 
@@ -36,10 +40,6 @@ def lock_paths(app_root: Path) -> tuple[Path, Path]:
     return locks_dir / "runtime.lock", locks_dir / "update.lock"
 
 
-def pid_metadata_path(app_root: Path) -> Path:
-    return Path(app_root) / "config" / "mwu.pid"
-
-
 class AdvisoryFileLock:
     """
     进程持有的 1 字节排他建议锁（filelock.FileLock 薄封装）。
@@ -47,12 +47,22 @@ class AdvisoryFileLock:
 
     def __init__(self, path: Path):
         self.path = Path(path)
-        # preserve_lock_file 必须为 True：默认释放会删文件，破坏稳定锁协议
+        # preserve_lock_file=True：默认释放会删文件，破坏稳定锁协议。
+        # thread_local=False：获取与释放可能跨线程（事件循环线程获取，信号
+        #   handler / atexit / run_in_executor / MAA worker 线程释放）；
+        #   默认 True 时 fd 与锁计数挂在 threading.local()，跨线程释放为
+        #   静默 no-op，runtime.lock 永不放，导致下次启动 exit 4
+        #   "应用已在运行"。
+        # fallback_to_soft=False：默认 True，遇到返回 ENOSYS 的文件系统会
+        #   静默降级为基于文件存在的 SoftFileLock，Go 更新器的 gofrs/flock
+        #   无法感知，跨语言互锁会静默失效；置 False 使其 fail-closed。
         self._fl = _filelock.FileLock(
             str(self.path),
             timeout=0,
             poll_interval=0.05,
             preserve_lock_file=True,
+            thread_local=False,
+            fallback_to_soft=False,
         )
         self._locked = False
 
@@ -94,7 +104,6 @@ class AdvisoryFileLock:
 
     def release(self) -> None:
         if not self._locked:
-            self._fl.release()  # 幂等释放
             return
         try:
             self._fl.release()
@@ -102,18 +111,12 @@ class AdvisoryFileLock:
             self._locked = False
             # 稳定锁文件永不删除（preserve_lock_file=True）
 
-    def __enter__(self) -> "AdvisoryFileLock":
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> None:
-        self.release()
-
 
 class RuntimeOwnership:
     """进程生命周期内的 runtime 所有权（规范启动序列）。
 
-    顺序：有界等待 update 锁并释放 → 非阻塞抢 runtime 锁 →
-    再次检查 update 锁 → 写 PID 元数据。权限/协议错误 fail-closed。
+    顺序：有界等待 update 锁并释放 → 非阻塞抢 runtime 锁。
+    权限/协议错误 fail-closed。
     """
 
     UPDATE_LOCK_TIMEOUT = 30.0
@@ -123,8 +126,6 @@ class RuntimeOwnership:
         runtime_path, update_path = lock_paths(self.app_root)
         self.runtime_lock = AdvisoryFileLock(runtime_path)
         self.update_lock = AdvisoryFileLock(update_path)
-        self.owner_token = str(uuid.uuid4())
-        self._pid_path = pid_metadata_path(self.app_root)
         self._acquired = False
 
     @property
@@ -144,64 +145,25 @@ class RuntimeOwnership:
         except Exception:
             self.runtime_lock.release()
             raise
-        try:
-            # 3. 再次确认 update 锁空闲
-            self._with_update_lock()
-            # 4. 拥有权确立后再写诊断用 PID 元数据
-            self._write_pid_metadata()
-            self._acquired = True
-        except Exception:
-            self._remove_pid_metadata()
-            self.runtime_lock.release()
-            raise
+        self._acquired = True
 
     def release(self) -> None:
         if not self._acquired and not self.runtime_lock.is_locked:
             return
-        self._remove_pid_metadata()
         self.runtime_lock.release()
         self._acquired = False
-
-    def __enter__(self) -> "RuntimeOwnership":
-        self.acquire()
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> None:
-        self.release()
 
     def _with_update_lock(self) -> None:
         try:
             self.update_lock.acquire(timeout_seconds=self.UPDATE_LOCK_TIMEOUT)
         except LockBusyError as e:
-            raise LockBusyError("Update lock held too long; aborting startup") from e
+            # 用子类标记“update 锁超时”，使 main.py 按类型分流退出码，
+            # 不再解析异常文本
+            raise UpdateLockBusyError(
+                "Update lock held too long; aborting startup"
+            ) from e
         except LockPermissionError:
             raise
         finally:
             if self.update_lock.is_locked:
                 self.update_lock.release()
-
-    def _write_pid_metadata(self) -> None:
-        self._pid_path.parent.mkdir(parents=True, exist_ok=True)
-        from datetime import datetime, timezone
-
-        data = {
-            "pid": os.getpid(),
-            "owner_token": self.owner_token,
-            "started_at": datetime.now(timezone.utc).isoformat(),
-        }
-        tmp = self._pid_path.with_suffix(".pid.tmp")
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, self._pid_path)
-
-    def _remove_pid_metadata(self) -> None:
-        try:
-            if not self._pid_path.exists():
-                return
-            data = json.loads(self._pid_path.read_text(encoding="utf-8"))
-            if data.get("owner_token") == self.owner_token:
-                self._pid_path.unlink(missing_ok=True)
-        except OSError:
-            pass

@@ -5,6 +5,7 @@ Injects fake pythoncom / win32com via monkeypatch — no real Windows required.
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 import types
@@ -17,6 +18,7 @@ import pytest
 from services.native_cron import parse_native_cron
 from services import system_scheduler_backend as ssb
 from services.system_scheduler_backend import (
+    LinuxBackend,
     MacOSBackend,
     NativeTaskSpec,
     WindowsBackend,
@@ -110,6 +112,8 @@ class FakeSettings:
         self.AllowDemandStart: bool | None = None
         self.ExecutionTimeLimit: str | None = None
         self.MultipleInstances: int | None = None
+        self.DisallowStartIfOnBatteries: bool | None = None
+        self.StopIfGoingOnBatteries: bool | None = None
 
 
 class FakeTaskDefinition:
@@ -332,6 +336,8 @@ def test_register_maps_daily_task_definition(monkeypatch: pytest.MonkeyPatch) ->
     assert td.Settings.AllowDemandStart is True
     assert td.Settings.ExecutionTimeLimit == "PT2H"
     assert td.Settings.MultipleInstances == _TASK_INSTANCES_PARALLEL
+    assert td.Settings.DisallowStartIfOnBatteries is False
+    assert td.Settings.StopIfGoingOnBatteries is False
 
     assert len(td.Triggers.created) == 1
     trigger = td.Triggers.created[0]
@@ -339,7 +345,10 @@ def test_register_maps_daily_task_definition(monkeypatch: pytest.MonkeyPatch) ->
     assert trigger.Enabled is True
     assert trigger.DaysInterval == 1
     assert trigger.StartBoundary is not None
-    assert trigger.StartBoundary.endswith("08:30:00") or "T08:30:00" in trigger.StartBoundary
+    assert (
+        trigger.StartBoundary.endswith("08:30:00")
+        or "T08:30:00" in trigger.StartBoundary
+    )
 
     assert len(td.Actions.created) == 1
     action_type, action = td.Actions.created[0]
@@ -349,13 +358,16 @@ def test_register_maps_daily_task_definition(monkeypatch: pytest.MonkeyPatch) ->
     assert action.WorkingDirectory == r"C:\MWU"
 
 
-def test_register_hourly_weekly_monthly_triggers(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_register_hourly_weekly_monthly_triggers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     backend = WindowsBackend()
 
     # HOURLY — boundary after call time and within ~1 hour (not next calendar day)
     service = FakeScheduleService()
     _install_fake_com(monkeypatch, service)
-    before = datetime.now().astimezone()
+    # naive 本地墙钟：StartBoundary 修复后为 naive，比较必须 naive vs naive
+    before = datetime.now()
     backend.register(_spec(cron="45 * * * *"))
     t = service.folders["\\MWU"].registered[-1]["task_def"].Triggers.created[0]
     assert t.type == _TASK_TRIGGER_TIME
@@ -402,17 +414,57 @@ def test_register_hourly_weekly_monthly_triggers(monkeypatch: pytest.MonkeyPatch
 
 
 def test_next_hourly_start_boundary_same_hour() -> None:
-    tz = timezone(timedelta(hours=8))
-    now = datetime(2026, 7, 20, 10, 30, 15, tzinfo=tz)
+    # 新契约：naive 本地墙钟入 → naive 本地墙钟出（isoformat 不带 offset）。
+    now = datetime(2026, 7, 20, 10, 30, 15)
     result = _next_hourly_start_boundary(45, now=now)
-    assert result == datetime(2026, 7, 20, 10, 45, 0, tzinfo=tz)
+    assert result == datetime(2026, 7, 20, 10, 45, 0)
 
 
 def test_next_hourly_start_boundary_next_hour() -> None:
+    now = datetime(2026, 7, 20, 10, 50, 0)
+    result = _next_hourly_start_boundary(45, now=now)
+    assert result == datetime(2026, 7, 20, 11, 45, 0)
+
+
+def test_next_hourly_start_boundary_aware_now_normalized_to_naive() -> None:
+    # 新契约：注入 aware `now` 时归一为 naive 本地墙钟（剥离 tzinfo），
+    # 否则 isoformat() 会带上 +HH:MM 偏移 → Task Scheduler 2.0 视为
+    # “跨时区同步”语义，DST 切换后逐次漂移 1 小时。
+    # 仅断言 tzinfo 与滚到 :45 的确定性属性，不锁定具体时刻（依赖系统本地时区）。
     tz = timezone(timedelta(hours=8))
     now = datetime(2026, 7, 20, 10, 50, 0, tzinfo=tz)
     result = _next_hourly_start_boundary(45, now=now)
-    assert result == datetime(2026, 7, 20, 11, 45, 0, tzinfo=tz)
+    assert result.tzinfo is None
+    assert result.minute == 45
+    assert result.second == 0
+
+
+def test_start_boundary_has_no_utc_offset(monkeypatch: pytest.MonkeyPatch) -> None:
+    """回归：StartBoundary 必须是 naive 本地墙钟（无 +HH:MM / Z）。
+
+    带 offset 的 StartBoundary 会被 Task Scheduler 2.0 当作“跨时区同步”语义，
+    把触发时刻钉死于绝对瞬时，DST 每次切换后日/周/月触发都会漂移 1 小时。
+    覆盖日/周/月/时四种触发器。
+    """
+    naive_iso = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$")
+    backend = WindowsBackend()
+
+    cases = [
+        ("30 8 * * *", _TASK_TRIGGER_DAILY),
+        ("45 * * * *", _TASK_TRIGGER_TIME),  # HOURLY
+        ("0 9 * * 1", _TASK_TRIGGER_WEEKLY),
+        ("0 0 15 * *", _TASK_TRIGGER_MONTHLY),
+    ]
+    for cron, trigger_type in cases:
+        service = FakeScheduleService()
+        _install_fake_com(monkeypatch, service)
+        backend.register(_spec(cron=cron))
+        trig = service.folders["\\MWU"].registered[-1]["task_def"].Triggers.created[0]
+        assert trig.type == trigger_type, cron
+        assert trig.StartBoundary is not None, cron
+        assert naive_iso.match(trig.StartBoundary), (
+            f"{cron}: StartBoundary 必须为 naive 本地墙钟，实际为 {trig.StartBoundary!r}"
+        )
 
 
 def test_register_creates_mwu_folder_when_missing(
@@ -436,16 +488,14 @@ def test_list_missing_folder_returns_empty(monkeypatch: pytest.MonkeyPatch) -> N
     assert pc.uninit_count == 1
 
 
-def test_delete_and_is_registered(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_unregister_deletes_task(monkeypatch: pytest.MonkeyPatch) -> None:
     service = FakeScheduleService()
     service.tasks[_UUID] = object()
     _install_fake_com(monkeypatch, service)
     backend = WindowsBackend()
 
-    assert backend.is_registered(_UUID) is True
     backend.unregister(_UUID)
     assert _UUID not in service.tasks
-    assert backend.is_registered(_UUID) is False
 
 
 def test_unregister_missing_task_is_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -453,7 +503,7 @@ def test_unregister_missing_task_is_idempotent(monkeypatch: pytest.MonkeyPatch) 
     service = FakeScheduleService()
     _install_fake_com(monkeypatch, service)
     backend = WindowsBackend()
-    # 不应抛异常；与 is_registered 返回 False 的判定保持一致
+    # 不应抛异常；_com_is_not_found 判定为「任务不存在」时视为已注销
     backend.unregister(_UUID)
     assert _UUID not in service.tasks
 
@@ -470,14 +520,14 @@ def test_get_task_error_becomes_runtime_error(monkeypatch: pytest.MonkeyPatch) -
     service = FakeScheduleService()
 
     class BoomFolder(FakeFolder):
-        def GetTask(self, name: str) -> FakeRegisteredTask:
+        def DeleteTask(self, name: str, flags: int) -> None:
             raise FakeComError(0x80070005, "access denied")
 
     service.folders["\\MWU"] = BoomFolder("\\MWU", service.tasks)
     _install_fake_com(monkeypatch, service)
     backend = WindowsBackend()
-    with pytest.raises(RuntimeError, match="GetTask"):
-        backend.is_registered(_UUID)
+    with pytest.raises(RuntimeError, match="删除失败"):
+        backend.unregister(_UUID)
 
 
 def test_task_not_ready_hresult_is_not_missing() -> None:
@@ -555,14 +605,14 @@ def test_get_task_not_ready_raises_not_false(monkeypatch: pytest.MonkeyPatch) ->
     service = FakeScheduleService()
 
     class NotReadyFolder(FakeFolder):
-        def GetTask(self, name: str) -> FakeRegisteredTask:
+        def DeleteTask(self, name: str, flags: int) -> None:
             raise FakeComError(0x8004130A, "The task is not ready to run")
 
     service.folders["\\MWU"] = NotReadyFolder("\\MWU", service.tasks)
     _install_fake_com(monkeypatch, service)
     backend = WindowsBackend()
-    with pytest.raises(RuntimeError, match="GetTask"):
-        backend.is_registered(_UUID)
+    with pytest.raises(RuntimeError, match="删除失败"):
+        backend.unregister(_UUID)
 
 
 def test_build_identifier() -> None:
@@ -613,9 +663,11 @@ def test_macos_unregister_not_found_with_plist_succeeds(
     assert not plist.exists()
 
 
-def test_macos_unregister_not_found_without_plist_raises(
+def test_macos_unregister_not_found_without_plist_is_idempotent(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
+    """任务已被外部删除（既未加载也无残留 plist）时，unregister 幂等成功
+    而非阻塞 disable/pause/delete 流程。与 WindowsBackend 行为一致。"""
     backend = MacOSBackend()
     plist = tmp_path / f"com.mwu.task.{_UUID}.plist"
     assert not plist.exists()
@@ -626,8 +678,9 @@ def test_macos_unregister_not_found_without_plist_raises(
         lambda args, check=False: _cp(1, stderr="Could not find service"),
     )
 
-    with pytest.raises(RuntimeError, match="不存在"):
-        backend.unregister(_UUID)
+    # 不应抛异常：ABC 契约 —— 任务已通过外部途径被删除，视为已注销
+    backend.unregister(_UUID)
+    assert not plist.exists()
 
 
 def test_macos_unregister_other_bootout_error_keeps_plist(
@@ -646,3 +699,125 @@ def test_macos_unregister_other_bootout_error_keeps_plist(
     with pytest.raises(RuntimeError, match="bootout failed"):
         backend.unregister(_UUID)
     assert plist.exists()
+
+
+# ---------------------------------------------------------------------------
+# Linux unregister (crontab -l/-/-r) semantics
+# ---------------------------------------------------------------------------
+
+
+def test_linux_unregister_empty_crontab_is_idempotent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """无 crontab 时，unregister 幂等成功而非阻塞 disable/pause/delete 流程。
+    与 WindowsBackend / MacOSBackend 行为一致。"""
+    backend = LinuxBackend()
+    calls: list[list[str]] = []
+
+    def fake_run_text(args, check=False):
+        calls.append(list(args))
+        # ``crontab -l``: rc=1 + "no crontab" → _read_crontab 归一为空串
+        return _cp(1, stderr="no crontab for testuser")
+
+    monkeypatch.setattr(ssb, "_run_text", fake_run_text)
+
+    backend.unregister(_UUID)  # 不应抛异常
+
+    # 仅 crontab -l 被调用；idempotent 早退路径下不应触碰 crontab -r / crontab -
+    assert calls == [["crontab", "-l"]]
+
+
+def test_linux_unregister_marker_missing_is_idempotent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """crontab 存在但目标 marker 不在其中（已被外部途径 `crontab -e` /
+    `crontab -r` 删除）时，unregister 幂等成功而不阻塞 delete 流程。"""
+    backend = LinuxBackend()
+    existing_crontab = "# some unrelated comment\n* * * * * echo hi\n"
+    calls: list[list[str]] = []
+    written: list[str] = []
+
+    def fake_run_text(args, check=False):
+        calls.append(list(args))
+        return _cp(0, stdout=existing_crontab)
+
+    monkeypatch.setattr(ssb, "_run_text", fake_run_text)
+    monkeypatch.setattr(
+        backend, "_write_crontab", lambda content: written.append(content)
+    )
+
+    backend.unregister(_UUID)  # 不应抛异常
+
+    # marker 缺失 → idempotent 早退：仅 crontab -l 被调用，不写入
+    assert calls == [["crontab", "-l"]]
+    assert written == []
+
+
+def test_linux_unregister_read_failure_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``crontab -l`` 真实失败（非「no crontab」语义）必须抛 RuntimeError，
+    不被幂等语义吞掉。"""
+    backend = LinuxBackend()
+    monkeypatch.setattr(
+        ssb,
+        "_run_text",
+        lambda args, check=False: _cp(1, stderr="command not found"),
+    )
+
+    with pytest.raises(RuntimeError, match="crontab -l failed"):
+        backend.unregister(_UUID)
+
+
+def test_linux_unregister_write_failure_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """marker 找到且删后 crontab 仍非空，但 ``crontab -`` 写入失败
+    （真实错误）必须抛 RuntimeError，不因幂等语义被吞掉。"""
+    backend = LinuxBackend()
+    # 「目标 marker + 其命令行」+ 「不相关用户条目」：删后剩余非空 → 走写入路径
+    existing_crontab = (
+        f"# MWU:{_UUID}\n* * * * * echo hi\n# unrelated\n0 0 * * * echo cleanup\n"
+    )
+
+    # ``crontab -l`` 返回已有 marker 的多行 crontab → 进入写入路径
+    monkeypatch.setattr(
+        ssb,
+        "_run_text",
+        lambda args, check=False: _cp(0, stdout=existing_crontab),
+    )
+
+    def boom_write(content: str) -> None:
+        raise RuntimeError("crontab 写入失败: permission denied")
+
+    monkeypatch.setattr(backend, "_write_crontab", boom_write)
+
+    with pytest.raises(RuntimeError, match="crontab 写入失败"):
+        backend.unregister(_UUID)
+
+
+def test_linux_unregister_remove_command_failure_raises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """marker 找到且删后 crontab 为空 → 走 ``crontab -r``；该 subprocess
+    真实失败时必须抛 RuntimeError，不因幂等语义被吞掉。"""
+    backend = LinuxBackend()
+    # 「目标 marker + 其命令行」是唯一条目：删后剩余为空 → 走 crontab -r
+    existing_crontab = f"# MWU:{_UUID}\n* * * * * echo hi\n"
+
+    recorded: list[list[str]] = []
+
+    def fake_run_text(args, check=False):
+        recorded.append(list(args))
+        # crontab -l 成功；crontab -r 真实失败
+        if args == ["crontab", "-l"]:
+            return _cp(0, stdout=existing_crontab)
+        if args == ["crontab", "-r"]:
+            return _cp(1, stderr="crontab: can't remove")
+        raise AssertionError(f"unexpected _run_text call: {args}")
+
+    monkeypatch.setattr(ssb, "_run_text", fake_run_text)
+
+    with pytest.raises(RuntimeError, match="crontab -r failed"):
+        backend.unregister(_UUID)
+    assert recorded == [["crontab", "-l"], ["crontab", "-r"]]

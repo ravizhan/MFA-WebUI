@@ -134,6 +134,19 @@ describe("useSchedulerStore", () => {
       expect(await store.updateTask("1", { name: "x" })).toBe(false)
       expect(store.error).toBe("update failed")
     })
+
+    it("returns false when the task id is missing from the local list", async () => {
+      vi.mocked(api.updateSchedulerTask).mockResolvedValueOnce({
+        status: "success",
+        task: mockTask("missing", true),
+      })
+      const store = useSchedulerStore()
+      store.tasks = [mockTask("1", true)]
+      const result = await store.updateTask("missing", { name: "x" })
+      expect(result).toBe(false)
+      expect(store.tasks.map((t) => t.id)).toEqual(["1"])
+      expect(store.error).toBeNull()
+    })
   })
 
   describe("deleteTask", () => {

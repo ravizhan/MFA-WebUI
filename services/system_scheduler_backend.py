@@ -64,6 +64,7 @@ _SCHTASKS_MONTH_TO_COM: dict[str, int] = {
 }
 _ALL_MONTHS_COM = 0xFFF
 
+
 @dataclass(frozen=True)
 class NativeTaskSpec:
     """OS 注册载荷（非 pydantic）。"""
@@ -74,6 +75,7 @@ class NativeTaskSpec:
     cli_args: list[str]
     cron: NativeCron
     working_dir: str
+
 
 def _get_uid() -> int:
     getuid = getattr(os, "getuid", None)
@@ -117,8 +119,14 @@ def _parse_hhmm(start_time: str) -> tuple[int, int]:
 
 
 def _next_start_boundary(hour: int, minute: int) -> datetime:
-    """下一本地日历时刻 hour:minute（日/周/月触发用）。"""
-    now = datetime.now().astimezone()
+    """下一本地日历时刻 hour:minute（日/周/月触发用）。
+
+    返回值必须是 naive 本地墙钟：带 UTC 偏移的 isoformat() 会被
+    Task Scheduler 2.0 当作 StartBoundary 的“跨时区同步”语义
+    （钉死于绝对瞬时），DST 每次切换都会把日/周/月触发漂移 1 小时。
+    """
+    # naive 本地墙钟：isoformat() 不带 +HH:MM 偏移，避免 DST 漂移
+    now = datetime.now()
     start = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
     if start <= now:
         start = start + timedelta(days=1)
@@ -132,11 +140,18 @@ def _next_hourly_start_boundary(
 
     本小时该分仍在未来则用本小时，否则进一小时；秒与微秒置零。
     ``now`` 可注入便于测试，默认本地墙钟。
+
+    返回值必须是 naive 本地墙钟：带 UTC 偏移会让 StartBoundary 触发
+    Task Scheduler 2.0 的“跨时区同步”语义，DST 切换后逐次漂移 1 小时。
     """
     if now is None:
-        now = datetime.now().astimezone()
-    elif now.tzinfo is None:
-        now = now.astimezone()
+        # naive 本地墙钟：isoformat() 不带 +HH:MM 偏移，避免 DST 漂移
+        now = datetime.now()
+    elif now.tzinfo is not None:
+        # 注入的是 aware 带时区对象：归一为 naive 本地墙钟，理由同上。
+        # 视为已纠正：此前此处逻辑相反（把 naive 转 aware），会让
+        # isoformat() 带上 offset，引发 DST 漂移。naive 输入直接使用。
+        now = now.astimezone().replace(tzinfo=None)
     start = now.replace(minute=minute, second=0, microsecond=0)
     if start <= now:
         start = start + timedelta(hours=1)
@@ -219,6 +234,7 @@ def _macos_is_not_found(stderr: str) -> bool:
         or "not found" in stderr.lower()
     )
 
+
 class SystemSchedulerBackend(ABC):
     """OS 级用户唤醒后端抽象。"""
 
@@ -242,10 +258,6 @@ class SystemSchedulerBackend(ABC):
         推荐幂等：任务已被外部途径删除时静默成功，避免 disable/pause/delete
         流程在状态漂移下被阻塞。各后端可自行决定「真正不存在」的判定。
         """
-
-    @abstractmethod
-    def is_registered(self, task_id: str) -> bool:
-        """查询注册状态：明确不存在 → False；其他错误抛 RuntimeError。"""
 
     @abstractmethod
     def list_registered_task_ids(self) -> list[str]:
@@ -311,41 +323,10 @@ class WindowsBackend(SystemSchedulerBackend):
                 if _com_is_not_found(e):
                     # 任务已通过 Task Scheduler GUI / 系统清理等外部途径被删除：
                     # 视为成功，避免 disable/pause/delete 流程被孤儿状态阻塞
-                    logger.warning(
-                        "Windows 任务 %s 已不存在，幂等视为已注销", task_id
-                    )
+                    logger.warning("Windows 任务 %s 已不存在，幂等视为已注销", task_id)
                     return
                 raise RuntimeError(
                     f"Task Scheduler 删除失败: {self._com_error_detail(e)}"
-                ) from e
-        finally:
-            service = folder = None
-            pythoncom.CoUninitialize()
-
-    def is_registered(self, task_id: str) -> bool:
-        validate_task_id(task_id)
-        pythoncom, Dispatch = self._import_com()
-        pythoncom.CoInitialize()
-        service = folder = None
-        try:
-            service = Dispatch("Schedule.Service")
-            service.Connect()
-            try:
-                folder = service.GetFolder(self._FOLDER)
-            except Exception as e:
-                if _com_is_not_found(e):
-                    return False
-                raise RuntimeError(
-                    f"Task Scheduler GetFolder 失败: {self._com_error_detail(e)}"
-                ) from e
-            try:
-                folder.GetTask(task_id)
-                return True
-            except Exception as e:
-                if _com_is_not_found(e):
-                    return False
-                raise RuntimeError(
-                    f"Task Scheduler GetTask 失败: {self._com_error_detail(e)}"
                 ) from e
         finally:
             service = folder = None
@@ -444,6 +425,12 @@ class WindowsBackend(SystemSchedulerBackend):
         settings.AllowDemandStart = True
         settings.ExecutionTimeLimit = "PT2H"
         settings.MultipleInstances = _TASK_INSTANCES_PARALLEL
+        # Task Scheduler 2.0 中 DisallowStartIfOnBatteries 与 StopIfGoingOnBatteries
+        # 默认均为 VARIANT_TRUE：前者会让笔记本在电池供电时静默不触发计划任务，
+        # 后者会在用户拔掉电源瞬间杀死正在运行的任务。两者必须显式置 False，
+        # 否则电池供电下该功能形同虚设，且没有任何错误暴露出来。
+        settings.DisallowStartIfOnBatteries = False
+        settings.StopIfGoingOnBatteries = False
 
         self._configure_triggers(task_def.Triggers, to_schtasks(spec.cron))
 
@@ -468,7 +455,9 @@ class WindowsBackend(SystemSchedulerBackend):
             trigger.Repetition.StopAtDurationEnd = False
             return
 
-        start_boundary = _next_start_boundary(hour, minute).isoformat(timespec="seconds")
+        start_boundary = _next_start_boundary(hour, minute).isoformat(
+            timespec="seconds"
+        )
 
         if schedule == "DAILY":
             trigger = triggers.Create(_TASK_TRIGGER_DAILY)
@@ -511,6 +500,7 @@ class WindowsBackend(SystemSchedulerBackend):
 
         raise ValueError(f"不支持的 schtasks schedule: {schedule}")
 
+
 class MacOSBackend(SystemSchedulerBackend):
     """macOS 14+ launchd 后端（用户 LaunchAgents）。"""
 
@@ -541,8 +531,10 @@ class MacOSBackend(SystemSchedulerBackend):
     def unregister(self, task_id: str) -> None:
         """删除 launchd 作业与 plist。
 
-        bootout 成功或「未加载但有 plist」均清理 plist；
-        两者皆无则严格报不存在；其他 bootout 错误保留 plist。
+        幂等：bootout 报任务不存在且无残留 plist 时视为已注销（任务已被
+        外部途径删除），与 ABC 契约及 WindowsBackend 一致。bootout 成功或
+        「未加载但有 plist」均清理 plist；其他 bootout 错误保留 plist 并
+        抛 RuntimeError；plist 删除 PermissionError 仍抛 RuntimeError。
         """
         validate_task_id(task_id)
         label = self.build_identifier(task_id)
@@ -555,7 +547,13 @@ class MacOSBackend(SystemSchedulerBackend):
             stderr = proc.stderr or ""
             if _macos_is_not_found(stderr) or proc.returncode == 113:
                 if not plist_exists:
-                    raise RuntimeError(f"launchd 任务不存在: {label}")
+                    # 任务已被外部途径删除（用户 `launchctl bootout` / 删除 plist /
+                    # GUI 清理等）：视为成功，避免 disable/pause/delete 流程被
+                    # 孤儿状态阻塞
+                    logger.warning(
+                        "macOS launchd 任务 %s 已不存在，幂等视为已注销", label
+                    )
+                    return
                 # 未加载但残留 plist，下方清理
             else:
                 detail = stderr.strip() or str(proc.returncode)
@@ -566,19 +564,6 @@ class MacOSBackend(SystemSchedulerBackend):
                 os.unlink(str(plist_path))
             except PermissionError as e:
                 raise RuntimeError(f"无法删除 plist: {plist_path}") from e
-
-    def is_registered(self, task_id: str) -> bool:
-        validate_task_id(task_id)
-        label = self.build_identifier(task_id)
-        domain = self._domain()
-        proc = _run_text(["launchctl", "print", f"{domain}/{label}"])
-        if proc.returncode == 0:
-            return True
-        stderr = proc.stderr or ""
-        if _macos_is_not_found(stderr) or proc.returncode == 113:
-            return False
-        detail = stderr.strip() or "no stderr"
-        raise RuntimeError(f"launchctl print failed (rc={proc.returncode}): {detail}")
 
     def list_registered_task_ids(self) -> list[str]:
         agents = Path("~/Library/LaunchAgents").expanduser()
@@ -625,6 +610,7 @@ class MacOSBackend(SystemSchedulerBackend):
             "StartCalendarInterval": to_launchd_calendar(spec.cron),
         }
 
+
 class LinuxBackend(SystemSchedulerBackend):
     """Linux 用户 crontab 后端。"""
 
@@ -659,11 +645,6 @@ class LinuxBackend(SystemSchedulerBackend):
         validate_task_id(task_id)
         self._remove_from_user_crontab(task_id)
 
-    def is_registered(self, task_id: str) -> bool:
-        validate_task_id(task_id)
-        marker = f"# MWU:{task_id}"
-        return marker in self._read_crontab()
-
     def list_registered_task_ids(self) -> list[str]:
         text = self._read_crontab()
         return _MWU_CRON_MARKER_RE.findall(text)
@@ -692,9 +673,17 @@ class LinuxBackend(SystemSchedulerBackend):
             raise RuntimeError(f"crontab 写入失败: {stderr.strip()}")
 
     def _remove_from_user_crontab(self, task_id: str) -> None:
+        """从用户 crontab 删除指定任务。
+
+        幂等：crontab 为空或缺该 marker 时视为已注销（任务已被外部途径
+        删除），与 ABC 契约及 WindowsBackend 一致。``crontab -l`` /
+        ``crontab -`` / ``crontab -r`` 的真实失败仍抛 RuntimeError。
+        """
         crontab_text = self._read_crontab()
         if not crontab_text:
-            raise RuntimeError(f"crontab 中不存在任务: {task_id}")
+            # 无 crontab 亦无 marker：任务已被外部途径删除，视为成功
+            logger.warning("Linux crontab 任务 %s 已不存在，幂等视为已注销", task_id)
+            return
         lines = crontab_text.splitlines(True)
         new_lines: list[str] = []
         skip_next = False
@@ -713,7 +702,10 @@ class LinuxBackend(SystemSchedulerBackend):
             new_lines.append(line)
 
         if not found:
-            raise RuntimeError(f"crontab 中不存在任务: {task_id}")
+            # marker 不在 crontab 中：任务已被外部途径删除（手动编辑或
+            # `crontab -r`），视为成功，避免 disable/pause/delete 流程被阻塞
+            logger.warning("Linux crontab 任务 %s 已不存在，幂等视为已注销", task_id)
+            return
 
         new_crontab = "".join(new_lines)
         if not new_crontab.strip():
@@ -732,6 +724,7 @@ class LinuxBackend(SystemSchedulerBackend):
 
     def _build_cron_line(self, spec: NativeTaskSpec) -> str:
         return f"{to_crontab_line(spec.cron)} {self._build_command_body(spec)}"
+
 
 def get_backend(platform_name: str | None = None) -> SystemSchedulerBackend:
     """按平台返回对应后端实例。"""
