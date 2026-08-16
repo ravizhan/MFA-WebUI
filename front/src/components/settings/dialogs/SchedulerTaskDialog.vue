@@ -360,6 +360,7 @@
               :options="deviceAddressOptions"
               :placeholder="t('panel.selectDevice')"
               :disabled="!formData.controller_name || loadingDevices"
+              size="md"
               @create="handleCustomDeviceCreate"
             />
           </fieldset>
