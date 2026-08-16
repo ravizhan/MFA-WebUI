@@ -191,7 +191,8 @@
         "title": "Start Conflict",
         "updateInProgress": "An update is in progress. Please try again later.",
         "busyMessage": "Task \"{name}\" is currently running.",
-        "stopAndRestart": "Stop and restart"
+        "stopAndRestart": "Stop and restart",
+        "stopTimeout": "Stop timed out: the previous task did not exit in time. Start manually later."
       },
       "rules": {
         "nameRequired": "Please enter task name",

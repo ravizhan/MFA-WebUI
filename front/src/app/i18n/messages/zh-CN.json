@@ -191,7 +191,8 @@
         "title": "启动冲突",
         "updateInProgress": "应用正在更新，请稍后再试",
         "busyMessage": "任务「{name}」正在运行",
-        "stopAndRestart": "停止并重启"
+        "stopAndRestart": "停止并重启",
+        "stopTimeout": "停止超时：上一个任务未能及时退出，请稍后手动启动"
       },
       "rules": {
         "nameRequired": "请输入任务名称",

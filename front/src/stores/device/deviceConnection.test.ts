@@ -358,6 +358,82 @@ describe("useDeviceConnectionStore", () => {
       expect(showGlobalMessage).not.toHaveBeenCalled()
     })
 
+    describe("stopActiveAndRestart", () => {
+      function primeRunningStore() {
+        const store = useDeviceConnectionStore()
+        const indexStore = useIndexStore()
+        const configStore = useTaskConfigStore()
+        const interfaceStore = useInterfaceStore()
+        store.controllerCapabilities = [adbCapability]
+        store.selectedController = "ADB"
+        store.resource = "res1"
+        store.startConflict = {
+          code: "busy_manual",
+          message: "busy",
+          active_run_id: "run-9",
+          active_task_name: "Other Task",
+          active_origin: "manual",
+        }
+        configStore.configLoaded = true
+        configStore.taskList = [{ id: "task1", name: "Task 1", order: 0, checked: true }]
+        interfaceStore.interface = {
+          task: [{ name: "Task 1", entry: "task1" }],
+        }
+        vi.mocked(api.getDeviceState).mockResolvedValue(lockedAdbState)
+        vi.spyOn(configStore, "buildExecutionPayload").mockReturnValue({
+          task_list: ["task1"],
+          task_options: {},
+          preTasks: [],
+        })
+        indexStore.setTaskRunning(true)
+        return { store, indexStore }
+      }
+
+      it("restarts only after SSE clears TaskRunning", async () => {
+        const { store, indexStore } = primeRunningStore()
+        vi.mocked(api.stopTask).mockResolvedValue(true)
+        vi.mocked(api.startTask).mockResolvedValue({ accepted: true, runId: "run-2" })
+
+        const pending = store.stopActiveAndRestart()
+        await nextTick()
+        expect(api.stopTask).toHaveBeenCalled()
+        expect(store.startConflict).toBeNull()
+        // 槽位未释放前不得重试启动
+        expect(api.startTask).not.toHaveBeenCalled()
+
+        indexStore.setTaskRunning(false)
+        await expect(pending).resolves.toBe(true)
+        expect(api.startTask).toHaveBeenCalledTimes(1)
+      })
+
+      it("fails with actionable toast when cleanup exceeds timeout", async () => {
+        vi.useFakeTimers()
+        const { store } = primeRunningStore()
+        vi.mocked(api.stopTask).mockResolvedValue(true)
+
+        const pending = store.stopActiveAndRestart()
+        await vi.advanceTimersByTimeAsync(30_000)
+        const result = await pending
+        vi.useRealTimers()
+
+        expect(result).toBe(false)
+        expect(api.startTask).not.toHaveBeenCalled()
+        expect(showGlobalMessage).toHaveBeenCalledWith(
+          "error",
+          "settings.scheduler.conflict.stopTimeout",
+        )
+      })
+
+      it("returns false when stop request fails", async () => {
+        const { store } = primeRunningStore()
+        vi.mocked(api.stopTask).mockResolvedValue(false)
+
+        await expect(store.stopActiveAndRestart()).resolves.toBe(false)
+        expect(api.startTask).not.toHaveBeenCalled()
+        expect(showGlobalMessage).not.toHaveBeenCalled()
+      })
+    })
+
     it("skips connect and resource when already connected", async () => {
       const store = useDeviceConnectionStore()
       const configStore = useTaskConfigStore()

@@ -708,7 +708,34 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
         return false
       }
       this.clearStartConflict()
-      await new Promise((resolve) => setTimeout(resolve, 500))
+      // 等待后端释放运行槽位：SSE task.completed/failed 由 dispatcher 置 TaskRunning=false，
+      // 仅在 active_run 清槽之后发出；固定延迟会在清理较慢时撞上 busy_manual 冲突。
+      const indexStore = useIndexStore()
+      const released = await new Promise<boolean>((resolve) => {
+        if (!indexStore.TaskRunning) {
+          resolve(true)
+          return
+        }
+        const timer = window.setTimeout(() => {
+          stopWatch()
+          resolve(false)
+        }, 30_000)
+        const stopWatch = watch(
+          () => indexStore.TaskRunning,
+          (running) => {
+            if (!running) {
+              window.clearTimeout(timer)
+              stopWatch()
+              resolve(true)
+            }
+          },
+        )
+      })
+      if (!released) {
+        const t = i18n.global.t
+        showGlobalMessage("error", t("settings.scheduler.conflict.stopTimeout"))
+        return false
+      }
       return this.StartTask()
     },
 

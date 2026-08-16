@@ -781,6 +781,13 @@ watch(
   },
 )
 
+// cron 从合格变为不合格时同步清空唤醒开关，避免隐藏值随提交被静默屏蔽
+watch(isCronNativeEligible, (eligible) => {
+  if (!eligible) {
+    wakeupEnabled.value = false
+  }
+})
+
 watch(
   () => formData.value.controller_name,
   (newVal, oldVal) => {

@@ -65,5 +65,14 @@ describe("checkCronNativeEligibility", () => {
     it("empty string", () => {
       expect(checkCronNativeEligibility("")).toBe(false)
     })
+
+    it("out-of-range numeric fields", () => {
+      expect(checkCronNativeEligibility("99 9 * * *")).toBe(false)
+      expect(checkCronNativeEligibility("0 24 * * *")).toBe(false)
+      expect(checkCronNativeEligibility("0 9 0 * *")).toBe(false)
+      expect(checkCronNativeEligibility("0 9 32 * *")).toBe(false)
+      expect(checkCronNativeEligibility("0 9 15 13 *")).toBe(false)
+      expect(checkCronNativeEligibility("99 99 99 99 *")).toBe(false)
+    })
   })
 })
