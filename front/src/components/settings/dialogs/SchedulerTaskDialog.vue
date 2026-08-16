@@ -6,7 +6,8 @@
     @close="onNativeClose"
   >
     <div
-      class="modal-box flex h-[min(92dvh,720px)] w-full max-w-4xl flex-col p-0 sm:h-auto sm:max-h-[90vh]"
+      class="modal-box flex h-[min(92dvh,540px)] w-full max-w-4xl flex-col p-0 sm:h-[min(90dvh,540px)] sm:max-h-none"
+      :style="dialogBoxStyle"
     >
       <!-- Header -->
       <header
@@ -333,7 +334,7 @@
               class="select select-bordered w-full"
               :disabled="loadingDevices"
             >
-              <option value="">{{ t("panel.selectDeviceType") }}</option>
+              <option value="" disabled>{{ t("panel.selectDeviceType") }}</option>
               <option v-for="opt in deviceControllerOptions" :key="opt.value" :value="opt.value">
                 {{ opt.label }}
               </option>
@@ -353,17 +354,14 @@
               :placeholder="t('panel.playcoverAddress')"
               :disabled="!formData.controller_name"
             />
-            <select
+            <CreatableSelect
               v-else
               v-model="selectedDeviceAddress"
-              class="select select-bordered w-full"
+              :options="deviceAddressOptions"
+              :placeholder="t('panel.selectDevice')"
               :disabled="!formData.controller_name || loadingDevices"
-            >
-              <option value="">{{ t("panel.selectDevice") }}</option>
-              <option v-for="opt in deviceAddressOptions" :key="opt.value" :value="opt.value">
-                {{ opt.label }}
-              </option>
-            </select>
+              @create="handleCustomDeviceCreate"
+            />
           </fieldset>
 
           <fieldset v-if="activeSection === 'environment'" class="fieldset p-0">
@@ -376,7 +374,7 @@
               class="select select-bordered w-full"
               :disabled="!formData.controller_name || loadingResources"
             >
-              <option value="">{{ t("panel.selectResource") }}</option>
+              <option value="" disabled>{{ t("panel.selectResource") }}</option>
               <option v-for="opt in resourceOptions" :key="opt.value" :value="opt.value">
                 {{ opt.label }}
               </option>
@@ -438,6 +436,7 @@
                   :controller-name="formData.controller_name"
                   :resource-name="formData.resource_name"
                   :hide-incompatible="true"
+                  max-height="20rem"
                   @update:tasks="handleTasksUpdate"
                   @update:selected-tasks="handleSelectedTasksUpdate"
                   @config="openTaskSettings"
@@ -498,8 +497,8 @@ import TaskSelectList from "@/components/panel/task/TaskSelectList.vue"
 import TaskOptionPanel from "@/components/panel/task/TaskOptionPanel.vue"
 import PreTaskList from "@/components/panel/task/PreTaskList.vue"
 import { resolveInterfaceText } from "@/utils/interface/content"
-import { getDevices, getResource } from "@/services/api"
-import type { ConnectableDevice, DeviceControllerType } from "@/services/api"
+import { getDevices, getResource, postCustomDevice } from "@/services/api"
+import type { ConnectableDevice } from "@/services/api"
 import { buildDeviceLabel } from "@/utils/panel/device"
 import { checkCronNativeEligibility } from "@/utils/scheduler/cronNative"
 import type { PanelLastConnectedDevice } from "@/types/settingsModel"
@@ -514,6 +513,8 @@ import type {
 } from "@/types/schedulerModel"
 import { showGlobalMessage } from "@/services/feedback/message"
 import { tryCatch } from "@/utils/tryCatch"
+import { useViewport } from "@/utils/viewport/useViewport"
+import CreatableSelect from "@/components/common/CreatableSelect.vue"
 
 interface Props {
   show: boolean
@@ -539,6 +540,15 @@ const settingsStore = useSettingsStore()
 const dialogRef = useTemplateRef<HTMLDialogElement>("dialogRef")
 const loading = ref(false)
 const closingFromUi = ref(false)
+
+const { isMobile, width: viewportWidth } = useViewport()
+
+/** On desktop, fix the dialog to a viewport-derived size so it never grows/shrinks with content. */
+const dialogBoxStyle = computed(() => {
+  if (isMobile.value) return undefined
+  const w = Math.min(Math.round(viewportWidth.value * 0.72), 960)
+  return { width: `${w}px`, maxWidth: "none" }
+})
 
 const activeSection = ref<DialogSection>("basic")
 const activeTab = ref<"task-list" | "task-settings" | "pre-tasks">("task-list")
@@ -1090,6 +1100,32 @@ async function fetchResources(controllerType: string) {
     return
   }
   availableResources.value = data
+}
+
+/** Persist a user-typed device address as a custom device and select it. */
+async function handleCustomDeviceCreate(rawAddress: string) {
+  const controllerName = formData.value.controller_name
+  const controllerType = selectedControllerType.value
+  if (!controllerName || !controllerType || !isDeviceControllerType(controllerType)) return
+
+  const address = rawAddress.trim()
+  if (!address) return
+
+  const [result, err] = await tryCatch(() =>
+    postCustomDevice({
+      controller_name: controllerName,
+      type: controllerType,
+      address,
+    }),
+  )
+  if (err || !result?.success) {
+    showGlobalMessage("error", result?.message || t("settings.scheduler.dialog.saveFail"))
+    return
+  }
+
+  // Refresh device list so the new device appears, then select it
+  await fetchDevices(controllerName)
+  selectedDeviceAddress.value = address
 }
 
 function validateName(): boolean {

@@ -1,5 +1,9 @@
 <template>
-  <div class="bg-base-100 rounded-lg overflow-hidden">
+  <div
+    class="bg-base-100 rounded-lg overflow-hidden"
+    :class="{ 'overflow-y-auto': maxHeight }"
+    :style="maxHeight ? { maxHeight } : undefined"
+  >
     <VueDraggable v-model="taskListData" :animation="150" ghost-class="ghost">
       <div
         v-for="(item, index) in taskListData"
@@ -51,6 +55,7 @@ interface Props {
   controllerName?: string | null
   resourceName?: string | null
   hideIncompatible?: boolean
+  maxHeight?: string
 }
 
 interface Emits {
@@ -65,6 +70,7 @@ const {
   controllerName = null,
   resourceName = null,
   hideIncompatible = false,
+  maxHeight = "",
 } = defineProps<Props>()
 
 const emit = defineEmits<Emits>()
