@@ -8,6 +8,7 @@ import io
 import logging
 import plistlib
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -83,7 +84,7 @@ class WindowsBackend(SystemSchedulerBackend):
 
     def register(self, spec: NativeTaskSpec) -> None:
         task_id = validate_task_id(spec.task_id)
-        command = " ".join([f'"{spec.exe_path}"', *spec.cli_args])
+        command = subprocess.list2cmdline([spec.exe_path, *spec.cli_args])
         _run(
             [
                 "schtasks",
@@ -206,9 +207,8 @@ class LinuxBackend(SystemSchedulerBackend):
     def register(self, spec: NativeTaskSpec) -> None:
         task_id = validate_task_id(spec.task_id)
         lines = self._filtered_lines(task_id)
-        lines.append(
-            f"{to_crontab_line(spec.cron)} {spec.exe_path} {' '.join(spec.cli_args)} # MWU:{task_id}"
-        )
+        cmd = " ".join(shlex.quote(t) for t in [spec.exe_path, *spec.cli_args])
+        lines.append(f"{to_crontab_line(spec.cron)} {cmd} # MWU:{task_id}")
         self._write_crontab("\n".join(lines) + "\n")
         logger.info("已注册 Linux 计划任务 %s", task_id)
 

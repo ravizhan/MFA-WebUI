@@ -224,9 +224,18 @@ async def lifespan(app: FastAPI):
         task = await app_state.scheduler_manager.get_task(pending_id)
         if task is not None and task.enabled and task.wakeup_enabled:
             app_state.send_log(f"冷启动执行系统级任务: {task.task_name}")
-            asyncio.create_task(
-                execution.submit_scheduled(app_state, task, origin="native")
-            )
+
+            async def _cold_start_native():
+                admission = await execution.submit_scheduled(
+                    app_state, task, origin="native"
+                )
+                if not admission.accepted:
+                    app_state.send_log(
+                        f"冷启动系统级任务跳过: {task.task_name}"
+                        f" (原因: {admission.skip_status or '未知'})"
+                    )
+
+            asyncio.create_task(_cold_start_native())
 
     monitor_task = asyncio.create_task(log_monitor())
     webbrowser.open_new("http://127.0.0.1:5566")

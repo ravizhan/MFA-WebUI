@@ -16,7 +16,6 @@ ExecutionStatus = Literal[
     "skipped_busy_manual",
     "skipped_busy_scheduled",
     "skipped_update_in_progress",
-    "missed_deadline",
 ]
 
 

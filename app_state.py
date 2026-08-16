@@ -73,7 +73,6 @@ class ActiveRun:
     origin: "ExecutionOrigin"
     task_name: str
     occurrence_id: str | None = None
-    stop_requested: bool = False
 
 
 class LogBroadcaster:

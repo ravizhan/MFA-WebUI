@@ -235,7 +235,6 @@ class TestSubmitManual:
         await submit_manual(state, make_payload())
         assert await stop_active(state) is True
         assert state.active_run is not None
-        assert state.active_run.stop_requested is True
         await _await_active_task(state)
 
 
@@ -245,33 +244,6 @@ class TestSubmitManual:
 
 
 class TestSubmitScheduled:
-    async def test_native_late_marks_missed_deadline_and_writes_row(
-        self, state: AppState
-    ):
-        task = make_task()
-        scheduled_for = datetime.now(timezone.utc) - timedelta(minutes=16)
-
-        admission = await submit_scheduled(
-            state, task, origin="native", scheduled_for=scheduled_for
-        )
-
-        assert admission.accepted is False
-        assert admission.skip_status == "missed_deadline"
-        assert admission.conflict is None
-        assert state.active_run is None
-        rows = list_executions(state.scheduler_db_path)
-        assert len(rows) == 1
-        row = rows[0]
-        assert row.id == admission.run_id
-        assert row.status == "missed_deadline"
-        assert row.origin == "native"
-        assert row.task_id == task.id
-        assert row.occurrence_id == (
-            f"{task.id}:{scheduled_for.astimezone(timezone.utc).isoformat()}"
-        )
-        assert row.scheduled_for == scheduled_for
-        assert row.finished_at is not None
-
     async def test_native_not_late_is_accepted(self, state: AppState):
         task = make_task()
         scheduled_for = datetime.now(timezone.utc) - timedelta(minutes=14)

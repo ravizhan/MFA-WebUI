@@ -31,7 +31,6 @@ from models.task_config import normalize_task_execution_payload
 logger = logging.getLogger(__name__)
 
 EXECUTIONS_MAX_RECORDS = 1000
-MISSED_DEADLINE_SECONDS = 15 * 60
 
 
 @dataclass
@@ -50,7 +49,7 @@ class Admission:
 
 
 def init_db(path: Path) -> None:
-    """初始化执行历史表（含新列的平滑迁移）"""
+    """初始化执行历史表"""
     path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(path) as db:
         db.execute(
@@ -71,31 +70,6 @@ def init_db(path: Path) -> None:
             )
             """
         )
-        # 旧库缺新列时逐个补齐（ALTER TABLE ADD COLUMN 幂等性靠捕获异常）
-        existing = {
-            row[1] for row in db.execute("PRAGMA table_info(scheduler_executions)")
-        }
-        for column, ddl in (
-            ("origin", "ALTER TABLE scheduler_executions ADD COLUMN origin TEXT"),
-            (
-                "occurrence_id",
-                "ALTER TABLE scheduler_executions ADD COLUMN occurrence_id TEXT",
-            ),
-            (
-                "scheduled_for",
-                "ALTER TABLE scheduler_executions ADD COLUMN scheduled_for TEXT",
-            ),
-            (
-                "blocker_run_id",
-                "ALTER TABLE scheduler_executions ADD COLUMN blocker_run_id TEXT",
-            ),
-            (
-                "blocker_task_name",
-                "ALTER TABLE scheduler_executions ADD COLUMN blocker_task_name TEXT",
-            ),
-        ):
-            if column not in existing:
-                db.execute(ddl)
         db.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_scheduler_executions_started_at
@@ -337,24 +311,6 @@ async def submit_scheduled(
     scheduled_for = scheduled_for or _utc_now()
     occurrence_id = f"{task.id}:{scheduled_for.astimezone(timezone.utc).isoformat()}"
 
-    # 原生冷启动迟到判定：超过 15 分钟视为错过截止时间
-    if origin == "native":
-        delay = (_utc_now() - scheduled_for.astimezone(timezone.utc)).total_seconds()
-        if delay > MISSED_DEADLINE_SECONDS:
-            logger.warning(
-                f"原生调度任务 {task.id} 迟到 {int(delay)}s，超过 15 分钟截止时间，记为 missed_deadline"
-            )
-            return _record_skip(
-                state,
-                task.id,
-                task.name,
-                origin,
-                "missed_deadline",
-                occurrence_id=occurrence_id,
-                scheduled_for=scheduled_for,
-                error=f"迟到 {int(delay)} 秒，超过 15 分钟截止时间",
-            )
-
     if state.update_in_progress:
         return _record_skip(
             state,
@@ -446,7 +402,6 @@ async def stop_active(state: AppState) -> bool:
     active = state.active_run
     if active is None:
         return False
-    active.stop_requested = True
     if state.worker is not None:
         state.worker.tasks.stop()
     # 后台协程在 finally 中清槽；此处不等待，立即返回
