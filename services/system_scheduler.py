@@ -41,6 +41,11 @@ class SystemScheduler:
         self._app_root = app_root
         self._backend = backend or get_backend()
 
+    @property
+    def supports_native(self) -> bool:
+        """后端是否真正提供 OS 原生唤醒（NullBackend 为 False）。"""
+        return self._backend.supports_native
+
     def _build_spec(self, task: ScheduledTask) -> NativeTaskSpec:
         """将调度任务转换为原生注册规格，仅支持 Cron 触发器。"""
         if not isinstance(task.trigger_config, CronTriggerConfig):
@@ -69,6 +74,9 @@ class SystemScheduler:
     def converge(self, desired: list[ScheduledTask]) -> ConvergeReport:
         """收敛到期望集合：注册所有启用了唤醒的任务，清理孤儿，绝不抛错。"""
         report = ConvergeReport()
+        if not self._backend.supports_native:
+            # 后端不可用时不得注册/清理；由调度层回退到应用内派发
+            return report
         desired_tasks = [t for t in desired if t.wakeup_enabled and t.enabled]
         desired_ids = {t.id for t in desired_tasks}
 

@@ -5,7 +5,7 @@ worker 保持 None：后台执行协程以「Worker 未就绪」快速失败，�
 
 import asyncio
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -97,7 +97,6 @@ class TestSqlitePersistence:
         for column in (
             "origin",
             "occurrence_id",
-            "scheduled_for",
             "blocker_run_id",
             "blocker_task_name",
         ):
@@ -109,7 +108,6 @@ class TestSqlitePersistence:
         init_db(db_path)  # 不抛错
 
     def test_add_and_list_round_trip_with_new_fields(self, state: AppState):
-        scheduled_for = datetime(2026, 8, 16, 1, 2, 3, tzinfo=timezone.utc)
         started_at = datetime(2026, 8, 16, 0, 0, 0, tzinfo=timezone.utc)
         execution = TaskExecution(
             id="run-1",
@@ -117,7 +115,6 @@ class TestSqlitePersistence:
             task_name="定时任务",
             origin="native",
             occurrence_id="task-1:2026-08-16T01:02:03+00:00",
-            scheduled_for=scheduled_for,
             blocker_task_name="手动任务",
             started_at=started_at,
             status="running",
@@ -134,7 +131,6 @@ class TestSqlitePersistence:
         assert row.task_name == "定时任务"
         assert row.origin == "native"
         assert row.occurrence_id == "task-1:2026-08-16T01:02:03+00:00"
-        assert row.scheduled_for == scheduled_for
         assert row.blocker_task_name == "手动任务"
         assert row.started_at == started_at
         assert row.finished_at is None
@@ -244,13 +240,10 @@ class TestSubmitManual:
 
 
 class TestSubmitScheduled:
-    async def test_native_not_late_is_accepted(self, state: AppState):
+    async def test_native_origin_is_accepted(self, state: AppState):
         task = make_task()
-        scheduled_for = datetime.now(timezone.utc) - timedelta(minutes=14)
 
-        admission = await submit_scheduled(
-            state, task, origin="native", scheduled_for=scheduled_for
-        )
+        admission = await submit_scheduled(state, task, origin="native")
 
         assert admission.accepted is True
         assert admission.run_id is not None

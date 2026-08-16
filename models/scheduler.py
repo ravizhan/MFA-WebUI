@@ -181,7 +181,6 @@ class TaskExecution(BaseModel):
     task_name: str = Field(..., description="任务名称")
     origin: ExecutionOrigin = Field("in_app", description="执行来源")
     occurrence_id: Optional[str] = Field(None, description="调度发生次标识")
-    scheduled_for: Optional[datetime] = Field(None, description="计划执行时间")
     blocker_task_name: Optional[str] = Field(None, description="冲突的占用任务名称")
     started_at: datetime = Field(..., description="开始时间")
     finished_at: Optional[datetime] = Field(None, description="结束时间")

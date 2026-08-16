@@ -104,8 +104,7 @@
       "deleteConfirm": "Are you sure you want to delete this task?",
       "deleted": "Task deleted",
       "history": {
-        "scheduledFor": "Scheduled",
-        "skippedBy": "Skipped by: {name}"
+        "skippedBy": "Skipped by {name}"
       },
       "formatter": {
         "cron": "Cron",
@@ -125,8 +124,7 @@
         "stopped": "Stopped",
         "skippedBusyManual": "Skipped (manual busy)",
         "skippedBusyScheduled": "Skipped (scheduled busy)",
-        "skippedUpdateInProgress": "Skipped (updating)",
-        "missedDeadline": "Missed deadline"
+        "skippedUpdateInProgress": "Skipped (updating)"
       },
       "origin": {
         "manual": "Manual",

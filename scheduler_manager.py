@@ -7,7 +7,7 @@
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import timezone
 from pathlib import Path
 from typing import Any, List, Literal, Optional
 
@@ -102,13 +102,21 @@ def _build_task_from_kwargs(
 async def scheduled_job_fired(**kwargs) -> None:
     """APScheduler 可持久化执行入口。
 
-    - 启用了系统级唤醒（wakeup_enabled）的任务由 OS 原生调度负责，应用内直接跳过，
-      避免双重派发；
+    - 启用了系统级唤醒（wakeup_enabled）且系统级后端可用的任务由 OS 原生调度负责，
+      应用内直接跳过，避免双重派发；后端不可用（NullBackend）时回退应用内派发；
     - 其余任务移交 ``maa_worker.execution.submit_scheduled``（origin="in_app"）。
     """
     state = _CALLBACK_STATE
     if state is None:
         logger.error(f"调度器运行期状态未绑定，跳过定时任务 {kwargs.get('task_id')}")
+        return
+    # 唤醒任务仅在系统级后端可用时才跳过应用内派发；不可用则回退，防止任务失能
+    if kwargs.get("wakeup_enabled") and getattr(
+        state.system_scheduler, "supports_native", False
+    ):
+        logger.info(
+            f"定时任务 {kwargs.get('task_id')} 已启用系统级唤醒，跳过应用内派发"
+        )
         return
     try:
         trigger_config = _decode_trigger_config(kwargs.get("trigger_config"))
@@ -118,16 +126,12 @@ async def scheduled_job_fired(**kwargs) -> None:
     except Exception as e:
         logger.warning(f"定时任务 {kwargs.get('task_id')} 载荷解码失败，跳过执行: {e}")
         return
-    if task.wakeup_enabled:
-        logger.info(f"定时任务 {task.id} 已启用系统级唤醒，跳过应用内派发")
-        return
     from maa_worker import execution  # 延迟导入避免循环依赖
 
     await execution.submit_scheduled(
         state,
         task,
         origin="in_app",
-        scheduled_for=datetime.now(timezone.utc),
     )
 
 

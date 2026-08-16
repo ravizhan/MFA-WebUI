@@ -205,7 +205,6 @@ describe("useSchedulerStore", () => {
           task_name: "task-1",
           origin: "in_app",
           occurrence_id: null,
-          scheduled_for: null,
           blocker_task_name: null,
           started_at: "2024-01-01T00:00:00Z",
           status: "success",

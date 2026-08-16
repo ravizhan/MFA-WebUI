@@ -12,7 +12,6 @@ export type ExecutionStatus =
   | "skipped_busy_manual"
   | "skipped_busy_scheduled"
   | "skipped_update_in_progress"
-  | "missed_deadline"
 
 export interface CronTriggerConfig {
   type: "cron"
@@ -117,7 +116,6 @@ export interface TaskExecution {
   task_name: string
   origin: ExecutionOrigin
   occurrence_id: string | null
-  scheduled_for: string | null
   blocker_task_name: string | null
   started_at: string // ISO 8601 datetime string
   finished_at?: string | null // ISO 8601 datetime string

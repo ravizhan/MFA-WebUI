@@ -191,3 +191,28 @@ class TestNonCronTrigger:
         assert report.registered == []
         assert "date-1" in report.failed
         assert "仅 Cron" in report.failed["date-1"]
+
+
+class NullLikeBackend(FakeBackend):
+    """模拟不支持 OS 原生唤醒的后端（supports_native=False）。"""
+
+    supports_native = False
+
+
+class TestConvergeNonNativeBackend:
+    def test_converge_is_noop_when_backend_lacks_native_support(self):
+        backend = NullLikeBackend(pre_registered={ORPHAN_A})
+        scheduler = make_scheduler(backend)
+
+        report = scheduler.converge([make_task(T1), make_task(T2)])
+
+        # 不注册、不清理孤儿，留给调度层回退到应用内派发
+        assert report.registered == []
+        assert report.unregistered == []
+        assert report.failed == {}
+        assert backend.register_calls == []
+        assert backend.unregister_calls == []
+
+    def test_supports_native_property_reflects_backend(self):
+        assert make_scheduler(FakeBackend()).supports_native is True
+        assert make_scheduler(NullLikeBackend()).supports_native is False

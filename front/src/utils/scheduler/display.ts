@@ -84,7 +84,6 @@ export function getStatusType(
     case "skipped_busy_manual":
     case "skipped_busy_scheduled":
     case "skipped_update_in_progress":
-    case "missed_deadline":
       return "warning"
     default:
       return "default"
@@ -107,8 +106,6 @@ export function getStatusIcon(status: ExecutionStatus): string {
       return "i-mdi-calendar-remove"
     case "skipped_update_in_progress":
       return "i-mdi-update"
-    case "missed_deadline":
-      return "i-mdi-clock-alert"
     default:
       return "i-mdi-help-circle"
   }
@@ -130,8 +127,6 @@ export function getStatusLabel(t: (key: string) => string, status: ExecutionStat
       return t("settings.scheduler.status.skippedBusyScheduled")
     case "skipped_update_in_progress":
       return t("settings.scheduler.status.skippedUpdateInProgress")
-    case "missed_deadline":
-      return t("settings.scheduler.status.missedDeadline")
     default:
       return t("common.unknown")
   }

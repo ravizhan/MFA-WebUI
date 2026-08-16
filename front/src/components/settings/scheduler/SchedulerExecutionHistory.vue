@@ -29,10 +29,6 @@
         <div class="text-xs" :class="statusTextClass(exec.status)">
           {{ getStatusLabelText(exec.status) }}
         </div>
-        <div v-if="exec.scheduled_for" class="text-xs opacity-50">
-          {{ t("settings.scheduler.history.scheduledFor") }}{{ t("common.colon")
-          }}{{ formatDateTimeText(exec.scheduled_for) }}
-        </div>
         <div v-if="exec.blocker_task_name" class="text-xs text-warning">
           {{ t("settings.scheduler.history.skippedBy", { name: exec.blocker_task_name }) }}
         </div>

@@ -104,7 +104,6 @@
       "deleteConfirm": "确定要删除这个定时任务吗？",
       "deleted": "任务已删除",
       "history": {
-        "scheduledFor": "计划",
         "skippedBy": "被占用跳过：{name}"
       },
       "formatter": {
@@ -125,8 +124,7 @@
         "stopped": "已停止",
         "skippedBusyManual": "已跳过（手动任务占用）",
         "skippedBusyScheduled": "已跳过（调度任务占用）",
-        "skippedUpdateInProgress": "已跳过（更新中）",
-        "missedDeadline": "错过截止时间"
+        "skippedUpdateInProgress": "已跳过（更新中）"
       },
       "origin": {
         "manual": "手动",

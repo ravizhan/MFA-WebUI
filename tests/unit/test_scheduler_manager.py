@@ -177,3 +177,49 @@ class TestUpdateTaskWakeup:
         assert updated is not None
         assert updated.enabled is True
         assert system_scheduler.register.call_count == 2
+
+
+class TestScheduledJobFired:
+    async def _make_kwargs(self, mgr, task) -> dict:
+        job = mgr.scheduler.get_job(task.id)
+        assert job is not None
+        return job.kwargs
+
+    async def test_wakeup_skips_in_app_dispatch_when_native_supported(
+        self, manager_env, monkeypatch
+    ):
+        from scheduler_manager import scheduled_job_fired
+        import maa_worker.execution as execution
+
+        mgr, state, system_scheduler = manager_env
+        system_scheduler.supports_native = True
+        state.system_scheduler = system_scheduler
+        task = await mgr.create_task(make_create("唤醒任务", wakeup_enabled=True))
+        submit = MagicMock()
+        monkeypatch.setattr(execution, "submit_scheduled", submit)
+
+        await scheduled_job_fired(**await self._make_kwargs(mgr, task))
+
+        submit.assert_not_called()
+
+    async def test_wakeup_falls_back_to_in_app_when_native_unsupported(
+        self, manager_env, monkeypatch
+    ):
+        from scheduler_manager import scheduled_job_fired
+        import maa_worker.execution as execution
+
+        mgr, state, system_scheduler = manager_env
+        system_scheduler.supports_native = False
+        state.system_scheduler = system_scheduler
+        task = await mgr.create_task(make_create("唤醒任务", wakeup_enabled=True))
+        captured: dict = {}
+
+        async def fake_submit(state_arg, task_arg, origin):
+            captured["origin"] = origin
+            captured["task_id"] = task_arg.id
+
+        monkeypatch.setattr(execution, "submit_scheduled", fake_submit)
+
+        await scheduled_job_fired(**await self._make_kwargs(mgr, task))
+
+        assert captured == {"origin": "in_app", "task_id": task.id}

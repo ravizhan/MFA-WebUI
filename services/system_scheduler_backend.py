@@ -50,6 +50,8 @@ class NativeTaskSpec:
 class SystemSchedulerBackend(ABC):
     """系统级计划任务后端抽象基类"""
 
+    supports_native: bool = True
+
     @abstractmethod
     def register(self, spec: NativeTaskSpec) -> None:
         """注册（或更新）一个系统计划任务"""
@@ -230,6 +232,8 @@ class LinuxBackend(SystemSchedulerBackend):
 
 class NullBackend(SystemSchedulerBackend):
     """空后端：不支持系统级调度的平台，注册/删除均为 no-op"""
+
+    supports_native: bool = False
 
     def register(self, spec: NativeTaskSpec) -> None:
         logger.info(

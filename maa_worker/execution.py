@@ -60,7 +60,6 @@ def init_db(path: Path) -> None:
                 task_name TEXT NOT NULL,
                 origin TEXT NOT NULL DEFAULT 'in_app',
                 occurrence_id TEXT,
-                scheduled_for TEXT,
                 status TEXT NOT NULL,
                 blocker_run_id TEXT,
                 blocker_task_name TEXT,
@@ -102,10 +101,10 @@ def add_execution(path: Path, execution: TaskExecution) -> None:
         db.execute(
             """
             INSERT INTO scheduler_executions
-            (id, task_id, task_name, origin, occurrence_id, scheduled_for,
+            (id, task_id, task_name, origin, occurrence_id,
              status, blocker_run_id, blocker_task_name, error_message,
              started_at, finished_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 execution.id,
@@ -113,7 +112,6 @@ def add_execution(path: Path, execution: TaskExecution) -> None:
                 execution.task_name,
                 execution.origin,
                 execution.occurrence_id,
-                _to_iso(execution.scheduled_for),
                 execution.status,
                 None,
                 execution.blocker_task_name,
@@ -160,7 +158,7 @@ def list_executions(path: Path, limit: int = 50) -> list[TaskExecution]:
     with sqlite3.connect(path) as db:
         rows = db.execute(
             """
-            SELECT id, task_id, task_name, origin, occurrence_id, scheduled_for,
+            SELECT id, task_id, task_name, origin, occurrence_id,
                    status, blocker_task_name, error_message, started_at, finished_at
             FROM scheduler_executions
             ORDER BY started_at DESC, id DESC
@@ -178,12 +176,11 @@ def list_executions(path: Path, limit: int = 50) -> list[TaskExecution]:
                 task_name=row[2],
                 origin=row[3] or "in_app",
                 occurrence_id=row[4],
-                scheduled_for=datetime.fromisoformat(row[5]) if row[5] else None,
-                status=row[6],
-                blocker_task_name=row[7],
-                error_message=row[8],
-                started_at=datetime.fromisoformat(row[9]),
-                finished_at=datetime.fromisoformat(row[10]) if row[10] else None,
+                status=row[5],
+                blocker_task_name=row[6],
+                error_message=row[7],
+                started_at=datetime.fromisoformat(row[8]),
+                finished_at=datetime.fromisoformat(row[9]) if row[9] else None,
             )
         )
     return executions
@@ -217,7 +214,6 @@ def _record_skip(
     origin: ExecutionOrigin,
     status: ExecutionStatus,
     occurrence_id: Optional[str] = None,
-    scheduled_for: Optional[datetime] = None,
     error: Optional[str] = None,
 ) -> Admission:
     """落库一条跳过/失败记录并返回拒绝准入"""
@@ -228,7 +224,6 @@ def _record_skip(
         task_name=task_name,
         origin=origin,
         occurrence_id=occurrence_id,
-        scheduled_for=scheduled_for,
         blocker_task_name=state.active_run.task_name if state.active_run else None,
         started_at=_utc_now(),
         finished_at=_utc_now(),
@@ -305,11 +300,9 @@ async def submit_scheduled(
     state: AppState,
     task: ScheduledTask,
     origin: ExecutionOrigin,
-    scheduled_for: Optional[datetime] = None,
 ) -> Admission:
-    """调度触发准入（应用内 / 原生冷启动）"""
-    scheduled_for = scheduled_for or _utc_now()
-    occurrence_id = f"{task.id}:{scheduled_for.astimezone(timezone.utc).isoformat()}"
+    """调度触发准入（应用内 / 原生冷启动）；时间仅记录实际开始执行时刻"""
+    occurrence_id = f"{task.id}:{_utc_now().isoformat()}"
 
     if state.update_in_progress:
         return _record_skip(
@@ -319,7 +312,6 @@ async def submit_scheduled(
             origin,
             "skipped_update_in_progress",
             occurrence_id=occurrence_id,
-            scheduled_for=scheduled_for,
             error="应用正在更新",
         )
 
@@ -336,7 +328,6 @@ async def submit_scheduled(
             origin,
             skip_status,
             occurrence_id=occurrence_id,
-            scheduled_for=scheduled_for,
             error=f"与运行中的任务冲突: {state.active_run.task_name}",
         )
 
@@ -353,7 +344,6 @@ async def submit_scheduled(
         task_name=task.name,
         origin=origin,
         occurrence_id=occurrence_id,
-        scheduled_for=scheduled_for,
         started_at=_utc_now(),
         status="running",
     )

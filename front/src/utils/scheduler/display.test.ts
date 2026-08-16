@@ -121,7 +121,6 @@ describe("getStatusType", () => {
     ["skipped_busy_manual", "warning"],
     ["skipped_busy_scheduled", "warning"],
     ["skipped_update_in_progress", "warning"],
-    ["missed_deadline", "warning"],
   ] satisfies [ExecutionStatus, ReturnType<typeof getStatusType>][])(
     "maps %s to %s",
     (status, expected) => {
@@ -144,7 +143,6 @@ describe("getStatusIcon", () => {
     ["skipped_busy_manual", "i-mdi-account-cancel"],
     ["skipped_busy_scheduled", "i-mdi-calendar-remove"],
     ["skipped_update_in_progress", "i-mdi-update"],
-    ["missed_deadline", "i-mdi-clock-alert"],
   ] satisfies [ExecutionStatus, string][])("maps %s to %s", (status, expected) => {
     expect(getStatusIcon(status)).toBe(expected)
   })
@@ -166,7 +164,6 @@ describe("getStatusLabel", () => {
     ["skipped_busy_manual", "settings.scheduler.status.skippedBusyManual"],
     ["skipped_busy_scheduled", "settings.scheduler.status.skippedBusyScheduled"],
     ["skipped_update_in_progress", "settings.scheduler.status.skippedUpdateInProgress"],
-    ["missed_deadline", "settings.scheduler.status.missedDeadline"],
   ] satisfies [ExecutionStatus, string][])("maps %s to %s", (status, expected) => {
     expect(getStatusLabel(t, status)).toBe(expected)
   })

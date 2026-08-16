@@ -223,7 +223,7 @@ async def lifespan(app: FastAPI):
         app_state.pending_scheduled_task_id = None
         task = await app_state.scheduler_manager.get_task(pending_id)
         if task is not None and task.enabled and task.wakeup_enabled:
-            app_state.send_log(f"冷启动执行系统级任务: {task.task_name}")
+            app_state.send_log(f"冷启动执行系统级任务: {task.name}")
 
             async def _cold_start_native():
                 admission = await execution.submit_scheduled(
@@ -231,7 +231,7 @@ async def lifespan(app: FastAPI):
                 )
                 if not admission.accepted:
                     app_state.send_log(
-                        f"冷启动系统级任务跳过: {task.task_name}"
+                        f"冷启动系统级任务跳过: {task.name}"
                         f" (原因: {admission.skip_status or '未知'})"
                     )
 
