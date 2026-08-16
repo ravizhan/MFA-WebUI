@@ -487,6 +487,38 @@ describe("useDeviceConnectionStore", () => {
         expect(calls).toBeLessThanOrEqual(121)
       })
 
+      it("stops retrying and clears stale conflict when a later attempt fails without conflict", async () => {
+        vi.useFakeTimers()
+        const { store, indexStore } = primeRunningStore()
+        vi.mocked(api.stopTask).mockResolvedValue(true)
+        // 复现 greptile 场景：首次重启拿到 busy_manual，下一次因普通错误失败（无 conflict）。
+        // 过期冲突不得驱动重试——应立即停止并清除 startConflict。
+        vi.mocked(api.startTask)
+          .mockResolvedValueOnce({
+            accepted: false,
+            conflict: {
+              code: "busy_manual",
+              message: "busy",
+              active_run_id: "run-9",
+              active_task_name: "Other Task",
+              active_origin: "manual",
+            },
+          })
+          .mockResolvedValueOnce({ accepted: false, error: "任务启动失败" })
+
+        const pending = store.stopActiveAndRestart()
+        await vi.advanceTimersByTimeAsync(0)
+        indexStore.setTaskRunning(false)
+        await vi.advanceTimersByTimeAsync(61_000)
+        const result = await pending
+        vi.useRealTimers()
+
+        expect(result).toBe(false)
+        // 修复前：旧 busy_manual 滞留 → 重试跑满 60s（约 121 次）；修复后：第二次失败即停
+        expect(api.startTask).toHaveBeenCalledTimes(2)
+        expect(store.startConflict).toBeNull()
+      })
+
       it("fails with actionable toast when cleanup exceeds timeout", async () => {
         vi.useFakeTimers()
         const { store } = primeRunningStore()

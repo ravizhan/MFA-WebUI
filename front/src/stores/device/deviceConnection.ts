@@ -697,6 +697,9 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
         this.startConflict = result.conflict ?? null
         return false
       }
+      // 非冲突失败同样清掉过期冲突：否则 stopActiveAndRestart 的重试条件
+      // 会拿着旧的 busy_manual 继续空转，对话框也停留在已失效的冲突状态。
+      this.startConflict = null
       return false
     },
 
