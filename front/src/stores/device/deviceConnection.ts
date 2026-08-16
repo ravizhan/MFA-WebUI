@@ -688,6 +688,8 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
       const result = await startTask(payload)
       if (result.accepted) {
         indexStore.setTaskRunning(true)
+        // 清掉重试路径留下的过期冲突，避免 StartConflictDialog 在运行中弹出
+        this.startConflict = null
         return true
       }
       if (result.conflict) {
@@ -708,8 +710,10 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
         return false
       }
       this.clearStartConflict()
-      // 等待后端释放运行槽位：SSE task.completed/failed 由 dispatcher 置 TaskRunning=false，
-      // 仅在 active_run 清槽之后发出；固定延迟会在清理较慢时撞上 busy_manual 冲突。
+      // 等待后端工作线程结束：SSE task.completed/failed 由 dispatcher 置 TaskRunning=false。
+      // 注意：后端终端事件在 run_process 的 finally 之前发出（task_service.py），即事件
+      // 先于 active_run 清槽（execution.py 的 _complete_run 收尾），因此 TaskRunning=false
+      // 不代表准入槽位已释放，下方必须对 busy_manual 冲突做有限重试。
       const indexStore = useIndexStore()
       const released = await new Promise<boolean>((resolve) => {
         if (!indexStore.TaskRunning) {
@@ -736,7 +740,16 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
         showGlobalMessage("error", t("settings.scheduler.conflict.stopTimeout"))
         return false
       }
-      return this.StartTask()
+      // active_run 清槽晚于终端事件（落库在 asyncio.to_thread 中），轮询重试直至准入成功；
+      // 仅对 busy_manual 重试——busy_scheduled/update_in_progress 是真实占用，立即返回冲突。
+      // 上限 60s：后端收尾含 sqlite 落库，正常在数百毫秒内完成。
+      const deadline = Date.now() + 60_000
+      let restarted = await this.StartTask()
+      while (!restarted && this.startConflict?.code === "busy_manual" && Date.now() < deadline) {
+        await new Promise((resolve) => window.setTimeout(resolve, 500))
+        restarted = await this.StartTask()
+      }
+      return restarted
     },
 
     resetConfig() {

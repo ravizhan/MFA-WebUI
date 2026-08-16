@@ -406,6 +406,87 @@ describe("useDeviceConnectionStore", () => {
         expect(api.startTask).toHaveBeenCalledTimes(1)
       })
 
+      it("retries when busy_manual conflict arrives after terminal event (slot not yet released)", async () => {
+        vi.useFakeTimers()
+        const { store, indexStore } = primeRunningStore()
+        vi.mocked(api.stopTask).mockResolvedValue(true)
+        // 复现：终端事件先于 active_run 清槽 → 首次重启拿到 busy_manual，清槽后重试成功
+        vi.mocked(api.startTask)
+          .mockResolvedValueOnce({
+            accepted: false,
+            conflict: {
+              code: "busy_manual",
+              message: "busy",
+              active_run_id: "run-9",
+              active_task_name: "Other Task",
+              active_origin: "manual",
+            },
+          })
+          .mockResolvedValueOnce({ accepted: true, runId: "run-2" })
+
+        const pending = store.stopActiveAndRestart()
+        await vi.advanceTimersByTimeAsync(0)
+        indexStore.setTaskRunning(false)
+        await vi.advanceTimersByTimeAsync(500)
+        const result = await pending
+        vi.useRealTimers()
+
+        expect(result).toBe(true)
+        expect(api.startTask).toHaveBeenCalledTimes(2)
+        expect(store.startConflict).toBeNull()
+        expect(indexStore.TaskRunning).toBe(true)
+      })
+
+      it("does not retry on busy_scheduled conflict", async () => {
+        const { store, indexStore } = primeRunningStore()
+        vi.mocked(api.stopTask).mockResolvedValue(true)
+        const scheduledConflict = {
+          code: "busy_scheduled" as const,
+          message: "busy",
+          active_run_id: "run-10",
+          active_task_name: "Scheduled Task",
+          active_origin: "in_app" as const,
+        }
+        vi.mocked(api.startTask).mockResolvedValue({
+          accepted: false,
+          conflict: scheduledConflict,
+        })
+
+        indexStore.setTaskRunning(false)
+        await expect(store.stopActiveAndRestart()).resolves.toBe(false)
+        expect(api.startTask).toHaveBeenCalledTimes(1)
+        expect(store.startConflict).toEqual(scheduledConflict)
+      })
+
+      it("stops retrying when busy_manual persists past deadline", async () => {
+        vi.useFakeTimers()
+        const { store, indexStore } = primeRunningStore()
+        vi.mocked(api.stopTask).mockResolvedValue(true)
+        vi.mocked(api.startTask).mockResolvedValue({
+          accepted: false,
+          conflict: {
+            code: "busy_manual",
+            message: "busy",
+            active_run_id: "run-9",
+            active_task_name: "Other Task",
+            active_origin: "manual",
+          },
+        })
+
+        const pending = store.stopActiveAndRestart()
+        await vi.advanceTimersByTimeAsync(0)
+        indexStore.setTaskRunning(false)
+        await vi.advanceTimersByTimeAsync(61_000)
+        const result = await pending
+        vi.useRealTimers()
+
+        expect(result).toBe(false)
+        expect(store.startConflict?.code).toBe("busy_manual")
+        const calls = vi.mocked(api.startTask).mock.calls.length
+        expect(calls).toBeGreaterThan(1)
+        expect(calls).toBeLessThanOrEqual(121)
+      })
+
       it("fails with actionable toast when cleanup exceeds timeout", async () => {
         vi.useFakeTimers()
         const { store } = primeRunningStore()
