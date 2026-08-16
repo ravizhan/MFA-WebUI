@@ -19,12 +19,20 @@
               @change="emit('toggle', task.id, ($event.target as HTMLInputElement).checked)"
             />
             <div class="min-w-0">
-              <div class="font-medium truncate">{{ task.name }}</div>
+              <div class="font-medium truncate">
+                {{ task.name }}
+                <i
+                  v-if="task.wakeup_enabled"
+                  class="i-mdi-power-sleep ml-1 inline-block h-3.5 w-3.5 align-[-2px] opacity-70"
+                  aria-hidden="true"
+                  :title="t('settings.scheduler.list.runsWhenClosed')"
+                />
+              </div>
               <div class="text-xs opacity-60">{{ task.description }}</div>
-              <div class="flex flex-wrap gap-x-3 text-xs opacity-50 mt-1">
+              <div class="flex flex-wrap items-center gap-x-3 text-xs opacity-50 mt-1">
                 <span>
                   {{ t("settings.scheduler.trigger") }}{{ t("common.colon") }}
-                  {{ formatTriggerText(task.trigger_type, task.trigger_config) }}
+                  {{ formatTriggerText(task.trigger_config) }}
                 </span>
                 <span>
                   {{ t("settings.scheduler.nextRun") }}{{ t("common.colon") }}
@@ -51,7 +59,7 @@
 import { useI18n } from "vue-i18n"
 import { Icon } from "@iconify/vue"
 import { formatDateTime, formatTrigger } from "@/utils/scheduler/display"
-import type { ScheduledTask, TriggerConfig, TriggerType } from "@/types/schedulerModel"
+import type { ScheduledTask, TriggerConfig } from "@/types/schedulerModel"
 
 const { tasks } = defineProps<{
   tasks: ScheduledTask[]
@@ -65,8 +73,8 @@ const emit = defineEmits<{
 
 const { t, locale } = useI18n()
 
-function formatTriggerText(triggerType: TriggerType, triggerConfig: TriggerConfig): string {
-  return formatTrigger(t, locale.value, triggerType, triggerConfig)
+function formatTriggerText(triggerConfig: TriggerConfig): string {
+  return formatTrigger(t, locale.value, triggerConfig.type, triggerConfig)
 }
 
 function formatDateTimeText(dateStr?: string): string {

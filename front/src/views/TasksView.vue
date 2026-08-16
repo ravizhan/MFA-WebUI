@@ -56,6 +56,8 @@
     <!-- Mobile task settings drawer -->
     <TaskSettingsDrawer v-if="isMobile" />
   </div>
+
+  <StartConflictDialog />
 </template>
 
 <script setup lang="ts">
@@ -67,6 +69,7 @@ import PanelTaskColumn from "@/components/panel/PanelTaskColumn.vue"
 import TaskSettingsDrawer from "@/components/panel/task/TaskSettingsDrawer.vue"
 import PreTaskList from "@/components/panel/task/PreTaskList.vue"
 import TaskSelectList from "@/components/panel/task/TaskSelectList.vue"
+import StartConflictDialog from "@/components/settings/scheduler/StartConflictDialog.vue"
 import { stopTask } from "@/services/api"
 import { useIndexStore, useTaskConfigStore, useDeviceConnectionStore } from "@/stores"
 import type { TaskListItem } from "@/types/taskConfigModel"

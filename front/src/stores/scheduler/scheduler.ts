@@ -47,7 +47,7 @@ export const useSchedulerStore = defineStore("scheduler", () => {
     loading.value = false
   }
 
-  async function createTask(task: ScheduledTaskCreate) {
+  async function createTask(task: ScheduledTaskCreate): Promise<ScheduledTask | null> {
     loading.value = true
     error.value = null
     const [response, err] = await tryCatch(() => createSchedulerTask(task))
@@ -55,16 +55,16 @@ export const useSchedulerStore = defineStore("scheduler", () => {
       error.value = "网络错误，请稍后重试"
       console.error("Failed to create task:", err)
       loading.value = false
-      return false
+      return null
     }
     if (response.status === "success" && response.task) {
       tasks.value.push(response.task)
       loading.value = false
-      return true
+      return response.task
     }
     error.value = response.message || "创建任务失败"
     loading.value = false
-    return false
+    return null
   }
 
   async function updateTask(taskId: string, taskUpdate: ScheduledTaskUpdate) {

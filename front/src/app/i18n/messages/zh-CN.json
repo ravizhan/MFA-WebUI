@@ -93,13 +93,20 @@
       "title": "定时任务",
       "create": "新建任务",
       "taskList": "任务列表",
+      "list": {
+        "runsWhenClosed": "关闭后仍运行"
+      },
       "noTasks": "暂无定时任务",
       "trigger": "触发",
       "nextRun": "下次执行",
-      "history": "执行历史",
+      "historyTitle": "执行历史",
       "noHistory": "暂无执行记录",
       "deleteConfirm": "确定要删除这个定时任务吗？",
       "deleted": "任务已删除",
+      "history": {
+        "scheduledFor": "计划",
+        "skippedBy": "被占用跳过：{name}"
+      },
       "formatter": {
         "cron": "Cron",
         "date": "指定时间",
@@ -115,7 +122,16 @@
         "success": "成功",
         "failed": "失败",
         "running": "运行中",
-        "stopped": "已停止"
+        "stopped": "已停止",
+        "skippedBusyManual": "已跳过（手动任务占用）",
+        "skippedBusyScheduled": "已跳过（调度任务占用）",
+        "skippedUpdateInProgress": "已跳过（更新中）",
+        "missedDeadline": "错过截止时间"
+      },
+      "origin": {
+        "manual": "手动",
+        "inApp": "应用内",
+        "native": "系统"
       },
       "dialog": {
         "editTitle": "编辑定时任务",
@@ -161,6 +177,8 @@
         "controller": "控制器",
         "deviceAddress": "设备地址",
         "resource": "资源",
+        "runWhenClosed": "关闭后仍运行（系统级唤醒）",
+        "runWhenClosedIneligible": "当前 cron 不支持系统级唤醒（分钟须为具体值，日与星期不可同时限定）",
         "sections": {
           "nav": "配置分区",
           "basic": "基本信息",
@@ -168,6 +186,13 @@
           "environment": "运行环境",
           "content": "执行内容"
         }
+      },
+      "conflict": {
+        "title": "启动冲突",
+        "updateInProgress": "应用正在更新，请稍后再试",
+        "busyMessage": "任务「{name}」正在运行",
+        "stopAndRestart": "停止并重启",
+        "stopTimeout": "停止超时：上一个任务未能及时退出，请稍后手动启动"
       },
       "rules": {
         "nameRequired": "请输入任务名称",
