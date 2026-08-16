@@ -17,11 +17,24 @@
       </div>
       <div class="flex-1 min-w-0">
         <div class="flex items-center justify-between gap-2">
-          <span class="font-medium text-sm truncate">{{ exec.task_name }}</span>
+          <span class="flex items-center gap-2 min-w-0">
+            <span class="font-medium text-sm truncate">{{ exec.task_name }}</span>
+            <span class="badge badge-sm gap-1 shrink-0" :class="originBadgeClass(exec.origin)">
+              <Icon :icon="originIcon(exec.origin)" class="text-xs" />
+              {{ getOriginLabelText(exec.origin) }}
+            </span>
+          </span>
           <span class="text-xs opacity-50 shrink-0">{{ formatDateTimeText(exec.started_at) }}</span>
         </div>
         <div class="text-xs" :class="statusTextClass(exec.status)">
           {{ getStatusLabelText(exec.status) }}
+        </div>
+        <div v-if="exec.scheduled_for" class="text-xs opacity-50">
+          {{ t("settings.scheduler.history.scheduledFor") }}{{ t("common.colon")
+          }}{{ formatDateTimeText(exec.scheduled_for) }}
+        </div>
+        <div v-if="exec.blocker_task_name" class="text-xs text-warning">
+          {{ t("settings.scheduler.history.skippedBy", { name: exec.blocker_task_name }) }}
         </div>
         <div v-if="exec.error_message" class="text-xs text-error opacity-80">
           {{ exec.error_message }}
@@ -34,9 +47,10 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n"
 import { Icon } from "@iconify/vue"
-import type { ExecutionStatus, TaskExecution } from "@/types/schedulerModel"
+import type { ExecutionOrigin, ExecutionStatus, TaskExecution } from "@/types/schedulerModel"
 import {
   formatDateTime,
+  getOriginLabel,
   getStatusIcon,
   getStatusLabel,
   getStatusType,
@@ -56,15 +70,41 @@ function getStatusLabelText(status: ExecutionStatus): string {
   return getStatusLabel(t, status)
 }
 
+function getOriginLabelText(origin: ExecutionOrigin): string {
+  return getOriginLabel(t, origin)
+}
+
 function statusIcon(status: ExecutionStatus): string {
   const map: Record<string, string> = {
     "i-mdi-check-circle": "mdi:check-circle",
     "i-mdi-close-circle": "mdi:close-circle",
     "i-mdi-loading": "mdi:loading",
     "i-mdi-pause-circle": "mdi:pause-circle",
+    "i-mdi-account-cancel": "mdi:account-cancel",
+    "i-mdi-calendar-remove": "mdi:calendar-remove",
+    "i-mdi-update": "mdi:update",
+    "i-mdi-clock-alert": "mdi:clock-alert",
     "i-mdi-help-circle": "mdi:help-circle",
   }
   return map[getStatusIcon(status)] || "mdi:help-circle"
+}
+
+function originIcon(origin: ExecutionOrigin): string {
+  const map: Record<string, string> = {
+    manual: "mdi:account",
+    in_app: "mdi:application",
+    native: "mdi:power-sleep",
+  }
+  return map[origin] || "mdi:help-circle"
+}
+
+function originBadgeClass(origin: ExecutionOrigin): string {
+  const map: Record<string, string> = {
+    manual: "badge-info",
+    in_app: "badge-ghost",
+    native: "badge-secondary",
+  }
+  return map[origin] || "badge-ghost"
 }
 
 function statusBgClass(status: ExecutionStatus): string {

@@ -17,7 +17,7 @@
         <div class="flex-1 min-w-0">
           <div class="text-sm font-medium truncate">{{ task.name }}</div>
           <div class="text-xs opacity-60">
-            {{ formatTriggerText(task.trigger_type, task.trigger_config) }}
+            {{ formatTriggerText(task.trigger_config) }}
           </div>
         </div>
         <div class="text-xs opacity-60 shrink-0">
@@ -74,7 +74,7 @@ import { useI18n } from "vue-i18n"
 import { Icon } from "@iconify/vue"
 import { useSchedulerStore } from "@/stores"
 import { formatDateTime, formatTrigger } from "@/utils/scheduler/display"
-import type { TriggerConfig, TriggerType } from "@/types/schedulerModel"
+import type { TriggerConfig } from "@/types/schedulerModel"
 
 const { t, locale } = useI18n()
 const schedulerStore = useSchedulerStore()
@@ -87,8 +87,8 @@ const healthScore = computed(() => {
 
 const healthScoreText = computed(() => `${healthScore.value}%`)
 
-function formatTriggerText(triggerType: TriggerType, triggerConfig: TriggerConfig): string {
-  return formatTrigger(t, locale.value, triggerType, triggerConfig)
+function formatTriggerText(triggerConfig: TriggerConfig): string {
+  return formatTrigger(t, locale.value, triggerConfig.type, triggerConfig)
 }
 
 function formatDateTimeText(dateStr?: string): string {

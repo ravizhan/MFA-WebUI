@@ -1,8 +1,11 @@
-import type { TaskExecutionPayload } from "@/types/schedulerModel"
+import type {
+  ManualStartPayload,
+  ManualStartResult,
+  SchedulerApiResponse,
+} from "@/types/schedulerModel"
 import { showGlobalMessage } from "@/services/feedback/message"
-import type { ApiResponse } from "@/services/api/core/types"
 
-export function startTask(payload: TaskExecutionPayload): Promise<boolean> {
+export function startTask(payload: ManualStartPayload): Promise<ManualStartResult> {
   return fetch("/api/start", {
     method: "POST",
     body: JSON.stringify(payload),
@@ -11,17 +14,21 @@ export function startTask(payload: TaskExecutionPayload): Promise<boolean> {
     },
   })
     .then((res) => res.json())
-    .then((data: ApiResponse) => {
-      if (data.status !== "success") {
-        showGlobalMessage("error", data.message || "任务启动失败")
-        return false
+    .then((data: SchedulerApiResponse): ManualStartResult => {
+      if (data.status === "success") {
+        return { accepted: true, runId: data.run_id ?? "" }
       }
-      return true
+      if (data.status === "conflict") {
+        // Conflict is surfaced by the caller via StartConflictDialog, not a toast
+        return { accepted: false, conflict: data.conflict }
+      }
+      showGlobalMessage("error", data.message || "任务启动失败")
+      return { accepted: false, error: data.message || "任务启动失败" }
     })
     .catch((error) => {
       console.error("Failed to start task:", error)
       showGlobalMessage("error", "任务启动失败")
-      return false
+      return { accepted: false, error: "任务启动失败" }
     })
 }
 
@@ -33,7 +40,7 @@ export function stopTask(): Promise<boolean> {
     },
   })
     .then((res) => res.json())
-    .then((data: ApiResponse) => {
+    .then((data: SchedulerApiResponse) => {
       if (data.status === "success") {
         showGlobalMessage("success", "正在中止任务，请稍后")
         return true

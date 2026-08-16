@@ -107,10 +107,11 @@
                 class="border-base-300 hover:border-primary/40 has-[:checked]:border-primary has-[:checked]:bg-primary/5 flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 transition-colors"
               >
                 <input
-                  v-model="formData.trigger_type"
+                  :checked="triggerType === option.value"
                   type="radio"
                   class="radio radio-primary radio-sm"
                   :value="option.value"
+                  @change="setTriggerType(option.value)"
                 />
                 <Icon :icon="option.icon" class="text-base opacity-70" aria-hidden="true" />
                 <span class="text-sm">{{ option.label }}</span>
@@ -120,7 +121,7 @@
 
           <!-- Schedule: cron -->
           <fieldset
-            v-if="activeSection === 'schedule' && formData.trigger_type === 'cron'"
+            v-if="activeSection === 'schedule' && triggerType === 'cron'"
             class="fieldset p-0"
           >
             <legend class="fieldset-legend">
@@ -136,7 +137,7 @@
             />
           </fieldset>
           <div
-            v-if="activeSection === 'schedule' && formData.trigger_type === 'cron'"
+            v-if="activeSection === 'schedule' && triggerType === 'cron'"
             class="flex flex-wrap gap-2"
           >
             <span class="text-base-content/50 self-center text-xs">
@@ -156,9 +157,31 @@
             </button>
           </div>
 
+          <!-- Schedule: wakeup -->
+          <fieldset
+            v-if="activeSection === 'schedule' && triggerType === 'cron'"
+            class="fieldset p-0"
+          >
+            <legend class="fieldset-legend flex items-center gap-1.5">
+              <Icon icon="mdi:power-sleep" class="text-base opacity-70" aria-hidden="true" />
+              {{ t("settings.scheduler.dialog.runWhenClosed") }}
+            </legend>
+            <div class="flex flex-wrap items-center gap-3">
+              <input
+                v-model="wakeupEnabled"
+                type="checkbox"
+                class="toggle toggle-primary"
+                :disabled="!isCronNativeEligible"
+              />
+              <span v-if="!isCronNativeEligible" class="text-warning text-xs">
+                {{ t("settings.scheduler.dialog.runWhenClosedIneligible") }}
+              </span>
+            </div>
+          </fieldset>
+
           <!-- Schedule: date -->
           <fieldset
-            v-if="activeSection === 'schedule' && formData.trigger_type === 'date'"
+            v-if="activeSection === 'schedule' && triggerType === 'date'"
             class="fieldset p-0"
           >
             <legend class="fieldset-legend">
@@ -178,7 +201,7 @@
 
           <!-- Schedule: interval duration -->
           <fieldset
-            v-if="activeSection === 'schedule' && formData.trigger_type === 'interval'"
+            v-if="activeSection === 'schedule' && triggerType === 'interval'"
             class="fieldset p-0"
           >
             <legend class="fieldset-legend">
@@ -264,7 +287,7 @@
 
           <!-- Schedule: interval start/end -->
           <div
-            v-if="activeSection === 'schedule' && formData.trigger_type === 'interval'"
+            v-if="activeSection === 'schedule' && triggerType === 'interval'"
             class="grid grid-cols-1 gap-3 sm:grid-cols-2"
           >
             <fieldset class="fieldset p-0">
@@ -478,6 +501,7 @@ import { resolveInterfaceText } from "@/utils/interface/content"
 import { getDevices, getResource } from "@/services/api"
 import type { ConnectableDevice, DeviceControllerType } from "@/services/api"
 import { buildDeviceLabel } from "@/utils/panel/device"
+import { checkCronNativeEligibility } from "@/utils/scheduler/cronNative"
 import type { PanelLastConnectedDevice } from "@/types/settingsModel"
 import type {
   ScheduledTask,
@@ -520,6 +544,7 @@ const activeSection = ref<DialogSection>("basic")
 const activeTab = ref<"task-list" | "task-settings" | "pre-tasks">("task-list")
 const currentSettingTaskId = ref<string | null>(null)
 const suppressFormInit = ref(false)
+const wakeupEnabled = ref(false)
 
 const availableDevices = ref<ConnectableDevice[]>([])
 const availableResources = ref<Array<{ name: string; label?: string; controller?: string[] }>>([])
@@ -700,8 +725,16 @@ const intervalConfig = computed<IntervalTriggerConfig>(() => {
 const intervalStartLocal = computed(() => toDatetimeLocalValue(intervalConfig.value.start_date))
 const intervalEndLocal = computed(() => toDatetimeLocalValue(intervalConfig.value.end_date))
 
-const formData = ref<ScheduledTaskCreate>(initFormData(task))
+type SchedulerTaskFormData = Omit<ScheduledTaskCreate, "wakeup_enabled">
+
+const formData = ref<SchedulerTaskFormData>(initFormData(task))
 const taskListData = ref<TaskListItem[]>([])
+
+const triggerType = computed(() => formData.value.trigger_config.type)
+const isCronNativeEligible = computed(() => {
+  const config = formData.value.trigger_config
+  return config.type === "cron" && checkCronNativeEligibility(config.cron)
+})
 
 function syncDialogVisibility(open: boolean) {
   const el = dialogRef.value
@@ -735,13 +768,6 @@ onMounted(() => {
     syncDialogVisibility(true)
   }
 })
-
-watch(
-  () => formData.value.trigger_type,
-  (newType) => {
-    formData.value.trigger_config = getTriggerConfigByType(newType)
-  },
-)
 
 watch(
   () => task,
@@ -860,15 +886,15 @@ function handleTasksUpdate(tasks: TaskListItem[]) {
   formData.value.task_list = buildOrderedTaskList(formData.value.task_list, tasks)
 }
 
-function initFormData(task?: ScheduledTask | null): ScheduledTaskCreate {
+function initFormData(task?: ScheduledTask | null): SchedulerTaskFormData {
+  wakeupEnabled.value = task ? (task.wakeup_enabled ?? false) : false
   if (task) {
     const task_list = configStore.normalizeTaskIds(task.task_list)
     return {
       name: task.name,
       description: task.description || "",
       enabled: task.enabled,
-      trigger_type: task.trigger_type,
-      trigger_config: getTriggerConfigByType(task.trigger_type, task.trigger_config),
+      trigger_config: getTriggerConfigByType(task.trigger_config.type, task.trigger_config),
       task_list,
       task_options: configStore.buildOptionsForTasks(task_list, task.task_options),
       preTasks: Array.isArray(task.preTasks) ? task.preTasks.map((pt) => ({ ...pt })) : [],
@@ -881,7 +907,6 @@ function initFormData(task?: ScheduledTask | null): ScheduledTaskCreate {
     name: "",
     description: "",
     enabled: true,
-    trigger_type: "cron",
     trigger_config: getTriggerConfigByType("cron"),
     task_list: [],
     task_options: configStore.buildOptionsForTasks([]),
@@ -948,6 +973,13 @@ function getTriggerConfigByType(
       return buildIntervalConfig(existing)
     default:
       return buildCronConfig()
+  }
+}
+
+function setTriggerType(newType: TriggerType) {
+  formData.value.trigger_config = getTriggerConfigByType(newType)
+  if (newType !== "cron") {
+    wakeupEnabled.value = false
   }
 }
 
@@ -1152,14 +1184,13 @@ function validateForm(): boolean {
   if (!validateName()) {
     return false
   }
-  const { trigger_type } = formData.value
-  if (trigger_type === "cron" && !validateCron()) {
+  if (triggerType.value === "cron" && !validateCron()) {
     return false
   }
-  if (trigger_type === "date" && !validateDate()) {
+  if (triggerType.value === "date" && !validateDate()) {
     return false
   }
-  if (trigger_type === "interval" && !validateInterval()) {
+  if (triggerType.value === "interval" && !validateInterval()) {
     return false
   }
   return validateTaskList()
@@ -1173,16 +1204,20 @@ async function handleSave() {
   loading.value = true
   const taskPayload = {
     ...formData.value,
+    wakeup_enabled:
+      triggerType.value === "cron" && isCronNativeEligible.value ? wakeupEnabled.value : false,
     ...configStore.buildExecutionPayload(formData.value.task_list, formData.value.task_options),
     preTasks: formData.value.preTasks ?? [],
   }
-  const [success, err] = await tryCatch(() =>
-    isEditMode.value && task
-      ? schedulerStore.updateTask(task.id, taskPayload)
-      : schedulerStore.createTask(taskPayload),
-  )
+  const [savedTask, err] = await tryCatch(async () => {
+    if (isEditMode.value && task) {
+      const ok = await schedulerStore.updateTask(task.id, taskPayload)
+      return ok ? task : null
+    }
+    return schedulerStore.createTask(taskPayload)
+  })
   loading.value = false
-  if (err || !success) {
+  if (err || !savedTask) {
     showGlobalMessage("error", schedulerStore.error || t("settings.scheduler.dialog.saveFail"))
     return
   }

@@ -10,6 +10,7 @@ import {
   postDevices,
   postResource,
   startTask,
+  stopTask,
   type ConnectableDevice,
   type DeviceControllerCapability,
   type PostDeviceResult,
@@ -20,6 +21,7 @@ import { useIndexStore } from "@/stores/panel/session"
 import { useInterfaceStore } from "@/stores/interface/interface"
 import { useSettingsStore } from "@/stores/settings/settings"
 import { useTaskConfigStore } from "@/stores/task-config/taskConfig"
+import type { ManualStartPayload, StartConflict } from "@/types/schedulerModel"
 import type { TaskListItem } from "@/types/taskConfigModel"
 import type { PanelLastConnectedDevice } from "@/types/settingsModel"
 import {
@@ -53,6 +55,7 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
     connectedResourceName: string | null
     deviceStatePollTimer: number | null
     initialized: boolean
+    startConflict: StartConflict | null
     _fetchDevicesRequestId: number
     _fetchResourcesRequestId: number
   } => ({
@@ -69,6 +72,7 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
     connectedResourceName: null,
     deviceStatePollTimer: null,
     initialized: false,
+    startConflict: null,
     _fetchDevicesRequestId: 0,
     _fetchResourcesRequestId: 0,
   }),
@@ -662,12 +666,50 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
         return false
       }
 
-      const payload = configStore.buildExecutionPayload(compatibleTaskIds)
-      const success = await startTask(payload)
-      if (success) {
-        indexStore.setTaskRunning(true)
+      const base = configStore.buildExecutionPayload(compatibleTaskIds)
+      const controllerName = this.selectedControllerName || ""
+      const deviceType = this.selectedControllerCapability?.type || "Adb"
+      const deviceAddress =
+        deviceType === "PlayCover"
+          ? this.playCoverAddress.trim()
+          : buildDeviceAddress(this.selectedDevice)
+
+      const payload: ManualStartPayload = {
+        ...base,
+        controller_name: controllerName,
+        device: {
+          controller_name: controllerName,
+          device_type: deviceType,
+          device_address: deviceAddress,
+        },
+        resource_name: this.resource || "",
       }
-      return success
+
+      const result = await startTask(payload)
+      if (result.accepted) {
+        indexStore.setTaskRunning(true)
+        return true
+      }
+      if (result.conflict) {
+        // No toast here — StartConflictDialog renders from startConflict
+        this.startConflict = result.conflict ?? null
+        return false
+      }
+      return false
+    },
+
+    clearStartConflict() {
+      this.startConflict = null
+    },
+
+    async stopActiveAndRestart(): Promise<boolean> {
+      const stopped = await stopTask()
+      if (!stopped) {
+        return false
+      }
+      this.clearStartConflict()
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      return this.StartTask()
     },
 
     resetConfig() {
@@ -775,6 +817,20 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
 })
 
 // --- Helper functions used by the store ---
+
+/** Backend device_address format per device type (mirrors maa_worker/device_service.py). */
+function buildDeviceAddress(device: ConnectableDevice | null): string {
+  if (!device) {
+    return ""
+  }
+  if (isWin32Device(device)) {
+    return String(device.hWnd)
+  }
+  if (isGamepadDevice(device)) {
+    return `${device.hWnd}|${device.gamepad_type}`
+  }
+  return device.address
+}
 
 function buildStoredLastConnectedDevice(
   deviceInfo: ConnectableDevice,

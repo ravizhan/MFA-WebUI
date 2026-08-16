@@ -93,13 +93,20 @@
       "title": "Scheduler",
       "create": "New Task",
       "taskList": "Task List",
+      "list": {
+        "runsWhenClosed": "Runs when closed"
+      },
       "noTasks": "No scheduled tasks",
       "trigger": "Trigger",
       "nextRun": "Next Run",
-      "history": "Execution History",
+      "historyTitle": "Execution History",
       "noHistory": "No execution records",
       "deleteConfirm": "Are you sure you want to delete this task?",
       "deleted": "Task deleted",
+      "history": {
+        "scheduledFor": "Scheduled",
+        "skippedBy": "Skipped by: {name}"
+      },
       "formatter": {
         "cron": "Cron",
         "date": "Specific Time",
@@ -115,7 +122,16 @@
         "success": "Success",
         "failed": "Failed",
         "running": "Running",
-        "stopped": "Stopped"
+        "stopped": "Stopped",
+        "skippedBusyManual": "Skipped (manual busy)",
+        "skippedBusyScheduled": "Skipped (scheduled busy)",
+        "skippedUpdateInProgress": "Skipped (updating)",
+        "missedDeadline": "Missed deadline"
+      },
+      "origin": {
+        "manual": "Manual",
+        "inApp": "In-app",
+        "native": "Native"
       },
       "dialog": {
         "editTitle": "Edit Task",
@@ -161,6 +177,8 @@
         "controller": "Controller",
         "deviceAddress": "Device Address",
         "resource": "Resource",
+        "runWhenClosed": "Run when app is closed (OS wake)",
+        "runWhenClosedIneligible": "Current cron is not eligible for OS wake (needs fixed minute; day/weekday mutually exclusive)",
         "sections": {
           "nav": "Sections",
           "basic": "Basic Info",
@@ -168,6 +186,12 @@
           "environment": "Environment",
           "content": "Tasks"
         }
+      },
+      "conflict": {
+        "title": "Start Conflict",
+        "updateInProgress": "An update is in progress. Please try again later.",
+        "busyMessage": "Task \"{name}\" is currently running.",
+        "stopAndRestart": "Stop and restart"
       },
       "rules": {
         "nameRequired": "Please enter task name",

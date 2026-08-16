@@ -51,10 +51,10 @@ describe("scheduler API module", () => {
       const task: ScheduledTaskCreate = {
         name: "new-task",
         enabled: true,
+        wakeup_enabled: false,
         task_list: [],
         task_options: {},
         preTasks: [],
-        trigger_type: "cron",
         trigger_config: { type: "cron", cron: "0 0 * * *" },
       }
       const response = await createSchedulerTask(task)

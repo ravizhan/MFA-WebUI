@@ -26,7 +26,7 @@
             :class="{ 'tab-active': activeTab === 'history' }"
             @click="activeTab = 'history'"
           >
-            {{ t("settings.scheduler.history") }}
+            {{ t("settings.scheduler.historyTitle") }}
           </a>
         </div>
 
