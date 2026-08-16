@@ -1,6 +1,6 @@
 import io
 from pathlib import Path
-from queue import SimpleQueue
+from typing import TYPE_CHECKING
 
 import httpx
 from PIL import Image
@@ -8,19 +8,17 @@ from maa.resource import Resource
 from maa.tasker import Tasker
 from maa.toolkit import Toolkit
 
+from app_state import WorkerContext
 from maa_worker.agent_service import AgentService
 from maa_worker.device_service import DeviceService
 from maa_worker.event_service import EventService
 from maa_worker.pipeline_override import PipelineOverrideService
-from maa_worker.runtime import (
-    AgentRuntimeState,
-    DeviceRuntimeState,
-    TaskRuntimeState,
-    WorkerContext,
-)
 from maa_worker.sink_service import SinkHandler, SinkService
 from maa_worker.task_service import TaskService
 from models.interface import InterfaceModel
+
+if TYPE_CHECKING:
+    from app_state import AppState
 
 resource = Resource()
 resource.set_cpu()
@@ -29,22 +27,24 @@ resource.set_cpu()
 class MaaWorker:
     def __init__(
         self,
-        message_conn: SimpleQueue,
+        state: "AppState",
         interface: InterfaceModel,
-        app_root_dir: Path,
     ):
-        Toolkit.init_option(str(app_root_dir))
-
+        self.state = state
         self.interface = interface
-        self.message_conn = message_conn
+        self.message_conn = state.message_conn
         self.resource = resource
         self.tasker = Tasker()
         self.http_client = httpx.Client(timeout=30)
 
-        self.context = WorkerContext(interface_base_dir=app_root_dir.resolve())
-        self.device_state = DeviceRuntimeState()
-        self.task_state = TaskRuntimeState()
-        self.agent_state = AgentRuntimeState()
+        # 运行时状态并入 AppState（单例）
+        state.context = WorkerContext(interface_base_dir=self._resolve_app_root())
+        self.context = state.context
+        self.device_state = state.device
+        self.task_state = state.task
+        self.agent_state = state.agent
+
+        Toolkit.init_option(str(self.context.interface_base_dir))
 
         self.events = EventService(self)
         self.device = DeviceService(self)
@@ -57,6 +57,14 @@ class MaaWorker:
         self.sinks.register_all(self.resource, self.tasker)
 
         self.events.send_log("MAA初始化成功")
+
+    @staticmethod
+    def _resolve_app_root() -> Path:
+        import sys
+
+        if getattr(sys, "frozen", False):
+            return Path(sys.executable).resolve().parent
+        return Path(__file__).resolve().parent
 
     def get_screencap_bytes(self):
         controller = self.device_state.controller
@@ -76,6 +84,8 @@ class MaaWorker:
         return None
 
     def shutdown(self):
+        if self.task_state.running:
+            self.tasks.stop()
         self.sinks.unregister_all(
             self.resource,
             self.tasker,

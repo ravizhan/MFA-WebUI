@@ -1,12 +1,23 @@
 import uuid
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import List, Dict, Optional, Literal
 from datetime import datetime
 
-
 TaskOptionValue = str | List[str] | Dict[str, str]
 TaskOptionsByTask = Dict[str, Dict[str, TaskOptionValue]]
+
+ExecutionOrigin = Literal["manual", "in_app", "native"]
+ExecutionStatus = Literal[
+    "running",
+    "success",
+    "failed",
+    "stopped",
+    "skipped_busy_manual",
+    "skipped_busy_scheduled",
+    "skipped_update_in_progress",
+    "missed_deadline",
+]
 
 
 class ScheduledTaskDeviceConfig(BaseModel):
@@ -66,6 +77,19 @@ class IntervalTriggerConfig(BaseModel):
     start_date: Optional[datetime] = Field(None, description="开始时间")
     end_date: Optional[datetime] = Field(None, description="结束时间")
 
+    @model_validator(mode="after")
+    def _check_min_interval(self) -> "IntervalTriggerConfig":
+        total = (
+            (self.weeks or 0) * 604800
+            + (self.days or 0) * 86400
+            + (self.hours or 0) * 3600
+            + (self.minutes or 0) * 60
+            + (self.seconds or 0)
+        )
+        if total < 1:
+            raise ValueError("间隔总时长不能小于 1 秒")
+        return self
+
 
 TriggerConfig = CronTriggerConfig | DateTriggerConfig | IntervalTriggerConfig
 
@@ -82,6 +106,26 @@ class TaskExecutionPayload(BaseModel):
     )
 
 
+class ManualStartPayload(TaskExecutionPayload):
+    """手动启动载荷（含设备与资源信息）"""
+
+    controller_name: str = Field(..., description="控制器名称")
+    device: ScheduledTaskDeviceConfig = Field(..., description="设备配置")
+    resource_name: str = Field(..., description="资源包名称")
+
+
+class StartConflict(BaseModel):
+    """手动启动冲突信息"""
+
+    code: Literal["busy_manual", "busy_scheduled", "update_in_progress"] = Field(
+        ..., description="冲突代码"
+    )
+    message: str = Field(..., description="冲突描述")
+    active_run_id: str = Field(..., description="当前运行 ID")
+    active_task_name: str = Field(..., description="当前运行任务名称")
+    active_origin: ExecutionOrigin = Field(..., description="当前运行来源")
+
+
 class ScheduledTask(TaskExecutionPayload):
     """定时任务配置"""
 
@@ -89,8 +133,8 @@ class ScheduledTask(TaskExecutionPayload):
     name: str = Field(..., min_length=1, max_length=100, description="任务名称")
     description: Optional[str] = Field(None, max_length=500, description="任务描述")
     enabled: bool = Field(True, description="是否启用")
-    trigger_type: Literal["cron", "date", "interval"] = Field(
-        ..., description="触发器类型"
+    wakeup_enabled: bool = Field(
+        False, description="是否启用系统级唤醒（应用关闭后仍运行）"
     )
     trigger_config: TriggerConfig = Field(..., description="触发器配置")
     controller_name: Optional[str] = Field(None, description="控制器名称")
@@ -107,7 +151,7 @@ class ScheduledTaskCreate(TaskExecutionPayload):
     name: str = Field(..., min_length=1, max_length=100)
     description: Optional[str] = Field(None, max_length=500)
     enabled: bool = True
-    trigger_type: Literal["cron", "date", "interval"]
+    wakeup_enabled: bool = False
     trigger_config: TriggerConfig
     controller_name: Optional[str] = Field(None, description="控制器名称")
     device: Optional[ScheduledTaskDeviceConfig] = Field(None, description="设备配置")
@@ -120,7 +164,7 @@ class ScheduledTaskUpdate(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     description: Optional[str] = Field(None, max_length=500)
     enabled: Optional[bool] = None
-    trigger_type: Optional[Literal["cron", "date", "interval"]] = None
+    wakeup_enabled: Optional[bool] = None
     trigger_config: Optional[TriggerConfig] = None
     controller_name: Optional[str] = Field(None, description="控制器名称")
     device: Optional[ScheduledTaskDeviceConfig] = Field(None, description="设备配置")
@@ -134,20 +178,23 @@ class TaskExecution(BaseModel):
     """任务执行记录"""
 
     id: str = Field(..., description="执行记录唯一标识")
-    task_id: str = Field(..., description="关联的定时任务ID")
+    task_id: Optional[str] = Field(None, description="关联的定时任务ID（手动执行为空）")
     task_name: str = Field(..., description="任务名称")
+    origin: ExecutionOrigin = Field("in_app", description="执行来源")
+    occurrence_id: Optional[str] = Field(None, description="调度发生次标识")
+    scheduled_for: Optional[datetime] = Field(None, description="计划执行时间")
+    blocker_task_name: Optional[str] = Field(None, description="冲突的占用任务名称")
     started_at: datetime = Field(..., description="开始时间")
     finished_at: Optional[datetime] = Field(None, description="结束时间")
-    status: Literal["running", "success", "failed", "stopped"] = Field(
-        ..., description="执行状态"
-    )
+    status: ExecutionStatus = Field(..., description="执行状态")
     error_message: Optional[str] = Field(None, description="错误信息")
 
 
 class TaskExecutionCreate(BaseModel):
     """创建执行记录请求"""
 
-    task_id: str
+    task_id: Optional[str] = None
     task_name: str
-    status: Literal["running", "success", "failed", "stopped"]
+    origin: ExecutionOrigin = "in_app"
+    status: ExecutionStatus
     error_message: Optional[str] = None

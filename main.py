@@ -1,7 +1,10 @@
+import argparse
 import asyncio
 import hashlib
 import os
+import secrets
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -10,6 +13,7 @@ import webbrowser
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
+import httpx
 import uvicorn
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
@@ -27,15 +31,14 @@ from models.interface_loader import (
     resolve_interface_relative_path,
 )
 from models.scheduler import (
+    ManualStartPayload,
     ScheduledTaskCreate,
     ScheduledTaskUpdate,
-    TaskExecutionPayload,
 )
 from models.settings import SettingsModel
 from models.task_config import (
     TaskConfigModel,
     normalize_task_config,
-    normalize_task_execution_payload,
 )
 from scheduler_manager import SchedulerManager
 from services.update_service import (
@@ -44,7 +47,9 @@ from services.update_service import (
     download_file,
     get_platform_info,
 )
+from services.system_scheduler import SystemScheduler
 import settings_io
+from maa_worker import execution
 
 
 def _resolve_app_root_dir() -> Path:
@@ -58,6 +63,10 @@ CONFIG_DIR = APP_ROOT_DIR / "config"
 SETTINGS_FILE = CONFIG_DIR / "settings.json"
 TASK_CONFIG_FILE = CONFIG_DIR / "task_config.json"
 INDEX_FILE = APP_ROOT_DIR / "page/index.html"
+NATIVE_TOKEN_FILE = CONFIG_DIR / "native_token"
+SCHEDULER_DB_PATH = CONFIG_DIR / "scheduler.sqlite"
+EXIT_SUCCESS = 0
+EXIT_FAILED = 1
 
 
 def load_interface_translations() -> dict[str, dict]:
@@ -110,6 +119,62 @@ if not CONFIG_DIR.exists():
 
 
 app_state = AppState()
+_PENDING_SCHEDULED_TASK_ID: str | None = None
+
+
+class NativeDispatchRequest(BaseModel):
+    task_id: str
+    token: str
+
+
+def ensure_native_token() -> str:
+    """读取或生成 native token（冷启动委托鉴权用，0600 权限）"""
+    try:
+        if NATIVE_TOKEN_FILE.exists():
+            token = NATIVE_TOKEN_FILE.read_text(encoding="utf-8").strip()
+            if token:
+                return token
+    except OSError:
+        pass
+    token = secrets.token_hex(32)
+    fd = os.open(NATIVE_TOKEN_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(token)
+    try:
+        os.chmod(NATIVE_TOKEN_FILE, 0o600)
+    except PermissionError:
+        pass
+    return token
+
+
+def _port_in_use(host: str = "127.0.0.1", port: int = 5566) -> bool:
+    """端口已被监听即视为已有实例在运行（单实例判定）"""
+    try:
+        with socket.create_connection((host, port), timeout=1):
+            return True
+    except OSError:
+        return False
+
+
+def delegate_native_dispatch(task_id: str) -> int:
+    """已有实例运行时，将系统级任务通过 HTTP 移交给已运行实例"""
+    try:
+        token = NATIVE_TOKEN_FILE.read_text(encoding="utf-8").strip()
+        response = httpx.post(
+            "http://127.0.0.1:5566/api/internal/scheduler/native-dispatch",
+            json={"task_id": task_id, "token": token},
+            timeout=10,
+        )
+    except Exception as e:
+        print(f"委托系统级任务失败: {e}", file=sys.stderr)
+        return EXIT_FAILED
+    if response.status_code < 200 or response.status_code >= 300:
+        print(
+            f"委托系统级任务失败: HTTP {response.status_code} {response.text}",
+            file=sys.stderr,
+        )
+        return EXIT_FAILED
+    return EXIT_SUCCESS
 
 
 async def log_monitor():
@@ -125,7 +190,7 @@ async def log_monitor():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app_state.is_shutting_down = False
-    app_state.worker = MaaWorker(app_state.message_conn, interface, APP_ROOT_DIR)
+    app_state.worker = MaaWorker(app_state, interface)
     app_state.broadcaster = LogBroadcaster()
     with SETTINGS_FILE.open("r", encoding="utf-8") as f:
         config_data = json.load(f)
@@ -134,10 +199,34 @@ async def lifespan(app: FastAPI):
             config_data,
             context={"interface": interface},
         )
-    # 初始化调度器
-    app_state.scheduler_manager = SchedulerManager()
-    app_state.scheduler_manager.set_worker(app_state.worker)
-    await app_state.scheduler_manager.initialize()
+    if _PENDING_SCHEDULED_TASK_ID is not None:
+        app_state.pending_scheduled_task_id = _PENDING_SCHEDULED_TASK_ID
+    # 初始化系统级调度
+    app_state.native_token = ensure_native_token()
+    app_state.scheduler_db_path = SCHEDULER_DB_PATH
+    await asyncio.to_thread(execution.init_db, SCHEDULER_DB_PATH)
+    app_state.system_scheduler = SystemScheduler(APP_ROOT_DIR)
+    app_state.scheduler_manager = SchedulerManager(
+        app_state, SCHEDULER_DB_PATH, app_state.system_scheduler
+    )
+    await app_state.scheduler_manager.initialize(paused=True)
+    desired = await app_state.scheduler_manager.get_all_tasks()
+    report = app_state.system_scheduler.converge(desired)
+    app_state.send_log(
+        f"系统级调度收敛完成: 注册 {len(report.registered)} 个, "
+        f"注销 {len(report.unregistered)} 个, 失败 {len(report.failed)} 个"
+    )
+    app_state.scheduler_manager.scheduler.resume()
+
+    if app_state.pending_scheduled_task_id:
+        pending_id = app_state.pending_scheduled_task_id
+        app_state.pending_scheduled_task_id = None
+        task = await app_state.scheduler_manager.get_task(pending_id)
+        if task is not None and task.enabled and task.wakeup_enabled:
+            app_state.send_log(f"冷启动执行系统级任务: {task.task_name}")
+            asyncio.create_task(
+                execution.submit_scheduled(app_state, task, origin="native")
+            )
 
     monitor_task = asyncio.create_task(log_monitor())
     webbrowser.open_new("http://127.0.0.1:5566")
@@ -146,11 +235,14 @@ async def lifespan(app: FastAPI):
     monitor_task.cancel()
     with suppress(asyncio.CancelledError):
         await monitor_task
-    if app_state.worker:
-        app_state.worker.shutdown()
-    # 关闭调度器
+    if app_state.active_execution_task:
+        app_state.active_execution_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await app_state.active_execution_task
     if app_state.scheduler_manager:
         await app_state.scheduler_manager.shutdown()
+    if app_state.worker:
+        app_state.worker.shutdown()
 
 
 app = FastAPI(lifespan=lifespan)
@@ -662,58 +754,53 @@ def test_notification():
 
 
 @app.post("/api/start")
-def start(task_execution: TaskExecutionPayload):
-    if app_state.worker is None:
-        msg = "Worker未初始化"
-        app_state.send_log(msg)
-        return {"status": "failed", "message": msg}
-    if app_state.worker.task_state.running:
-        msg = "任务已开始"
-        app_state.send_log(msg)
-        return {"status": "failed", "message": msg}
-    if not app_state.worker.device_state.connected:
-        msg = "请先连接设备"
-        app_state.send_log(msg)
-        return {"status": "failed", "message": msg}
-    normalized_task_list, normalized_task_options, normalized_pre_tasks = (
-        normalize_task_execution_payload(
-            task_execution.task_list,
-            task_execution.task_options,
-            interface,
-            task_execution.preTasks,
-        )
-    )
-
-    if not normalized_task_list:
-        msg = "请选择任务"
-        app_state.send_log(msg)
-        return {"status": "failed", "message": msg}
-
-    if not app_state.worker.tasks.start(
-        normalized_task_list,
-        normalized_task_options,
-        pre_tasks=normalized_pre_tasks,
-    ):
-        msg = (
-            app_state.worker.device_state.last_resource_error
-            or app_state.worker.device_state.last_device_error
-            or app_state.worker.agent_state.start_error
-            or app_state.worker.task_state.last_error
-            or "任务启动失败"
-        )
-        app_state.send_log(msg)
-        return {"status": "failed", "message": msg}
-    return {"status": "success"}
+async def start(payload: ManualStartPayload):
+    admission = await execution.submit_manual(app_state, payload)
+    if admission.accepted:
+        return {"status": "success", "run_id": admission.run_id}
+    if admission.conflict is not None:
+        return {"status": "conflict", "conflict": admission.conflict.model_dump()}
+    return {"status": "failed", "message": admission.skip_status or "任务启动失败"}
 
 
 @app.post("/api/stop")
-def stop():
-    if app_state.worker is None or not app_state.worker.task_state.running:
-        msg = "任务未开始"
-        app_state.send_log(msg)
-        return {"status": "failed", "message": msg}
-    app_state.worker.tasks.stop()
-    return {"status": "success"}
+async def stop():
+    ok = await execution.stop_active(app_state)
+    if ok:
+        return {"status": "success"}
+    return {"status": "failed", "message": "任务未开始"}
+
+
+@app.post("/api/internal/scheduler/native-dispatch")
+async def native_dispatch(payload: NativeDispatchRequest):
+    """冷启动委托入口：由系统级唤醒触发的二次进程将任务移交给本实例"""
+    if payload.token != app_state.native_token:
+        return JSONResponse(
+            status_code=401,
+            content={"status": "failed", "message": "无效的 native token"},
+        )
+    task = await app_state.scheduler_manager.get_task(payload.task_id)
+    if task is None:
+        return JSONResponse(
+            status_code=404,
+            content={"status": "failed", "message": "任务不存在"},
+        )
+    if not task.enabled or not task.wakeup_enabled:
+        return JSONResponse(
+            status_code=409,
+            content={"status": "failed", "message": "任务未启用系统级唤醒"},
+        )
+    admission = await execution.submit_scheduled(app_state, task, origin="native")
+    if admission.accepted:
+        return {"status": "success", "run_id": admission.run_id, "skip_status": None}
+    return JSONResponse(
+        status_code=409,
+        content={
+            "status": "failed",
+            "message": "入场被拒",
+            "skip_status": admission.skip_status,
+        },
+    )
 
 
 @app.get("/api/logs")
@@ -891,6 +978,24 @@ async def get_scheduler_executions(limit: int = 50):
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="MWU 启动参数")
+    parser.add_argument(
+        "--scheduled-task",
+        type=str,
+        default=None,
+        help="系统级调度任务 ID（冷启动时移交给已运行实例或直接执行）",
+    )
+    args = parser.parse_args()
+
+    if _port_in_use():
+        if args.scheduled_task:
+            sys.exit(delegate_native_dispatch(args.scheduled_task))
+        print("应用已在运行")
+        sys.exit(EXIT_FAILED)
+
+    if args.scheduled_task:
+        _PENDING_SCHEDULED_TASK_ID = args.scheduled_task
+
     uvicorn.run(
         app,
         host="0.0.0.0",

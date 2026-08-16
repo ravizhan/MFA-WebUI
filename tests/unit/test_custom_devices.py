@@ -18,7 +18,7 @@ from maa_worker.device_service import (
     canonicalize_custom_address,
     custom_record_to_device,
 )
-from maa_worker.runtime import WorkerContext
+from app_state import WorkerContext
 from models.api import CustomDeviceCreate
 
 
