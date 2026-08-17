@@ -74,5 +74,20 @@ describe("checkCronNativeEligibility", () => {
       expect(checkCronNativeEligibility("0 9 15 13 *")).toBe(false)
       expect(checkCronNativeEligibility("99 99 99 99 *")).toBe(false)
     })
+
+    it("impossible day/month combination", () => {
+      expect(checkCronNativeEligibility("0 9 31 2 *")).toBe(false)
+      expect(checkCronNativeEligibility("0 9 30 2 *")).toBe(false)
+      expect(checkCronNativeEligibility("0 9 31 4 *")).toBe(false)
+    })
+
+    it("unicode digits (backend parity)", () => {
+      expect(checkCronNativeEligibility("０ 9 * * *")).toBe(false)
+    })
+
+    it("legitimate day/month accepted", () => {
+      expect(checkCronNativeEligibility("0 9 29 2 *")).toBe(true)
+      expect(checkCronNativeEligibility("0 9 30 4 *")).toBe(true)
+    })
   })
 })

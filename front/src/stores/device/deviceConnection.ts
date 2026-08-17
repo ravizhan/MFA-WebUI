@@ -40,6 +40,11 @@ import {
 
 let watcherStopHandles: (() => void)[] = []
 
+/** In-flight stopActiveAndRestart promise; concurrent calls coalesce onto this one operation. */
+let activeRestartPromise: Promise<boolean> | null = null
+/** Cleanup handles (release watcher / retry timers) for the currently in-flight restart op. */
+let activeRestartCleanup: (() => void)[] = []
+
 export const useDeviceConnectionStore = defineStore("deviceConnection", {
   state: (): {
     selectedController: string | null
@@ -708,51 +713,90 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
     },
 
     async stopActiveAndRestart(): Promise<boolean> {
-      const stopped = await stopTask()
-      if (!stopped) {
-        return false
+      // 并发保护：双击等重入调用 coalesce 到同一操作上，避免出现两套 stop/等待/重试循环。
+      if (activeRestartPromise) {
+        return activeRestartPromise
       }
-      this.clearStartConflict()
-      // 等待后端工作线程结束：SSE task.completed/failed 由 dispatcher 置 TaskRunning=false。
-      // 注意：后端终端事件在 run_process 的 finally 之前发出（task_service.py），即事件
-      // 先于 active_run 清槽（execution.py 的 _complete_run 收尾），因此 TaskRunning=false
-      // 不代表准入槽位已释放，下方必须对 busy_manual 冲突做有限重试。
-      const indexStore = useIndexStore()
-      const released = await new Promise<boolean>((resolve) => {
-        if (!indexStore.TaskRunning) {
-          resolve(true)
-          return
-        }
-        const timer = window.setTimeout(() => {
-          stopWatch()
-          resolve(false)
-        }, 30_000)
-        const stopWatch = watch(
-          () => indexStore.TaskRunning,
-          (running) => {
-            if (!running) {
-              window.clearTimeout(timer)
-              stopWatch()
+
+      const runRestart = async (): Promise<boolean> => {
+        const attempt = async (): Promise<boolean> => {
+          const stopped = await stopTask()
+          if (!stopped) {
+            return false
+          }
+          this.clearStartConflict()
+          // 等待后端工作线程结束：SSE task.completed/failed 由 dispatcher 置 TaskRunning=false。
+          // 注意：后端终端事件在 run_process 的 finally 之前发出（task_service.py），即事件
+          // 先于 active_run 清槽（execution.py 的 _complete_run 收尾），因此 TaskRunning=false
+          // 不代表准入槽位已释放，下方必须对 busy_manual 冲突做有限重试。
+          const indexStore = useIndexStore()
+          const released = await new Promise<boolean>((resolve) => {
+            if (!indexStore.TaskRunning) {
               resolve(true)
+              return
             }
-          },
-        )
-      })
-      if (!released) {
-        const t = i18n.global.t
-        showGlobalMessage("error", t("settings.scheduler.conflict.stopTimeout"))
-        return false
+            const timer = window.setTimeout(() => {
+              releaseWatch?.()
+              resolve(false)
+            }, 30_000)
+            let releaseWatch: (() => void) | null = null
+            releaseWatch = watch(
+              () => indexStore.TaskRunning,
+              (running) => {
+                if (!running) {
+                  window.clearTimeout(timer)
+                  releaseWatch?.()
+                  resolve(true)
+                }
+              },
+            )
+            // 注册到 store 清理机制：导航/卸载时取消挂起的等待与定时器，并中止本次操作。
+            activeRestartCleanup.push(() => {
+              window.clearTimeout(timer)
+              releaseWatch?.()
+              resolve(false)
+            })
+          })
+          if (!released) {
+            const t = i18n.global.t
+            showGlobalMessage("error", t("settings.scheduler.conflict.stopTimeout"))
+            return false
+          }
+          // active_run 清槽晚于终端事件（落库在 asyncio.to_thread 中），轮询重试直至准入成功；
+          // 仅对 busy_manual 重试——busy_scheduled/update_in_progress 是真实占用，立即返回冲突。
+          // 上限 60s：后端收尾含 sqlite 落库，正常在数百毫秒内完成。
+          const deadline = Date.now() + 60_000
+          let restarted = await this.StartTask()
+          while (!restarted && this.startConflict?.code === "busy_manual") {
+            // 睡前的 deadline 检查：已到上限即不再重试。
+            if (Date.now() >= deadline) {
+              break
+            }
+            const slept = await new Promise<boolean>((resolve) => {
+              const timer = window.setTimeout(() => resolve(true), 500)
+              activeRestartCleanup.push(() => {
+                window.clearTimeout(timer)
+                resolve(false)
+              })
+            })
+            // 睡后再次检查 deadline，确保不会在超时之后仍发起启动尝试。
+            if (!slept || Date.now() >= deadline) {
+              break
+            }
+            restarted = await this.StartTask()
+          }
+          return restarted
+        }
+        const [result] = await tryCatch(attempt)
+        // 统一清理：无论成功/失败/异常，释放挂起的清理器与重入守卫。
+        activeRestartCleanup.forEach((fn) => fn())
+        activeRestartCleanup = []
+        activeRestartPromise = null
+        return result ?? false
       }
-      // active_run 清槽晚于终端事件（落库在 asyncio.to_thread 中），轮询重试直至准入成功；
-      // 仅对 busy_manual 重试——busy_scheduled/update_in_progress 是真实占用，立即返回冲突。
-      // 上限 60s：后端收尾含 sqlite 落库，正常在数百毫秒内完成。
-      const deadline = Date.now() + 60_000
-      let restarted = await this.StartTask()
-      while (!restarted && this.startConflict?.code === "busy_manual" && Date.now() < deadline) {
-        await new Promise((resolve) => window.setTimeout(resolve, 500))
-        restarted = await this.StartTask()
-      }
-      return restarted
+
+      activeRestartPromise = runRestart()
+      return activeRestartPromise
     },
 
     resetConfig() {
@@ -853,6 +897,11 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
 
       watcherStopHandles.forEach((stop) => stop())
       watcherStopHandles = []
+
+      // 取消进行中的 stopActiveAndRestart（释放等待 watcher、重试定时器），避免卸载后继续空转。
+      activeRestartCleanup.forEach((fn) => fn())
+      activeRestartCleanup = []
+      activeRestartPromise = null
 
       this.initialized = false
     },

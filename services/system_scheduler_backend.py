@@ -6,6 +6,7 @@
 import csv
 import io
 import logging
+import os
 import plistlib
 import re
 import shlex
@@ -33,6 +34,15 @@ def validate_task_id(task_id: str) -> str:
     if not TASK_ID_RE.fullmatch(task_id):
         raise ValueError(f"非法任务 ID: {task_id!r}")
     return task_id
+
+
+class CommandError(RuntimeError):
+    """外部命令失败；携带 stderr/stdout，供调用方按内容区分可接受失败。"""
+
+    def __init__(self, message: str, stderr: str = "", stdout: str = "") -> None:
+        super().__init__(message)
+        self.stderr = stderr
+        self.stdout = stdout
 
 
 @dataclass(frozen=True)
@@ -66,7 +76,7 @@ class SystemSchedulerBackend(ABC):
 
 
 def _run(args: list[str], check: bool = True, **kwargs) -> subprocess.CompletedProcess:
-    """执行外部命令；失败统一抛 RuntimeError（携带输出信息）"""
+    """执行外部命令；失败统一抛 CommandError（携带 stderr/stdout）"""
     try:
         return subprocess.run(
             args,
@@ -77,8 +87,46 @@ def _run(args: list[str], check: bool = True, **kwargs) -> subprocess.CompletedP
             **kwargs,
         )
     except subprocess.CalledProcessError as exc:
-        detail = (exc.stderr or exc.stdout or "").strip()
-        raise RuntimeError(f"命令执行失败: {' '.join(args)}；{detail}") from exc
+        raise CommandError(
+            f"命令执行失败: {' '.join(args)}；{(exc.stderr or exc.stdout or '').strip()}",
+            stderr=exc.stderr or "",
+            stdout=exc.stdout or "",
+        ) from exc
+    except OSError as exc:
+        raise CommandError(
+            f"命令启动失败: {' '.join(args)}；{exc}",
+            stderr="",
+            stdout="",
+        ) from exc
+
+
+_SCHTASKS_NO_TASK_MARKERS = (
+    "no scheduled tasks",
+    "no tasks are scheduled",
+    "没有计划任务",
+    "找不到计划任务",
+)
+
+
+def _is_schtasks_no_tasks(stderr: str) -> bool:
+    """schtasks 报告“无任何计划任务”的判断（不同语言环境）。"""
+    if not stderr:
+        return False
+    lowered = stderr.lower()
+    return any(marker in lowered for marker in _SCHTASKS_NO_TASK_MARKERS)
+
+
+def _is_schtasks_task_not_found(stderr: str) -> bool:
+    """schtasks 报告“任务不存在”的判断（不同语言环境）。"""
+    if not stderr:
+        return False
+    lowered = stderr.lower()
+    return (
+        "cannot find" in lowered
+        or "not found" in lowered
+        or "找不到" in stderr
+        or "没有找到" in stderr
+    )
 
 
 class WindowsBackend(SystemSchedulerBackend):
@@ -103,22 +151,27 @@ class WindowsBackend(SystemSchedulerBackend):
 
     def unregister(self, task_id: str) -> None:
         task_id = validate_task_id(task_id)
-        _run(["schtasks", "/Delete", "/F", "/TN", f"MWU\\{task_id}"])
+        try:
+            _run(["schtasks", "/Delete", "/F", "/TN", f"MWU\\{task_id}"])
+        except CommandError as exc:
+            # 任务本就不存在（正常删除或并发竞态）视为删除成功
+            if _is_schtasks_task_not_found(exc.stderr):
+                logger.info("Windows 计划任务 MWU\\%s 已不存在，视为删除成功", task_id)
+                return
+            raise
         logger.info("已删除 Windows 计划任务 MWU\\%s", task_id)
 
     def list_registered_task_ids(self) -> set[str]:
-        task_ids: set[str] = set()
         try:
-            result = subprocess.run(
-                ["schtasks", "/Query", "/FO", "CSV", "/NH"],
-                capture_output=True,
-                text=True,
-                errors="replace",
-                check=True,
-            )
-        except (subprocess.CalledProcessError, OSError) as exc:
+            result = _run(["schtasks", "/Query", "/FO", "CSV", "/NH"])
+        except CommandError as exc:
+            # 无任何计划任务时 schtasks 非零退出：视为空集合；其它（权限/瞬时）
+            # 错误必须上抛，避免把未知状态当空而误清孤儿
+            if _is_schtasks_no_tasks(exc.stderr):
+                return set()
             logger.warning("查询 Windows 计划任务失败: %s", exc)
-            return task_ids
+            raise
+        task_ids: set[str] = set()
         for row in csv.reader(io.StringIO(result.stdout)):
             if not row:
                 continue
@@ -137,12 +190,35 @@ class MacOSBackend(SystemSchedulerBackend):
     def _plist_path(self, task_id: str) -> Path:
         return self._PLIST_DIR / f"{self._PLIST_PREFIX}{task_id}.plist"
 
+    def _bootout(self, uid: int, label: str) -> None:
+        """bootout 已加载服务；未加载（'not loaded'/'No such process'）视为成功。"""
+        result = _run(["launchctl", "bootout", f"gui/{uid}/{label}"], check=False)
+        if result.returncode == 0:
+            return
+        detail = (result.stderr or "").strip().lower()
+        not_loaded = (
+            not detail
+            or "no such process" in detail
+            or "not loaded" in detail
+            or "not found" in detail
+            or "没有该进程" in detail
+            or "未加载" in detail
+        )
+        if not_loaded:
+            return
+        raise CommandError(
+            f"launchctl bootout 失败: gui/{uid}/{label}；{result.stderr or ''}",
+            stderr=result.stderr or "",
+            stdout=result.stdout or "",
+        )
+
     def register(self, spec: NativeTaskSpec) -> None:
         task_id = validate_task_id(spec.task_id)
+        label = f"com.mwu.scheduler.{task_id}"
         plist_path = self._plist_path(task_id)
         plist_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
-            "Label": f"com.mwu.scheduler.{task_id}",
+            "Label": label,
             "ProgramArguments": [spec.exe_path, *spec.cli_args],
             "StartCalendarInterval": to_launchd_calendar(spec.cron),
             "WorkingDirectory": spec.working_dir,
@@ -150,15 +226,16 @@ class MacOSBackend(SystemSchedulerBackend):
         }
         with plist_path.open("wb") as f:
             plistlib.dump(payload, f)
-        # 覆盖更新时旧任务可能仍被加载，先卸载（不存在则忽略错误）
-        _run(["launchctl", "unload", str(plist_path)], check=False)
-        _run(["launchctl", "load", str(plist_path)])
+        uid = os.getuid()
+        # 覆盖更新时旧任务可能仍被加载：先 bootout（不存在则忽略错误），再 bootstrap
+        self._bootout(uid, label)
+        _run(["launchctl", "bootstrap", f"gui/{uid}", str(plist_path)])
         logger.info("已注册 macOS 计划任务 %s", plist_path)
 
     def unregister(self, task_id: str) -> None:
         task_id = validate_task_id(task_id)
         plist_path = self._plist_path(task_id)
-        _run(["launchctl", "unload", str(plist_path)], check=False)
+        self._bootout(os.getuid(), f"com.mwu.scheduler.{task_id}")
         plist_path.unlink(missing_ok=True)
         logger.info("已删除 macOS 计划任务 %s", plist_path)
 
@@ -192,9 +269,17 @@ class LinuxBackend(SystemSchedulerBackend):
                 errors="replace",
                 check=True,
             )
-        except (subprocess.CalledProcessError, OSError):
-            # 无 crontab 时 crontab -l 非零退出，视为空
-            return ""
+        except subprocess.CalledProcessError as exc:
+            stderr = (exc.stderr or "").strip()
+            # “no crontab for <user>” 是正常状态（尚无 crontab），视为空内容
+            if "no crontab for" in stderr.lower():
+                return ""
+            # 其它（权限/瞬时）错误必须上抛，避免把用户整个 crontab 覆写成应用内容
+            raise RuntimeError(
+                f"读取 crontab 失败: {' '.join(exc.cmd)}；{stderr}"
+            ) from exc
+        except OSError as exc:
+            raise RuntimeError(f"读取 crontab 失败: {exc}") from exc
         return result.stdout
 
     def _write_crontab(self, content: str) -> None:
@@ -220,11 +305,7 @@ class LinuxBackend(SystemSchedulerBackend):
         logger.info("已删除 Linux 计划任务 %s", task_id)
 
     def list_registered_task_ids(self) -> set[str]:
-        try:
-            content = self._read_crontab()
-        except OSError as exc:
-            logger.warning("查询 crontab 失败: %s", exc)
-            return set()
+        content = self._read_crontab()
         return {
             match.group(1) for match in re.finditer(r"# MWU:([a-f0-9-]{36})", content)
         }

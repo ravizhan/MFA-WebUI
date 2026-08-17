@@ -21,9 +21,10 @@
             <div class="min-w-0">
               <div class="font-medium truncate">
                 {{ task.name }}
-                <i
+                <Icon
                   v-if="task.wakeup_enabled"
-                  class="i-mdi-power-sleep ml-1 inline-block h-3.5 w-3.5 align-[-2px] opacity-70"
+                  icon="mdi:power-sleep"
+                  class="ml-1 inline-block align-[-2px] text-sm opacity-70"
                   aria-hidden="true"
                   :title="t('settings.scheduler.list.runsWhenClosed')"
                 />

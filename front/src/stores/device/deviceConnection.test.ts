@@ -545,6 +545,60 @@ describe("useDeviceConnectionStore", () => {
         expect(api.startTask).not.toHaveBeenCalled()
         expect(showGlobalMessage).not.toHaveBeenCalled()
       })
+
+      it("coalesces re-entrant calls onto a single stop/restart operation", async () => {
+        vi.useFakeTimers()
+        const { store, indexStore } = primeRunningStore()
+        vi.mocked(api.stopTask).mockResolvedValue(true)
+        vi.mocked(api.startTask).mockResolvedValue({ accepted: true, runId: "run-2" })
+
+        const first = store.stopActiveAndRestart()
+        const second = store.stopActiveAndRestart()
+        await vi.advanceTimersByTimeAsync(0)
+        indexStore.setTaskRunning(false)
+
+        const results = await Promise.all([first, second])
+        vi.useRealTimers()
+
+        expect(results).toEqual([true, true])
+        // 重入调用不得另起一套 stop/start 序列
+        expect(api.stopTask).toHaveBeenCalledTimes(1)
+        expect(api.startTask).toHaveBeenCalledTimes(1)
+      })
+
+      it("never fires a start attempt at or past the 60s retry deadline", async () => {
+        vi.useFakeTimers()
+        const startedAt = Date.now()
+        const { store, indexStore } = primeRunningStore()
+        vi.mocked(api.stopTask).mockResolvedValue(true)
+        const callTimes: number[] = []
+        vi.mocked(api.startTask).mockImplementation(() => {
+          callTimes.push(Date.now())
+          return Promise.resolve({
+            accepted: false,
+            conflict: {
+              code: "busy_manual",
+              message: "busy",
+              active_run_id: "run-9",
+              active_task_name: "Other Task",
+              active_origin: "manual",
+            },
+          })
+        })
+
+        const pending = store.stopActiveAndRestart()
+        await vi.advanceTimersByTimeAsync(0)
+        indexStore.setTaskRunning(false)
+        await vi.advanceTimersByTimeAsync(61_000)
+        const result = await pending
+        vi.useRealTimers()
+
+        const deadline = startedAt + 60_000
+        expect(result).toBe(false)
+        expect(callTimes.length).toBeGreaterThan(1)
+        // 睡后重新检查 deadline：任何启动尝试都必须发生在 60s 上限之前
+        expect(callTimes.every((t) => t < deadline)).toBe(true)
+      })
     })
 
     it("skips connect and resource when already connected", async () => {

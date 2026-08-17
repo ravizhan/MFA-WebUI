@@ -63,16 +63,28 @@ class SystemScheduler:
 
     def register(self, task: ScheduledTask) -> None:
         """注册（或覆盖更新）单个任务的系统级唤醒。"""
+        if not self._backend.supports_native:
+            # 不支持 OS 原生唤醒的平台回退到应用内派发，无需（也无法）注册
+            logger.debug("后端不支持系统级唤醒，跳过注册: %s", task.id)
+            return
         self._backend.register(self._build_spec(task))
         logger.info(f"已注册系统级唤醒: {task.name} ({task.id})")
 
     def unregister(self, task_id: str) -> None:
         """注销单个任务的系统级唤醒。"""
+        if not self._backend.supports_native:
+            logger.debug("后端不支持系统级唤醒，跳过注销: %s", task_id)
+            return
         self._backend.unregister(task_id)
         logger.info(f"已注销系统级唤醒: {task_id}")
 
     def converge(self, desired: list[ScheduledTask]) -> ConvergeReport:
-        """收敛到期望集合：注册所有启用了唤醒的任务，清理孤儿，绝不抛错。"""
+        """收敛到期望集合：注册所有启用了唤醒的任务，清理孤儿。
+
+        查询已注册任务失败时记录到 report.failed['__list__'] 并直接返回
+        （当前状态未知，不做任何注册/清理），由调用方记录失败；单个任务
+        的注册/注销失败不中断其它任务。
+        """
         report = ConvergeReport()
         if not self._backend.supports_native:
             # 后端不可用时不得注册/清理；由调度层回退到应用内派发
@@ -82,9 +94,10 @@ class SystemScheduler:
 
         try:
             registered_ids = self._backend.list_registered_task_ids()
-        except Exception as e:  # noqa: BLE001 - 收敛过程不允许抛出
+        except Exception as e:  # noqa: BLE001 - 状态未知，收敛退出交由调用方记录
             logger.warning(f"查询已注册系统级唤醒失败: {e}")
-            registered_ids = set()
+            report.failed["__list__"] = str(e)
+            return report
 
         for task in desired_tasks:
             try:

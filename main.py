@@ -158,23 +158,35 @@ def _port_in_use(host: str = "127.0.0.1", port: int = 5566) -> bool:
 
 def delegate_native_dispatch(task_id: str) -> int:
     """已有实例运行时，将系统级任务通过 HTTP 移交给已运行实例"""
-    try:
-        token = NATIVE_TOKEN_FILE.read_text(encoding="utf-8").strip()
-        response = httpx.post(
-            "http://127.0.0.1:5566/api/internal/scheduler/native-dispatch",
-            json={"task_id": task_id, "token": token},
-            timeout=10,
-        )
-    except Exception as e:
-        print(f"委托系统级任务失败: {e}", file=sys.stderr)
-        return EXIT_FAILED
-    if response.status_code < 200 or response.status_code >= 300:
-        print(
-            f"委托系统级任务失败: HTTP {response.status_code} {response.text}",
-            file=sys.stderr,
-        )
-        return EXIT_FAILED
-    return EXIT_SUCCESS
+    token = NATIVE_TOKEN_FILE.read_text(encoding="utf-8").strip()
+    attempts = 6
+    for attempt in range(attempts):
+        try:
+            response = httpx.post(
+                "http://127.0.0.1:5566/api/internal/scheduler/native-dispatch",
+                json={"task_id": task_id, "token": token},
+                timeout=10,
+            )
+        except Exception as e:
+            # 连接失败：端口已由赢家绑定但服务尚未就绪 → 短退避后重试，避免丢任务。
+            # 成功连接后的非 2xx（401/404/409 等）属于应用层拒绝，不重试。
+            if attempt < attempts - 1:
+                print(
+                    f"委托系统级任务失败（第 {attempt + 1}/{attempts} 次，将重试）: {e}",
+                    file=sys.stderr,
+                )
+                time.sleep(2)
+                continue
+            print(f"委托系统级任务失败: {e}", file=sys.stderr)
+            return EXIT_FAILED
+        if response.status_code < 200 or response.status_code >= 300:
+            print(
+                f"委托系统级任务失败: HTTP {response.status_code} {response.text}",
+                file=sys.stderr,
+            )
+            return EXIT_FAILED
+        return EXIT_SUCCESS
+    return EXIT_FAILED
 
 
 async def log_monitor():
@@ -629,6 +641,8 @@ async def perform_update():
             "status": "downloading",
             "message": "正在下载更新包...",
         }
+        # 更新真正开始：置位准入标志，阻塞 /api/start 与调度准入，防止更新期间启动任务
+        app_state.set_update_in_progress()
 
         try:
             raw_proxy = (
@@ -653,6 +667,7 @@ async def perform_update():
             msg = f"下载失败: {e}"
             app_state.send_log(msg)
             app_state.update_status = {"status": "failed", "message": msg}
+            app_state.clear_update_in_progress()
             return {"status": "failed", "message": str(e)}
 
         def run_updater_loop():
@@ -660,62 +675,69 @@ async def perform_update():
                 "status": "updating",
                 "message": "正在运行更新器...",
             }
-            while True:
-                cmd = [
-                    "./mwu-updater",
-                    "-archive",
-                    os.path.abspath(update_package_path),
-                    "-webhook",
-                    "http://127.0.0.1:5566/api/system/shutdown",
-                    "-restart-cmd",
-                    sys.executable,
-                ]
+            # 更新器循环仅在终态分支（启动失败 / 异常退出 / 正常退出）通过 break 退出；
+            # 自更新（returncode 10）用 continue 继续，不触发 finally。
+            try:
+                while True:
+                    cmd = [
+                        "./mwu-updater",
+                        "-archive",
+                        os.path.abspath(update_package_path),
+                        "-webhook",
+                        "http://127.0.0.1:5566/api/system/shutdown",
+                        "-restart-cmd",
+                        sys.executable,
+                    ]
 
-                try:
-                    process = subprocess.Popen(
-                        cmd,
-                        stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT,
-                        text=True,
-                        encoding="utf-8",
-                        errors="replace",
-                    )
+                    try:
+                        process = subprocess.Popen(
+                            cmd,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,
+                            text=True,
+                            encoding="utf-8",
+                            errors="replace",
+                        )
 
-                    if process.stdout:
-                        for line in process.stdout:
-                            print(f"[Updater] {line.strip()}")
-                            try:
-                                data = json.loads(line)
-                                if "status" in data:
-                                    app_state.update_status = data
-                            except json.JSONDecodeError:
-                                pass
-                except Exception as e:
-                    msg = f"启动更新器失败: {e}"
-                    app_state.send_log(msg)
-                    app_state.update_status = {
-                        "status": "failed",
-                        "message": msg,
-                    }
-                    break
-
-                process.wait()
-
-                if process.returncode == 10:
-                    app_state.update_status = {
-                        "status": "updating",
-                        "message": "更新器自更新完成，正在重启更新器...",
-                    }
-                    continue
-                else:
-                    if process.returncode != 0:
-                        msg = f"更新器异常退出: {process.returncode}，请查看updater.log"
+                        if process.stdout:
+                            for line in process.stdout:
+                                print(f"[Updater] {line.strip()}")
+                                try:
+                                    data = json.loads(line)
+                                    if "status" in data:
+                                        app_state.update_status = data
+                                except json.JSONDecodeError:
+                                    pass
+                    except Exception as e:
+                        msg = f"启动更新器失败: {e}"
                         app_state.send_log(msg)
                         app_state.update_status = {
                             "status": "failed",
                             "message": msg,
                         }
-                    break
+                        break
+
+                    process.wait()
+
+                    if process.returncode == 10:
+                        app_state.update_status = {
+                            "status": "updating",
+                            "message": "更新器自更新完成，正在重启更新器...",
+                        }
+                        continue
+                    else:
+                        if process.returncode != 0:
+                            msg = f"更新器异常退出: {process.returncode}，请查看updater.log"
+                            app_state.send_log(msg)
+                            app_state.update_status = {
+                                "status": "failed",
+                                "message": msg,
+                            }
+                        break
+            finally:
+                # 更新器线程终态：无论失败还是正常退出，均放行任务准入。
+                # 成功自更新时进程被 webhook 杀除，此 finally 不执行（进程随 flag 消亡），符合预期。
+                app_state.clear_update_in_progress()
 
         threading.Thread(target=run_updater_loop, daemon=True).start()
         return {"status": "success", "message": "正在后台更新程序..."}
@@ -723,6 +745,7 @@ async def perform_update():
         msg = str(e)
         app_state.send_log(f"更新失败: {msg}")
         app_state.update_status = {"status": "failed", "message": msg}
+        app_state.clear_update_in_progress()
         return {"status": "failed", "message": msg}
 
 

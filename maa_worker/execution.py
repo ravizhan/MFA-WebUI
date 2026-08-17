@@ -207,7 +207,7 @@ def _conflict_from_active(state: AppState) -> StartConflict:
     )
 
 
-def _record_skip(
+async def _record_skip(
     state: AppState,
     task_id: Optional[str],
     task_name: str,
@@ -230,9 +230,9 @@ def _record_skip(
         status=status,
         error_message=error,
     )
-    # fire-and-forget 同步落库（单实例低频，无需 to_thread 争用）
+    # fire-and-forget 落库（脱离事件循环，避免阻塞）
     try:
-        add_execution(state.scheduler_db_path, execution)
+        await asyncio.to_thread(add_execution, state.scheduler_db_path, execution)
     except Exception as e:
         logger.error(f"写入跳过记录失败: {e}")
     return Admission(accepted=False, run_id=run_id, skip_status=status)
@@ -263,36 +263,43 @@ async def submit_manual(state: AppState, payload: ManualStartPayload) -> Admissi
         origin="manual",
         task_name=payload.task_list[0] if payload.task_list else "手动任务",
     )
-    execution = TaskExecution(
-        id=run_id,
-        task_id=None,
-        task_name=state.active_run.task_name,
-        origin="manual",
-        started_at=_utc_now(),
-        status="running",
-    )
-    await asyncio.to_thread(add_execution, state.scheduler_db_path, execution)
-    state.active_execution_task = asyncio.create_task(
-        _complete_run(state, run_id, payload)
-    )
+    try:
+        execution = TaskExecution(
+            id=run_id,
+            task_id=None,
+            task_name=state.active_run.task_name,
+            origin="manual",
+            started_at=_utc_now(),
+            status="running",
+        )
+        await asyncio.to_thread(add_execution, state.scheduler_db_path, execution)
+        state.active_execution_task = asyncio.create_task(
+            _complete_run(state, run_id, payload)
+        )
 
-    # 防御：若协程在首次调度前被取消，finally 不会执行，立即清槽并补记
-    def _guard_prestart_cancel(t: asyncio.Task) -> None:
-        if (
-            t.cancelled()
-            and state.active_run is not None
-            and state.active_run.run_id == run_id
-        ):
+        # 防御：若协程在首次调度前被取消，finally 不会执行，立即清槽并补记
+        def _guard_prestart_cancel(t: asyncio.Task) -> None:
+            if (
+                t.cancelled()
+                and state.active_run is not None
+                and state.active_run.run_id == run_id
+            ):
+                state.active_run = None
+                state.active_execution_task = None
+                try:
+                    finish_execution(
+                        state.scheduler_db_path, run_id, "stopped", "运行被取消"
+                    )
+                except Exception as e:
+                    logger.error(f"补记取消记录失败: {e}")
+
+        state.active_execution_task.add_done_callback(_guard_prestart_cancel)
+    except BaseException:
+        # 落库失败或准入阶段被取消：立即清槽，避免槽位永久占用（后续每次启动都被拒 busy）
+        if state.active_run is not None and state.active_run.run_id == run_id:
             state.active_run = None
-            state.active_execution_task = None
-            try:
-                finish_execution(
-                    state.scheduler_db_path, run_id, "stopped", "运行被取消"
-                )
-            except Exception as e:
-                logger.error(f"补记取消记录失败: {e}")
-
-    state.active_execution_task.add_done_callback(_guard_prestart_cancel)
+        state.active_execution_task = None
+        raise
     return Admission(accepted=True, run_id=run_id)
 
 
@@ -305,7 +312,7 @@ async def submit_scheduled(
     occurrence_id = f"{task.id}:{_utc_now().isoformat()}"
 
     if state.update_in_progress:
-        return _record_skip(
+        return await _record_skip(
             state,
             task.id,
             task.name,
@@ -321,7 +328,7 @@ async def submit_scheduled(
             if state.active_run.origin == "manual"
             else "skipped_busy_scheduled"
         )
-        return _record_skip(
+        return await _record_skip(
             state,
             task.id,
             task.name,
@@ -338,52 +345,59 @@ async def submit_scheduled(
         task_name=task.name,
         occurrence_id=occurrence_id,
     )
-    execution = TaskExecution(
-        id=run_id,
-        task_id=task.id,
-        task_name=task.name,
-        origin=origin,
-        occurrence_id=occurrence_id,
-        started_at=_utc_now(),
-        status="running",
-    )
-    await asyncio.to_thread(add_execution, state.scheduler_db_path, execution)
+    try:
+        execution = TaskExecution(
+            id=run_id,
+            task_id=task.id,
+            task_name=task.name,
+            origin=origin,
+            occurrence_id=occurrence_id,
+            started_at=_utc_now(),
+            status="running",
+        )
+        await asyncio.to_thread(add_execution, state.scheduler_db_path, execution)
 
-    payload = ManualStartPayload(
-        task_list=task.task_list,
-        task_options=task.task_options,
-        preTasks=task.preTasks,
-        controller_name=task.controller_name
-        or (task.device.controller_name if task.device else ""),
-        device=task.device
-        or ScheduledTaskDeviceConfig(
-            controller_name=task.controller_name or "",
-            device_type="Adb",
-            device_address="",
-        ),
-        resource_name=task.resource_name or "",
-    )
-    state.active_execution_task = asyncio.create_task(
-        _complete_run(state, run_id, payload)
-    )
+        payload = ManualStartPayload(
+            task_list=task.task_list,
+            task_options=task.task_options,
+            preTasks=task.preTasks,
+            controller_name=task.controller_name
+            or (task.device.controller_name if task.device else ""),
+            device=task.device
+            or ScheduledTaskDeviceConfig(
+                controller_name=task.controller_name or "",
+                device_type="Adb",
+                device_address="",
+            ),
+            resource_name=task.resource_name or "",
+        )
+        state.active_execution_task = asyncio.create_task(
+            _complete_run(state, run_id, payload)
+        )
 
-    # 防御：若协程在首次调度前被取消，finally 不会执行，立即清槽并补记
-    def _guard_prestart_cancel(t: asyncio.Task) -> None:
-        if (
-            t.cancelled()
-            and state.active_run is not None
-            and state.active_run.run_id == run_id
-        ):
+        # 防御：若协程在首次调度前被取消，finally 不会执行，立即清槽并补记
+        def _guard_prestart_cancel(t: asyncio.Task) -> None:
+            if (
+                t.cancelled()
+                and state.active_run is not None
+                and state.active_run.run_id == run_id
+            ):
+                state.active_run = None
+                state.active_execution_task = None
+                try:
+                    finish_execution(
+                        state.scheduler_db_path, run_id, "stopped", "运行被取消"
+                    )
+                except Exception as e:
+                    logger.error(f"补记取消记录失败: {e}")
+
+        state.active_execution_task.add_done_callback(_guard_prestart_cancel)
+    except BaseException:
+        # 落库失败或准入阶段被取消：立即清槽，避免槽位永久占用（后续每次启动都被拒 busy）
+        if state.active_run is not None and state.active_run.run_id == run_id:
             state.active_run = None
-            state.active_execution_task = None
-            try:
-                finish_execution(
-                    state.scheduler_db_path, run_id, "stopped", "运行被取消"
-                )
-            except Exception as e:
-                logger.error(f"补记取消记录失败: {e}")
-
-    state.active_execution_task.add_done_callback(_guard_prestart_cancel)
+        state.active_execution_task = None
+        raise
     return Admission(accepted=True, run_id=run_id)
 
 
@@ -393,7 +407,14 @@ async def stop_active(state: AppState) -> bool:
     if active is None:
         return False
     if state.worker is not None:
-        state.worker.tasks.stop()
+        # tasks.stop() 内部轮询（time.sleep(0.5)），脱离事件循环执行
+        await asyncio.to_thread(state.worker.tasks.stop)
+    # 任务尚未启动（设备连接/准备阶段）：tasks.stop() 是 no-op（running 仍 False），
+    # 直接取消后台协程以触发 finally 清槽，否则停止被 ack 但任务随后照常启动。
+    if active.started is False:
+        task = state.active_execution_task
+        if task is not None and not task.done():
+            task.cancel()
     # 后台协程在 finally 中清槽；此处不等待，立即返回
     return True
 
@@ -405,6 +426,7 @@ async def _complete_run(
     worker = state.worker
     status: ExecutionStatus = "failed"
     error: Optional[str] = None
+    task_started = False
     try:
         if worker is None:
             raise RuntimeError("Worker 未就绪")
@@ -474,6 +496,10 @@ async def _complete_run(
             pre_tasks=normalized_pre_tasks,
         ):
             raise RuntimeError("任务启动失败（可能已有任务在运行）")
+        # 任务线程已启动：run_process 自行发出终端事件；标记以便停止/失败时不重复发、不误取消
+        task_started = True
+        if state.active_run is not None and state.active_run.run_id == run_id:
+            state.active_run.started = True
 
         # 5. 轮询等待结束（stop_flag 由 worker 内部轮询处理中途停止）
         while worker.task_state.running:
@@ -496,11 +522,32 @@ async def _complete_run(
         logger.error(f"执行运行 {run_id} 失败: {e}")
         if worker is not None:
             worker.events.send_log(f"任务执行失败: {e}")
+            if not task_started:
+                # 前置阶段失败（run_process 未启动、未发终端事件）：补发 task.failed，
+                # 否则前端 TaskRunning 在 accept 后被置位却无 task.completed/failed 清除，UI 卡死。
+                try:
+                    await asyncio.to_thread(
+                        worker.events.emit_task_failed, payload.task_list, error or ""
+                    )
+                except Exception as emit_err:
+                    logger.error(f"发送任务失败事件失败: {emit_err}")
     finally:
         # 取消路径：改写状态，落库用 shield 保证不被二次取消
         if asyncio.current_task().cancelling():
             status = "stopped"
             error = "运行被取消"
+            if worker is not None and not task_started:
+                # 前置阶段被取消（run_process 未启动）：补发终端事件，避免前端 TaskRunning 卡死
+                try:
+                    await asyncio.shield(
+                        asyncio.to_thread(
+                            worker.events.emit_task_failed,
+                            payload.task_list,
+                            error or "",
+                        )
+                    )
+                except Exception as emit_err:
+                    logger.error(f"发送任务失败事件失败: {emit_err}")
         try:
             await asyncio.shield(
                 asyncio.to_thread(

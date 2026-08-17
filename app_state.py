@@ -73,6 +73,7 @@ class ActiveRun:
     origin: "ExecutionOrigin"
     task_name: str
     occurrence_id: str | None = None
+    started: bool = False
 
 
 class LogBroadcaster:
@@ -152,3 +153,9 @@ class AppState:
 
     def send_log(self, msg: str):
         self.send_event(build_log_event(msg))
+
+    def set_update_in_progress(self) -> None:
+        self.update_in_progress = True
+
+    def clear_update_in_progress(self) -> None:
+        self.update_in_progress = False

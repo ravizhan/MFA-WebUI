@@ -32,13 +32,16 @@ if (
 
 
 def make_create(
-    name: str, wakeup_enabled: bool = False, enabled: bool = True
+    name: str,
+    wakeup_enabled: bool = False,
+    enabled: bool = True,
+    cron: str = "0 9 * * *",
 ) -> ScheduledTaskCreate:
     return ScheduledTaskCreate(
         name=name,
         wakeup_enabled=wakeup_enabled,
         enabled=enabled,
-        trigger_config=CronTriggerConfig(cron="0 9 * * *"),
+        trigger_config=CronTriggerConfig(cron=cron),
         task_list=["Startup"],
     )
 
@@ -140,6 +143,35 @@ class TestTriggerRoundTrip:
         assert isinstance(decoded, CronTriggerConfig)
         assert decoded.cron == "0 9 * * 1"
 
+    @pytest.mark.parametrize(
+        "unix_dow",
+        ["1-5", "1,3,5", "*/2", "1-5/2"],
+    )
+    async def test_composite_dow_round_trip(self, manager_env, unix_dow):
+        # Unix 星期 0=周日, 7=周日 → 复合表达式逐组件映射并对称还原
+        mgr, _state, _system_scheduler = manager_env
+        cron = f"0 9 * * {unix_dow}"
+
+        trigger = mgr._create_trigger(CronTriggerConfig(cron=cron))
+        dow_field = next(f for f in trigger.fields if f.name == "day_of_week")
+        assert str(dow_field) != "*"  # 复合表达式被解析，而非整段透传失效
+
+        trigger_type, decoded = mgr._build_trigger_config(trigger)
+        assert trigger_type == "cron"
+        assert isinstance(decoded, CronTriggerConfig)
+        assert decoded.cron == cron
+
+    @pytest.mark.parametrize(
+        "unix_dow,aps_dow",
+        [("1-5", "0-4"), ("1,3,5", "0,2,4"), ("*/2", "*/2")],
+    )
+    async def test_composite_dow_maps_to_aps(self, manager_env, unix_dow, aps_dow):
+        # 逐端点核对 Unix→APS 的映射方向（1-5 → 0-4 等）
+        mgr, _state, _system_scheduler = manager_env
+        trigger = mgr._create_trigger(CronTriggerConfig(cron=f"0 9 * * {unix_dow}"))
+        dow_field = next(f for f in trigger.fields if f.name == "day_of_week")
+        assert str(dow_field) == aps_dow
+
 
 class TestUpdateTaskWakeup:
     async def test_turning_wakeup_off_unregisters(self, manager_env):
@@ -223,3 +255,210 @@ class TestScheduledJobFired:
         await scheduled_job_fired(**await self._make_kwargs(mgr, task))
 
         assert captured == {"origin": "in_app", "task_id": task.id}
+
+
+class TestWakeupMinuteConflict:
+    async def test_create_rejects_same_minute_wakeup(self, manager_env):
+        mgr, _state, system_scheduler = manager_env
+        await mgr.create_task(
+            make_create("任务A", wakeup_enabled=True, cron="0 9 * * *")
+        )
+
+        with pytest.raises(ValueError, match="同一分钟"):
+            await mgr.create_task(
+                make_create("任务B", wakeup_enabled=True, cron="0 9 * * 1")
+            )
+
+        # 冲突任务未注册、未落库
+        assert system_scheduler.register.call_count == 1
+        names = {t.name for t in await mgr.get_all_tasks()}
+        assert names == {"任务A"}
+
+    async def test_create_allows_different_minute_wakeup(self, manager_env):
+        mgr, _state, system_scheduler = manager_env
+        await mgr.create_task(
+            make_create("任务A", wakeup_enabled=True, cron="0 9 * * *")
+        )
+
+        task_b = await mgr.create_task(
+            make_create("任务B", wakeup_enabled=True, cron="1 9 * * *")
+        )
+
+        assert system_scheduler.register.call_count == 2
+        assert mgr.scheduler.get_job(task_b.id) is not None
+
+    async def test_create_ignores_non_wakeup_overlap(self, manager_env):
+        mgr, _state, _system_scheduler = manager_env
+        # 既有任务同分钟但未开启唤醒：不构成冲突
+        await mgr.create_task(
+            make_create("普通任务", wakeup_enabled=False, cron="0 9 * * *")
+        )
+
+        task = await mgr.create_task(
+            make_create("唤醒任务", wakeup_enabled=True, cron="0 9 * * *")
+        )
+
+        assert mgr.scheduler.get_job(task.id) is not None
+
+    async def test_update_rejects_conflict_with_other_task(self, manager_env):
+        mgr, _state, _system_scheduler = manager_env
+        task_a = await mgr.create_task(
+            make_create("任务A", wakeup_enabled=True, cron="0 9 * * *")
+        )
+        task_b = await mgr.create_task(
+            make_create("任务B", wakeup_enabled=True, cron="30 10 * * *")
+        )
+
+        with pytest.raises(ValueError, match="同一分钟"):
+            await mgr.update_task(
+                task_b.id,
+                ScheduledTaskUpdate(trigger_config=CronTriggerConfig(cron="0 9 * * *")),
+            )
+
+        # 任务 B 触发器保持原值
+        got_b = await mgr.get_task(task_b.id)
+        assert got_b is not None
+        assert got_b.trigger_config.cron == "30 10 * * *"
+
+    async def test_update_allows_self_unchanged(self, manager_env):
+        mgr, _state, system_scheduler = manager_env
+        task = await mgr.create_task(
+            make_create("任务A", wakeup_enabled=True, cron="0 9 * * *")
+        )
+        system_scheduler.register.assert_called_once()
+
+        # 更新自身描述（cron 不变，应排除自身不报错）
+        updated = await mgr.update_task(
+            task.id, ScheduledTaskUpdate(description="新描述")
+        )
+
+        assert updated is not None
+        assert updated.description == "新描述"
+
+
+class TestPauseResumeNativeSync:
+    async def test_pause_unregisters_native(self, manager_env):
+        mgr, _state, system_scheduler = manager_env
+        task = await mgr.create_task(make_create("唤醒任务", wakeup_enabled=True))
+        system_scheduler.register.assert_called_once()
+
+        ok = await mgr.pause_task(task.id)
+
+        assert ok is True
+        system_scheduler.unregister.assert_called_once_with(task.id)
+        assert mgr.scheduler.get_job(task.id).next_run_time is None
+
+    async def test_pause_non_wakeup_skips_unregister(self, manager_env):
+        mgr, _state, system_scheduler = manager_env
+        task = await mgr.create_task(make_create("普通任务", wakeup_enabled=False))
+
+        ok = await mgr.pause_task(task.id)
+
+        assert ok is True
+        system_scheduler.unregister.assert_not_called()
+
+    async def test_pause_aborts_on_unregister_failure(self, manager_env):
+        mgr, _state, system_scheduler = manager_env
+        task = await mgr.create_task(make_create("唤醒任务", wakeup_enabled=True))
+        system_scheduler.reset_mock()
+
+        def _boom(_task_id):
+            raise RuntimeError("native unregister boom")
+
+        system_scheduler.unregister.side_effect = _boom
+
+        ok = await mgr.pause_task(task.id)
+
+        assert ok is False
+        # APS 任务未被暂停（仍启用）
+        assert mgr.scheduler.get_job(task.id).next_run_time is not None
+
+    async def test_resume_reregisters_native(self, manager_env):
+        mgr, _state, system_scheduler = manager_env
+        task = await mgr.create_task(make_create("唤醒任务", wakeup_enabled=True))
+        await mgr.pause_task(task.id)
+        system_scheduler.unregister.assert_called_once_with(task.id)
+
+        ok = await mgr.resume_task(task.id)
+
+        assert ok is True
+        assert system_scheduler.register.call_count == 2
+        assert mgr.scheduler.get_job(task.id).next_run_time is not None
+
+    async def test_resume_aborts_on_register_failure(self, manager_env):
+        mgr, _state, system_scheduler = manager_env
+        task = await mgr.create_task(make_create("唤醒任务", wakeup_enabled=True))
+        await mgr.pause_task(task.id)
+        system_scheduler.reset_mock()
+
+        def _boom(_task):
+            raise RuntimeError("native register boom")
+
+        system_scheduler.register.side_effect = _boom
+
+        ok = await mgr.resume_task(task.id)
+
+        assert ok is False
+        # APS 任务未被恢复（仍暂停）
+        assert mgr.scheduler.get_job(task.id).next_run_time is None
+
+
+class TestDeleteNativeSync:
+    async def test_delete_wakeup_task_succeeds(self, manager_env):
+        mgr, _state, system_scheduler = manager_env
+        task = await mgr.create_task(make_create("唤醒任务", wakeup_enabled=True))
+
+        ok = await mgr.delete_task(task.id)
+
+        assert ok is True
+        system_scheduler.unregister.assert_called_once_with(task.id)
+        assert mgr.scheduler.get_job(task.id) is None
+
+    async def test_delete_wakeup_aborts_on_unregister_failure(self, manager_env):
+        mgr, _state, system_scheduler = manager_env
+        task = await mgr.create_task(make_create("唤醒任务", wakeup_enabled=True))
+        system_scheduler.reset_mock()
+
+        def _boom(_task_id):
+            raise RuntimeError("native unregister boom")
+
+        system_scheduler.unregister.side_effect = _boom
+
+        ok = await mgr.delete_task(task.id)
+
+        assert ok is False
+        assert mgr.scheduler.get_job(task.id) is not None
+
+    async def test_delete_non_wakeup_succeeds_no_unregister(self, manager_env):
+        mgr, _state, system_scheduler = manager_env
+        task = await mgr.create_task(make_create("普通任务", wakeup_enabled=False))
+
+        ok = await mgr.delete_task(task.id)
+
+        assert ok is True
+        system_scheduler.unregister.assert_not_called()
+        assert mgr.scheduler.get_job(task.id) is None
+
+
+class TestUpdateWakeupOffAborts:
+    async def test_update_wakeup_off_unregister_failure_returns_none(self, manager_env):
+        mgr, _state, system_scheduler = manager_env
+        task = await mgr.create_task(make_create("唤醒任务", wakeup_enabled=True))
+        system_scheduler.register.assert_called_once()
+        system_scheduler.reset_mock()
+
+        def _boom(_task_id):
+            raise RuntimeError("native unregister boom")
+
+        system_scheduler.unregister.side_effect = _boom
+
+        updated = await mgr.update_task(
+            task.id, ScheduledTaskUpdate(wakeup_enabled=False)
+        )
+
+        assert updated is None
+        # wakeup_enabled 未提交：仍为启用唤醒的原状态
+        got = await mgr.get_task(task.id)
+        assert got is not None
+        assert got.wakeup_enabled is True
+        assert got.enabled is True

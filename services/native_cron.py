@@ -78,7 +78,8 @@ def parse_native_cron(cron: str) -> NativeCron:
         if field == "*":
             values.append(None)
             continue
-        if not field.isdigit():
+        # 与前端 /^[0-9]+$/ 对齐：仅接受 ASCII 数字（isdigit 会放过全角等 Unicode 数字）
+        if not field.isascii() or not field.isdigit():
             raise ValueError(
                 f"{_FIELD_NAMES[index]}字段无效：{field!r}（仅支持 * 或单个具体数值）"
             )
@@ -103,6 +104,12 @@ def parse_native_cron(cron: str) -> NativeCron:
 
     if month is not None and day is None:
         raise ValueError("月字段受限时，日字段必须同时受限")
+
+    # 显式月+日组合必须真实存在：schtasks /M 指定月份时拒绝该月没有的日期
+    if month is not None and day is not None:
+        _MAX_DAY = (31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+        if day > _MAX_DAY[month - 1]:
+            raise ValueError(f"{month} 月没有 {day} 日，无法注册系统级唤醒")
 
     # 星期 7（=周日）归一化为 0
     if dow == 7:
@@ -175,6 +182,38 @@ def to_crontab_line(nc: NativeCron) -> str:
         str(value) if value is not None else "*"
         for value in (nc.minute, nc.hour, nc.day, nc.month, nc.dow)
     )
+
+
+def _days_overlap(a: NativeCron, b: NativeCron) -> bool:
+    """判断两个严格 cron 的「日期维度」是否可能同一天触发。
+
+    month/day/dow 任一字段两侧均受限且取值不同 → 不可能同日；
+    其余组合（含一侧限定星期、另一侧限定具体日的 OR 语义）保守视为可能同日。
+    """
+    if a.month is not None and b.month is not None and a.month != b.month:
+        return False
+    if a.day is not None and b.day is not None and a.day != b.day:
+        return False
+    if a.dow is not None and b.dow is not None and a.dow != b.dow:
+        return False
+
+    # 一侧限定星期、另一侧限定具体日（含月）时，cron 的 dom/dow 为 OR 语义：
+    # 无法用静态字段比较，保守判定为可能重叠。
+    return True
+
+
+def native_crons_may_conflict(a: NativeCron, b: NativeCron) -> bool:
+    """判断两个严格 cron 表达式是否可能在同一分钟内同时触发。
+
+    用于系统级唤醒任务的创建/更新校验：冷启动单例假设要求任意两个
+    原生唤醒不得同分钟触发，否则两个进程会竞态绑定端口导致任务丢失。
+    判定保守（宁可误报冲突）：任一字段两侧均受限且不同才视为不冲突。
+    """
+    if a.minute != b.minute:
+        return False
+    if a.hour is not None and b.hour is not None and a.hour != b.hour:
+        return False
+    return _days_overlap(a, b)
 
 
 def unix_dow_to_aps(dow: int) -> int:

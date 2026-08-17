@@ -5,8 +5,10 @@ worker 保持 None：后台执行协程以「Worker 未就绪」快速失败，�
 
 import asyncio
 import sqlite3
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -57,6 +59,107 @@ async def _await_active_task(state: AppState) -> None:
     task = state.active_execution_task
     assert task is not None
     await task
+
+
+# ---------------------------------------------------------------------------
+# 用于前置阶段失败 / 停止 测试的伪 Worker（worker=None 时后台协程快速失败）
+# ---------------------------------------------------------------------------
+
+
+class _FakeEvents:
+    def __init__(self):
+        self.failed_events: list[tuple[list[str], str]] = []
+        self.logs: list[str] = []
+
+    def send_log(self, msg: str):
+        self.logs.append(msg)
+
+    def emit_task_failed(self, task_list: list[str], error_message: str):
+        self.failed_events.append((list(task_list), error_message))
+
+
+class _FakeInterface:
+    def __init__(self, entries: list[str]):
+        self.task = [SimpleNamespace(entry=e, option=[]) for e in entries]
+        self.option = {}
+
+
+class _FakeTaskService:
+    def __init__(self, result: bool, task_state: "_FakeTaskState | None" = None):
+        self.result = result
+        self.called = False
+        self.block: threading.Event | None = None
+        self._task_state = task_state
+
+    def start(self, task_list, options, task_name=None, pre_tasks=None):
+        self.called = True
+        if self.block is not None:
+            # 阻塞至测试放行，模拟任务长时间占槽
+            self.block.wait(timeout=5)
+        if self.result and self._task_state is not None:
+            # 对齐真实 TaskService.start：成功时置 running=True
+            self._task_state.running = True
+        return self.result
+
+    def stop(self) -> bool:
+        return False
+
+
+class _FakeDeviceState:
+    connected = False
+    configuration_locked = False
+    controller_name = ""
+    current_resource_name = ""
+
+
+class _FakeDevice:
+    """模拟慢速设备连接（connect 阻塞至 release 事件，供停止测试在准备阶段取消）。"""
+
+    def __init__(self):
+        self.release = threading.Event()
+        self.connect_called = False
+
+    def build_device_model_from_config(self, controller_name, device_type, address):
+        return SimpleNamespace(
+            controller_name=controller_name,
+            device_type=device_type,
+            device_address=address,
+        )
+
+    def connect(self, model):
+        self.connect_called = True
+        self.release.wait(timeout=5)
+        return True
+
+    def set_resource(self, name):
+        return True
+
+
+class _FakeTaskState:
+    running = False
+    last_status = "idle"
+    last_error = None
+
+
+class _FakeWorker:
+    def __init__(
+        self,
+        *,
+        start_result: bool,
+        ready: bool = False,
+        block_connect: bool = False,
+    ):
+        self.events = _FakeEvents()
+        self.interface = _FakeInterface(["Startup"])
+        self.task_state = _FakeTaskState()
+        self.tasks = _FakeTaskService(start_result, task_state=self.task_state)
+        self.device_state = _FakeDeviceState()
+        self.device = _FakeDevice() if block_connect else None
+        if ready:
+            self.device_state.connected = True
+            self.device_state.configuration_locked = True
+            self.device_state.controller_name = "AdbController"
+            self.device_state.current_resource_name = "main"
 
 
 @pytest.fixture
@@ -231,7 +334,32 @@ class TestSubmitManual:
         await submit_manual(state, make_payload())
         assert await stop_active(state) is True
         assert state.active_run is not None
+        task = state.active_execution_task
+        assert task is not None
+        await asyncio.gather(task, return_exceptions=True)
+        assert state.active_run is None
+
+    async def test_add_execution_failure_rolls_back_slot(
+        self, state: AppState, monkeypatch
+    ):
+        def _boom(path: Path, execution: TaskExecution):
+            raise RuntimeError("disk failure")
+
+        # add_execution 抛错：准入必须回滚 active_run，否则槽位永久占用、后续启动全被拒 busy
+        with monkeypatch.context() as m:
+            m.setattr("maa_worker.execution.add_execution", _boom)
+            with pytest.raises(RuntimeError, match="disk failure"):
+                await submit_manual(state, make_payload())
+
+        assert state.active_run is None
+        assert state.active_execution_task is None
+        assert list_executions(state.scheduler_db_path) == []
+
+        # 槽位未被 wedged：monkeypatch 已撤销，恢复 add_execution 后再次启动可正常准入
+        admission = await submit_manual(state, make_payload())
+        assert admission.accepted is True
         await _await_active_task(state)
+        assert state.active_run is None
 
 
 # ---------------------------------------------------------------------------
@@ -252,6 +380,11 @@ class TestSubmitScheduled:
         assert row.status == "failed"  # worker=None，自然失败收尾
 
     async def test_skipped_busy_manual_while_manual_run_active(self, state: AppState):
+        # ready worker + 阻塞的 start：首个手动任务持续占槽，跳过判定不受清槽时序影响
+        worker = _FakeWorker(start_result=True, ready=True)
+        worker.tasks.block = threading.Event()
+        state.worker = worker
+
         task = make_task()
         first = await submit_manual(state, make_payload("手动任务A"))
         assert first.accepted is True
@@ -268,21 +401,38 @@ class TestSubmitScheduled:
         assert skip.task_id == task.id
         assert skip.origin == "in_app"
         assert skip.blocker_task_name == "手动任务A"
+        # 放行 start 并结束任务（last_status 默认非 success → failed），清槽
+        worker.tasks.block.set()
+        worker.task_state.running = False
         await _await_active_task(state)
         assert state.active_run is None
 
     async def test_skipped_busy_scheduled_while_scheduled_run_active(
         self, state: AppState
     ):
-        first = await submit_scheduled(state, make_task("task-a"), origin="in_app")
+        worker = _FakeWorker(start_result=True, ready=True)
+        worker.tasks.block = threading.Event()
+        state.worker = worker
+
+        first = await submit_scheduled(
+            state, make_task("task-a", name="定时任务"), origin="in_app"
+        )
         assert first.accepted is True
 
         admission = await submit_scheduled(state, make_task("task-b"), origin="in_app")
 
         assert admission.accepted is False
         assert admission.skip_status == "skipped_busy_scheduled"
-        assert state.active_run is not None
+        # 冲突在另一调度运行尚占槽时被检测：跳过记录捕获其任务名
+        rows = list_executions(state.scheduler_db_path)
+        by_id = {row.id: row for row in rows}
+        assert by_id[admission.run_id].status == "skipped_busy_scheduled"
+        assert by_id[admission.run_id].blocker_task_name == "定时任务"
+        # 放行 start 并结束首个任务，清槽
+        worker.tasks.block.set()
+        worker.task_state.running = False
         await _await_active_task(state)
+        assert state.active_run is None
 
     async def test_skipped_update_in_progress(self, state: AppState):
         state.update_in_progress = True
@@ -324,3 +474,59 @@ class TestStopAndCancel:
         assert row.id == admission.run_id
         assert row.status == "stopped"
         assert "取消" in row.error_message
+
+    async def test_prestart_failure_emits_terminal_event(self, state: AppState):
+        state.worker = _FakeWorker(start_result=False, ready=True)
+
+        admission = await submit_manual(state, make_payload())
+        assert admission.accepted is True
+
+        task = state.active_execution_task
+        assert task is not None
+        await task
+
+        # run_process 未启动（tasks.start 返回 False）：必须补发 task.failed 终端事件，
+        # 否则前端 TaskRunning 在 accept 后被置位却无清除事件，UI 卡死。
+        assert state.active_run is None
+        assert state.worker.events.failed_events, (
+            "expected emit_task_failed for pre-start failure"
+        )
+        assert "任务启动失败" in state.worker.events.failed_events[-1][1]
+        row = list_executions(state.scheduler_db_path)[0]
+        assert row.status == "failed"
+
+    async def test_stop_during_prestart_cancels_and_clears_slot(
+        self, state: AppState, monkeypatch
+    ):
+        # 强制设备连接阶段阻塞在准备阶段，使停止请求发生时任务尚未真正启动
+        settings = SimpleNamespace(
+            runtime=SimpleNamespace(maxRetryCount=1, retryInterval=0)
+        )
+        monkeypatch.setattr("maa_worker.execution.load_settings", lambda: settings)
+        worker = _FakeWorker(start_result=True, block_connect=True)
+        state.worker = worker
+
+        admission = await submit_manual(state, make_payload())
+        assert admission.accepted is True
+
+        # 让后台协程进入 device.connect 阻塞等待
+        for _ in range(20):
+            if worker.device.connect_called:
+                break
+            await asyncio.sleep(0.01)
+        assert worker.device.connect_called is True
+
+        assert await stop_active(state) is True
+        worker.device.release.set()
+
+        task = state.active_execution_task
+        assert task is not None
+        await asyncio.gather(task, return_exceptions=True)
+
+        # 任务从未真正启动：tasks.start 未被调用，槽位已清，落库为 stopped
+        assert worker.tasks.called is False
+        assert state.active_run is None
+        assert state.active_execution_task is None
+        row = list_executions(state.scheduler_db_path)[0]
+        assert row.id == admission.run_id
+        assert row.status == "stopped"

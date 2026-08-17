@@ -60,7 +60,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, useTemplateRef, watch } from "vue"
+import { computed, onMounted, useTemplateRef, watch } from "vue"
 import { useI18n } from "vue-i18n"
 import { useRouter } from "vue-router"
 import { Icon } from "@iconify/vue"
@@ -73,25 +73,29 @@ const deviceStore = useDeviceConnectionStore()
 const dialogRef = useTemplateRef<HTMLDialogElement>("dialogRef")
 const conflict = computed(() => deviceStore.startConflict)
 
-watch(
-  conflict,
-  (value) => {
-    const el = dialogRef.value
-    if (!el) {
-      return
+function syncVisibility(value: unknown) {
+  const el = dialogRef.value
+  if (!el) {
+    return
+  }
+  if (value) {
+    if (!el.open) {
+      el.showModal()
     }
-    if (value) {
-      if (!el.open) {
-        el.showModal()
-      }
-      return
-    }
-    if (el.open) {
-      el.close()
-    }
-  },
-  { immediate: true },
-)
+    return
+  }
+  if (el.open) {
+    el.close()
+  }
+}
+
+watch(conflict, (value) => syncVisibility(value), { immediate: true })
+
+// 立即 watcher 在 dialogRef 尚未挂载时提前 return；组件重建时若 Pinia 已持有冲突，
+// 需要在此补一次同步，否则对话框永远打不开。
+onMounted(() => {
+  syncVisibility(conflict.value)
+})
 
 function handleClose() {
   deviceStore.clearStartConflict()

@@ -5,6 +5,7 @@ import pytest
 from services.native_cron import (
     NativeCron,
     aps_dow_to_unix,
+    native_crons_may_conflict,
     parse_native_cron,
     to_crontab_line,
     to_launchd_calendar,
@@ -145,6 +146,34 @@ class TestParseNativeCronRejects:
         with pytest.raises(ValueError, match="月字段受限时"):
             parse_native_cron(cron)
 
+    @pytest.mark.parametrize(
+        "cron",
+        [
+            "0 9 31 2 *",  # 2 月没有 31 日
+            "0 9 31 4 *",  # 4 月没有 31 日
+            "0 9 30 2 *",  # 2 月没有 30 日
+        ],
+    )
+    def test_impossible_day_month(self, cron):
+        with pytest.raises(ValueError, match="没有"):
+            parse_native_cron(cron)
+
+    def test_legitimate_day_month_accepted(self):
+        # 2/29 合法（闰年存在）；4/30 合法
+        assert parse_native_cron("0 9 29 2 *").day == 29
+        assert parse_native_cron("0 9 30 4 *").day == 30
+
+    @pytest.mark.parametrize(
+        "cron",
+        [
+            "０ 9 * * *",  # 全角数字（Unicode 数字，isdigit 会误收）
+            "0 ٩ * * *",  # 阿拉伯-印度数字
+        ],
+    )
+    def test_unicode_digits_rejected(self, cron):
+        with pytest.raises(ValueError):
+            parse_native_cron(cron)
+
 
 # ---------------------------------------------------------------------------
 # to_schtasks_args
@@ -277,3 +306,55 @@ class TestDowConversion:
 
     def test_aps_monday_zero_to_unix_monday_one(self):
         assert aps_dow_to_unix(0) == 1
+
+
+# ---------------------------------------------------------------------------
+# native_crons_may_conflict — same-minute co-fire detection
+# ---------------------------------------------------------------------------
+
+
+def _nc(cron: str) -> NativeCron:
+    return parse_native_cron(cron)
+
+
+class TestNativeCronsMayConflict:
+    @pytest.mark.parametrize(
+        ("a", "b"),
+        [
+            # 同一时刻每日触发
+            ("0 9 * * *", "0 9 * * *"),
+            # 分钟通配的一小时任务 vs 同时刻每日任务（每小时任务每分钟都会撞每日同分任务）
+            ("5 * * * *", "5 3 * * *"),
+            # 星期不同但 OR 语义无法静态排除：一侧限定星期、另一侧不限日
+            ("0 9 * * 1", "0 9 * * *"),
+            # 一侧限定星期、另一侧限定具体日（dom/dow OR 语义，保守判冲突）
+            ("0 9 * * 3", "0 9 15 * *"),
+            # 仅日受限 vs 不限日，同日会撞
+            ("30 8 1 * *", "30 8 * * *"),
+            # 月受限（日随之受限）vs 不限月同日，该月会撞
+            ("0 12 10 6 *", "0 12 10 * *"),
+        ],
+    )
+    def test_conflict_detected(self, a, b):
+        assert native_crons_may_conflict(_nc(a), _nc(b))
+        # 判定对参数顺序对称
+        assert native_crons_may_conflict(_nc(b), _nc(a))
+
+    @pytest.mark.parametrize(
+        ("a", "b"),
+        [
+            # 分钟不同
+            ("0 9 * * *", "1 9 * * *"),
+            # 小时不同（分钟相同）
+            ("0 9 * * *", "0 10 * * *"),
+            # 星期不同
+            ("0 9 * * 1", "0 9 * * 2"),
+            # 具体日不同
+            ("0 9 1 * *", "0 9 2 * *"),
+            # 月不同（日相同）
+            ("0 9 15 1 *", "0 9 15 2 *"),
+        ],
+    )
+    def test_no_conflict(self, a, b):
+        assert not native_crons_may_conflict(_nc(a), _nc(b))
+        assert not native_crons_may_conflict(_nc(b), _nc(a))

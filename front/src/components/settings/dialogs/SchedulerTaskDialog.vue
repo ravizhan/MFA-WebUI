@@ -334,7 +334,7 @@
               class="select select-bordered w-full"
               :disabled="loadingDevices"
             >
-              <option value="" disabled>{{ t("panel.selectDeviceType") }}</option>
+              <option value="">{{ t("panel.selectDeviceType") }}</option>
               <option v-for="opt in deviceControllerOptions" :key="opt.value" :value="opt.value">
                 {{ opt.label }}
               </option>
@@ -375,7 +375,7 @@
               class="select select-bordered w-full"
               :disabled="!formData.controller_name || loadingResources"
             >
-              <option value="" disabled>{{ t("panel.selectResource") }}</option>
+              <option value="">{{ t("panel.selectResource") }}</option>
               <option v-for="opt in resourceOptions" :key="opt.value" :value="opt.value">
                 {{ opt.label }}
               </option>
@@ -499,7 +499,7 @@ import TaskOptionPanel from "@/components/panel/task/TaskOptionPanel.vue"
 import PreTaskList from "@/components/panel/task/PreTaskList.vue"
 import { resolveInterfaceText } from "@/utils/interface/content"
 import { getDevices, getResource, postCustomDevice } from "@/services/api"
-import type { ConnectableDevice } from "@/services/api"
+import type { ConnectableDevice, DeviceControllerType } from "@/services/api"
 import { buildDeviceLabel } from "@/utils/panel/device"
 import { checkCronNativeEligibility } from "@/utils/scheduler/cronNative"
 import type { PanelLastConnectedDevice } from "@/types/settingsModel"
@@ -1126,6 +1126,12 @@ async function handleCustomDeviceCreate(rawAddress: string) {
 
   // Refresh device list so the new device appears, then select it
   await fetchDevices(controllerName)
+  // 用户在请求期间可能已切换控制器：仅当当前选择仍匹配才写入地址，避免把旧地址落到别的控制器上。
+  const currentControllerName = formData.value.controller_name
+  const currentControllerType = selectedControllerType.value
+  if (currentControllerName !== controllerName || currentControllerType !== controllerType) {
+    return
+  }
   selectedDeviceAddress.value = address
 }
 
