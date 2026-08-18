@@ -224,6 +224,20 @@ async def lifespan(app: FastAPI):
     await app_state.scheduler_manager.initialize(paused=True)
     desired = await app_state.scheduler_manager.get_all_tasks()
     report = app_state.system_scheduler.converge(desired)
+    # 启动时注册失败的任务自动降级为应用内派发，避免静默失能
+    for task_id, error in report.failed.items():
+        if task_id == "__list__":
+            continue
+        task = await app_state.scheduler_manager.get_task(task_id)
+        if task and task.wakeup_enabled:
+            ok = await app_state.scheduler_manager.degrade_wakeup(task_id)
+            if ok:
+                app_state.send_log(
+                    f"系统级唤醒注册失败，已降级为应用内派发: {task.name}。"
+                    f"请前往定时任务面板重新启用唤醒。错误: {error}"
+                )
+            else:
+                logger.error(f"降级任务 {task_id} 失败")
     app_state.send_log(
         f"系统级调度收敛完成: 注册 {len(report.registered)} 个, "
         f"注销 {len(report.unregistered)} 个, 失败 {len(report.failed)} 个"

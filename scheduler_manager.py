@@ -748,6 +748,30 @@ class SchedulerManager:
                 self._state.worker.events.send_log(f"删除任务失败: {e}")
             return False
 
+    async def degrade_wakeup(self, task_id: str) -> bool:
+        """启动时注册失败后降级任务：关闭 wakeup_enabled，跳过原生注销。
+
+        用于 converge 注册失败后的容错路径：原生后端可能已不可用，
+        unregister 会抛异常，因此直接修改 APS 任务属性，不触碰 OS 侧。
+        """
+        if not self.scheduler:
+            return False
+        try:
+            job = self.scheduler.get_job(task_id)
+            if job is None:
+                logger.warning(f"降级失败：任务 {task_id} 不存在")
+                return False
+            current_kwargs = dict(job.kwargs or {})
+            if not current_kwargs.get("wakeup_enabled", False):
+                return True  # 已是关闭状态，无需操作
+            current_kwargs["wakeup_enabled"] = False
+            self.scheduler.modify_job(task_id, kwargs=current_kwargs)
+            logger.info(f"已降级任务 {task_id} 的系统级唤醒")
+            return True
+        except Exception as e:
+            logger.error(f"降级任务 {task_id} 失败: {e}")
+            return False
+
     async def pause_task(self, task_id: str) -> bool:
         """暂停定时任务"""
         if not self.scheduler:
