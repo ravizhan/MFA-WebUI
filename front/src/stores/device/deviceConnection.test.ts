@@ -10,6 +10,7 @@ vi.mock("@/services/api", () => ({
   postCustomDevice: vi.fn<() => void>(),
   postResource: vi.fn<() => void>(),
   startTask: vi.fn<() => void>(),
+  stopTask: vi.fn<() => void>(),
   getSettings: vi.fn<() => void>(),
   updateSettings: vi.fn<() => void>(),
   getTaskConfig: vi.fn<() => void>(),
@@ -304,6 +305,12 @@ describe("useDeviceConnectionStore", () => {
       const configStore = useTaskConfigStore()
       const interfaceStore = useInterfaceStore()
       const payload = { task_list: ["task1"], task_options: {}, preTasks: [] }
+      const expectedPayload = {
+        ...payload,
+        controller_name: "adb",
+        device: { controller_name: "adb", device_type: "Adb", device_address: "" },
+        resource_name: "res1",
+      }
       store.controllerCapabilities = [adbCapability]
       store.selectedController = "ADB"
       store.resource = "res1"
@@ -315,10 +322,283 @@ describe("useDeviceConnectionStore", () => {
       }
       vi.mocked(api.getDeviceState).mockResolvedValue(lockedAdbState)
       vi.spyOn(configStore, "buildExecutionPayload").mockReturnValue(payload)
-      vi.mocked(api.startTask).mockResolvedValue(true)
+      vi.mocked(api.startTask).mockResolvedValue({ accepted: true, runId: "run-1" })
       const result = await store.StartTask()
       expect(result).toBe(true)
-      expect(api.startTask).toHaveBeenCalledWith(payload)
+      expect(api.startTask).toHaveBeenCalledWith(expectedPayload)
+    })
+
+    it("sets startConflict and returns false on conflict without toast", async () => {
+      const store = useDeviceConnectionStore()
+      const configStore = useTaskConfigStore()
+      const interfaceStore = useInterfaceStore()
+      const payload = { task_list: ["task1"], task_options: {}, preTasks: [] }
+      const conflict = {
+        code: "busy_manual" as const,
+        message: "busy",
+        active_run_id: "run-9",
+        active_task_name: "Other Task",
+        active_origin: "manual" as const,
+      }
+      store.controllerCapabilities = [adbCapability]
+      store.selectedController = "ADB"
+      store.resource = "res1"
+      configStore.configLoaded = true
+      configStore.taskList = [{ id: "task1", name: "Task 1", order: 0, checked: true }]
+
+      interfaceStore.interface = {
+        task: [{ name: "Task 1", entry: "task1" }],
+      }
+      vi.mocked(api.getDeviceState).mockResolvedValue(lockedAdbState)
+      vi.spyOn(configStore, "buildExecutionPayload").mockReturnValue(payload)
+      vi.mocked(api.startTask).mockResolvedValue({ accepted: false, conflict })
+      const result = await store.StartTask()
+      expect(result).toBe(false)
+      expect(store.startConflict).toEqual(conflict)
+      expect(showGlobalMessage).not.toHaveBeenCalled()
+    })
+
+    describe("stopActiveAndRestart", () => {
+      function primeRunningStore() {
+        const store = useDeviceConnectionStore()
+        const indexStore = useIndexStore()
+        const configStore = useTaskConfigStore()
+        const interfaceStore = useInterfaceStore()
+        store.controllerCapabilities = [adbCapability]
+        store.selectedController = "ADB"
+        store.resource = "res1"
+        store.startConflict = {
+          code: "busy_manual",
+          message: "busy",
+          active_run_id: "run-9",
+          active_task_name: "Other Task",
+          active_origin: "manual",
+        }
+        configStore.configLoaded = true
+        configStore.taskList = [{ id: "task1", name: "Task 1", order: 0, checked: true }]
+        interfaceStore.interface = {
+          task: [{ name: "Task 1", entry: "task1" }],
+        }
+        vi.mocked(api.getDeviceState).mockResolvedValue(lockedAdbState)
+        vi.spyOn(configStore, "buildExecutionPayload").mockReturnValue({
+          task_list: ["task1"],
+          task_options: {},
+          preTasks: [],
+        })
+        indexStore.setTaskRunning(true)
+        return { store, indexStore }
+      }
+
+      it("restarts only after SSE clears TaskRunning", async () => {
+        const { store, indexStore } = primeRunningStore()
+        vi.mocked(api.stopTask).mockResolvedValue(true)
+        vi.mocked(api.startTask).mockResolvedValue({ accepted: true, runId: "run-2" })
+
+        const pending = store.stopActiveAndRestart()
+        await nextTick()
+        expect(api.stopTask).toHaveBeenCalled()
+        expect(store.startConflict).toBeNull()
+        // 槽位未释放前不得重试启动
+        expect(api.startTask).not.toHaveBeenCalled()
+
+        indexStore.setTaskRunning(false)
+        await expect(pending).resolves.toBe(true)
+        expect(api.startTask).toHaveBeenCalledTimes(1)
+      })
+
+      it("retries when busy_manual conflict arrives after terminal event (slot not yet released)", async () => {
+        vi.useFakeTimers()
+        const { store, indexStore } = primeRunningStore()
+        vi.mocked(api.stopTask).mockResolvedValue(true)
+        // 复现：终端事件先于 active_run 清槽 → 首次重启拿到 busy_manual，清槽后重试成功
+        vi.mocked(api.startTask)
+          .mockResolvedValueOnce({
+            accepted: false,
+            conflict: {
+              code: "busy_manual",
+              message: "busy",
+              active_run_id: "run-9",
+              active_task_name: "Other Task",
+              active_origin: "manual",
+            },
+          })
+          .mockResolvedValueOnce({ accepted: true, runId: "run-2" })
+
+        const pending = store.stopActiveAndRestart()
+        await vi.advanceTimersByTimeAsync(0)
+        indexStore.setTaskRunning(false)
+        await vi.advanceTimersByTimeAsync(500)
+        const result = await pending
+        vi.useRealTimers()
+
+        expect(result).toBe(true)
+        expect(api.startTask).toHaveBeenCalledTimes(2)
+        expect(store.startConflict).toBeNull()
+        expect(indexStore.TaskRunning).toBe(true)
+      })
+
+      it("does not retry on busy_scheduled conflict", async () => {
+        const { store, indexStore } = primeRunningStore()
+        vi.mocked(api.stopTask).mockResolvedValue(true)
+        const scheduledConflict = {
+          code: "busy_scheduled" as const,
+          message: "busy",
+          active_run_id: "run-10",
+          active_task_name: "Scheduled Task",
+          active_origin: "in_app" as const,
+        }
+        vi.mocked(api.startTask).mockResolvedValue({
+          accepted: false,
+          conflict: scheduledConflict,
+        })
+
+        indexStore.setTaskRunning(false)
+        await expect(store.stopActiveAndRestart()).resolves.toBe(false)
+        expect(api.startTask).toHaveBeenCalledTimes(1)
+        expect(store.startConflict).toEqual(scheduledConflict)
+      })
+
+      it("stops retrying when busy_manual persists past deadline", async () => {
+        vi.useFakeTimers()
+        const { store, indexStore } = primeRunningStore()
+        vi.mocked(api.stopTask).mockResolvedValue(true)
+        vi.mocked(api.startTask).mockResolvedValue({
+          accepted: false,
+          conflict: {
+            code: "busy_manual",
+            message: "busy",
+            active_run_id: "run-9",
+            active_task_name: "Other Task",
+            active_origin: "manual",
+          },
+        })
+
+        const pending = store.stopActiveAndRestart()
+        await vi.advanceTimersByTimeAsync(0)
+        indexStore.setTaskRunning(false)
+        await vi.advanceTimersByTimeAsync(61_000)
+        const result = await pending
+        vi.useRealTimers()
+
+        expect(result).toBe(false)
+        expect(store.startConflict?.code).toBe("busy_manual")
+        const calls = vi.mocked(api.startTask).mock.calls.length
+        expect(calls).toBeGreaterThan(1)
+        expect(calls).toBeLessThanOrEqual(121)
+      })
+
+      it("stops retrying and clears stale conflict when a later attempt fails without conflict", async () => {
+        vi.useFakeTimers()
+        const { store, indexStore } = primeRunningStore()
+        vi.mocked(api.stopTask).mockResolvedValue(true)
+        // 复现 greptile 场景：首次重启拿到 busy_manual，下一次因普通错误失败（无 conflict）。
+        // 过期冲突不得驱动重试——应立即停止并清除 startConflict。
+        vi.mocked(api.startTask)
+          .mockResolvedValueOnce({
+            accepted: false,
+            conflict: {
+              code: "busy_manual",
+              message: "busy",
+              active_run_id: "run-9",
+              active_task_name: "Other Task",
+              active_origin: "manual",
+            },
+          })
+          .mockResolvedValueOnce({ accepted: false, error: "任务启动失败" })
+
+        const pending = store.stopActiveAndRestart()
+        await vi.advanceTimersByTimeAsync(0)
+        indexStore.setTaskRunning(false)
+        await vi.advanceTimersByTimeAsync(61_000)
+        const result = await pending
+        vi.useRealTimers()
+
+        expect(result).toBe(false)
+        // 修复前：旧 busy_manual 滞留 → 重试跑满 60s（约 121 次）；修复后：第二次失败即停
+        expect(api.startTask).toHaveBeenCalledTimes(2)
+        expect(store.startConflict).toBeNull()
+      })
+
+      it("fails with actionable toast when cleanup exceeds timeout", async () => {
+        vi.useFakeTimers()
+        const { store } = primeRunningStore()
+        vi.mocked(api.stopTask).mockResolvedValue(true)
+
+        const pending = store.stopActiveAndRestart()
+        await vi.advanceTimersByTimeAsync(30_000)
+        const result = await pending
+        vi.useRealTimers()
+
+        expect(result).toBe(false)
+        expect(api.startTask).not.toHaveBeenCalled()
+        expect(showGlobalMessage).toHaveBeenCalledWith(
+          "error",
+          "settings.scheduler.conflict.stopTimeout",
+        )
+      })
+
+      it("returns false when stop request fails", async () => {
+        const { store } = primeRunningStore()
+        vi.mocked(api.stopTask).mockResolvedValue(false)
+
+        await expect(store.stopActiveAndRestart()).resolves.toBe(false)
+        expect(api.startTask).not.toHaveBeenCalled()
+        expect(showGlobalMessage).not.toHaveBeenCalled()
+      })
+
+      it("coalesces re-entrant calls onto a single stop/restart operation", async () => {
+        vi.useFakeTimers()
+        const { store, indexStore } = primeRunningStore()
+        vi.mocked(api.stopTask).mockResolvedValue(true)
+        vi.mocked(api.startTask).mockResolvedValue({ accepted: true, runId: "run-2" })
+
+        const first = store.stopActiveAndRestart()
+        const second = store.stopActiveAndRestart()
+        await vi.advanceTimersByTimeAsync(0)
+        indexStore.setTaskRunning(false)
+
+        const results = await Promise.all([first, second])
+        vi.useRealTimers()
+
+        expect(results).toEqual([true, true])
+        // 重入调用不得另起一套 stop/start 序列
+        expect(api.stopTask).toHaveBeenCalledTimes(1)
+        expect(api.startTask).toHaveBeenCalledTimes(1)
+      })
+
+      it("never fires a start attempt at or past the 60s retry deadline", async () => {
+        vi.useFakeTimers()
+        const startedAt = Date.now()
+        const { store, indexStore } = primeRunningStore()
+        vi.mocked(api.stopTask).mockResolvedValue(true)
+        const callTimes: number[] = []
+        vi.mocked(api.startTask).mockImplementation(() => {
+          callTimes.push(Date.now())
+          return Promise.resolve({
+            accepted: false,
+            conflict: {
+              code: "busy_manual",
+              message: "busy",
+              active_run_id: "run-9",
+              active_task_name: "Other Task",
+              active_origin: "manual",
+            },
+          })
+        })
+
+        const pending = store.stopActiveAndRestart()
+        await vi.advanceTimersByTimeAsync(0)
+        indexStore.setTaskRunning(false)
+        await vi.advanceTimersByTimeAsync(61_000)
+        const result = await pending
+        vi.useRealTimers()
+
+        const deadline = startedAt + 60_000
+        expect(result).toBe(false)
+        expect(callTimes.length).toBeGreaterThan(1)
+        // 睡后重新检查 deadline：任何启动尝试都必须发生在 60s 上限之前
+        expect(callTimes.every((t) => t < deadline)).toBe(true)
+      })
     })
 
     it("skips connect and resource when already connected", async () => {
@@ -337,6 +617,12 @@ describe("useDeviceConnectionStore", () => {
       }
       vi.mocked(api.getDeviceState).mockResolvedValue(lockedAdbState)
       vi.spyOn(configStore, "buildExecutionPayload").mockReturnValue(payload)
+      const expectedPayload = {
+        ...payload,
+        controller_name: "adb",
+        device: { controller_name: "adb", device_type: "Adb", device_address: "" },
+        resource_name: "res1",
+      }
       const connectSpy = vi.spyOn(store, "connectDevices").mockResolvedValue({
         success: true,
         message: "ok",
@@ -345,11 +631,12 @@ describe("useDeviceConnectionStore", () => {
         success: true,
         message: "ok",
       })
-      vi.mocked(api.startTask).mockResolvedValue(true)
+      vi.mocked(api.startTask).mockResolvedValue({ accepted: true, runId: "run-1" })
       const result = await store.StartTask()
       expect(result).toBe(true)
       expect(connectSpy).not.toHaveBeenCalled()
       expect(resourceSpy).not.toHaveBeenCalled()
+      expect(api.startTask).toHaveBeenCalledWith(expectedPayload)
     })
   })
 

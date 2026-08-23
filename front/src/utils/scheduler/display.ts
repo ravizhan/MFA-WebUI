@@ -1,4 +1,9 @@
-import type { ExecutionStatus, TriggerConfig, TriggerType } from "@/types/schedulerModel"
+import type {
+  ExecutionOrigin,
+  ExecutionStatus,
+  TriggerConfig,
+  TriggerType,
+} from "@/types/schedulerModel"
 
 function formatCronTrigger(t: (key: string) => string, triggerConfig: TriggerConfig): string {
   if (triggerConfig.type !== "cron") return t("common.unknown")
@@ -76,6 +81,10 @@ export function getStatusType(
       return "info"
     case "stopped":
       return "warning"
+    case "skipped_busy_manual":
+    case "skipped_busy_scheduled":
+    case "skipped_update_in_progress":
+      return "warning"
     default:
       return "default"
   }
@@ -91,6 +100,12 @@ export function getStatusIcon(status: ExecutionStatus): string {
       return "i-mdi-loading"
     case "stopped":
       return "i-mdi-pause-circle"
+    case "skipped_busy_manual":
+      return "i-mdi-account-cancel"
+    case "skipped_busy_scheduled":
+      return "i-mdi-calendar-remove"
+    case "skipped_update_in_progress":
+      return "i-mdi-update"
     default:
       return "i-mdi-help-circle"
   }
@@ -106,6 +121,25 @@ export function getStatusLabel(t: (key: string) => string, status: ExecutionStat
       return t("settings.scheduler.status.running")
     case "stopped":
       return t("settings.scheduler.status.stopped")
+    case "skipped_busy_manual":
+      return t("settings.scheduler.status.skippedBusyManual")
+    case "skipped_busy_scheduled":
+      return t("settings.scheduler.status.skippedBusyScheduled")
+    case "skipped_update_in_progress":
+      return t("settings.scheduler.status.skippedUpdateInProgress")
+    default:
+      return t("common.unknown")
+  }
+}
+
+export function getOriginLabel(t: (key: string) => string, origin: ExecutionOrigin): string {
+  switch (origin) {
+    case "manual":
+      return t("settings.scheduler.origin.manual")
+    case "in_app":
+      return t("settings.scheduler.origin.inApp")
+    case "native":
+      return t("settings.scheduler.origin.native")
     default:
       return t("common.unknown")
   }

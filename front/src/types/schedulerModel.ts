@@ -1,8 +1,17 @@
 import type { PreTaskCommand } from "@/types/taskConfigModel"
 
-export type TriggerType = "cron" | "date" | "interval"
+export type TriggerType = TriggerConfig["type"]
 
-export type ExecutionStatus = "running" | "success" | "failed" | "stopped"
+export type ExecutionOrigin = "manual" | "in_app" | "native"
+
+export type ExecutionStatus =
+  | "running"
+  | "success"
+  | "failed"
+  | "stopped"
+  | "skipped_busy_manual"
+  | "skipped_busy_scheduled"
+  | "skipped_update_in_progress"
 
 export interface CronTriggerConfig {
   type: "cron"
@@ -43,12 +52,30 @@ export interface ScheduledTaskDeviceConfig {
   device_address: string
 }
 
+export interface StartConflict {
+  code: "busy_manual" | "busy_scheduled" | "update_in_progress"
+  message: string
+  active_run_id: string
+  active_task_name: string
+  active_origin: ExecutionOrigin
+}
+
+export interface ManualStartPayload extends TaskExecutionPayload {
+  controller_name: string
+  device: ScheduledTaskDeviceConfig
+  resource_name: string
+}
+
+export type ManualStartResult =
+  | { accepted: true; runId: string }
+  | { accepted: false; conflict?: StartConflict; error?: string }
+
 export interface ScheduledTask extends TaskExecutionPayload {
   id: string
   name: string
   description?: string
   enabled: boolean
-  trigger_type: TriggerType
+  wakeup_enabled: boolean
   trigger_config: TriggerConfig
   controller_name?: string | null
   device?: ScheduledTaskDeviceConfig | null
@@ -62,7 +89,7 @@ export interface ScheduledTaskCreate extends TaskExecutionPayload {
   name: string
   description?: string
   enabled: boolean
-  trigger_type: TriggerType
+  wakeup_enabled: boolean
   trigger_config: TriggerConfig
   controller_name?: string | null
   device?: ScheduledTaskDeviceConfig | null
@@ -73,7 +100,7 @@ export interface ScheduledTaskUpdate {
   name?: string
   description?: string
   enabled?: boolean
-  trigger_type?: TriggerType
+  wakeup_enabled?: boolean
   trigger_config?: TriggerConfig
   controller_name?: string | null
   device?: ScheduledTaskDeviceConfig | null
@@ -85,17 +112,23 @@ export interface ScheduledTaskUpdate {
 
 export interface TaskExecution {
   id: string
-  task_id: string
+  task_id: string | null
   task_name: string
+  origin: ExecutionOrigin
+  occurrence_id: string | null
+  blocker_task_name: string | null
   started_at: string // ISO 8601 datetime string
-  finished_at?: string // ISO 8601 datetime string
+  finished_at?: string | null // ISO 8601 datetime string
   status: ExecutionStatus
-  error_message?: string
+  error_message?: string | null
 }
 
 export interface SchedulerApiResponse {
-  status: "success" | "failed"
+  status: "success" | "failed" | "conflict"
   message?: string
+  run_id?: string
+  conflict?: StartConflict
+  skip_status?: string | null
   tasks?: ScheduledTask[]
   task?: ScheduledTask
   executions?: TaskExecution[]

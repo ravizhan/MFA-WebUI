@@ -1,17 +1,79 @@
 import asyncio
 import subprocess
+import threading
 import time
 from collections import deque
+from dataclasses import dataclass, field
+from pathlib import Path
 from queue import SimpleQueue
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from maa_utils import MaaWorker
 from models.api import RealtimeEvent, RealtimeEventLevel
 from models.settings import SettingsModel
-from scheduler_manager import SchedulerManager
+
+if TYPE_CHECKING:
+    from maa.agent_client import AgentClient
+
+    from maa_utils import MaaWorker
+    from models.scheduler import ExecutionOrigin
+    from scheduler_manager import SchedulerManager
+    from services.system_scheduler import SystemScheduler
 
 
 _HISTORY_MAXLEN = 2000
+
+
+@dataclass
+class WorkerContext:
+    interface_base_dir: Path
+    i18n_text_mapping: dict[str, Any] | None = None
+
+
+@dataclass
+class DeviceRuntimeState:
+    controller: Any = None
+    controller_type: str | None = None
+    controller_name: str | None = None
+    current_resource_name: str | None = None
+    connected: bool = False
+    configuration_locked: bool = False
+    last_device_error: str | None = None
+    last_resource_error: str | None = None
+
+
+@dataclass
+class TaskRuntimeState:
+    stop_flag: bool = False
+    running: bool = False
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    thread: threading.Thread | None = None
+    last_status: str = "idle"
+    last_error: str | None = None
+    current_task_name: str | None = None
+    pre_tasks: list | None = None
+    current_pre_task_process: subprocess.Popen | None = None
+
+
+@dataclass
+class AgentRuntimeState:
+    start_lock: threading.Lock = field(default_factory=threading.Lock)
+    started_once: bool = False
+    start_succeeded: bool = False
+    start_error: str | None = None
+    pi_env: dict[str, str] | None = None
+    processes: list[subprocess.Popen] = field(default_factory=list)
+    agent_client: "AgentClient" = None
+
+
+@dataclass
+class ActiveRun:
+    """当前活跃运行占槽信息"""
+
+    run_id: str
+    origin: "ExecutionOrigin"
+    task_name: str
+    occurrence_id: str | None = None
+    started: bool = False
 
 
 class LogBroadcaster:
@@ -61,19 +123,39 @@ def normalize_event(payload: RealtimeEvent | dict[str, Any] | str) -> RealtimeEv
 class AppState:
     def __init__(self):
         self.message_conn = SimpleQueue()
-        self.worker: MaaWorker | None = None
+        self.worker: "MaaWorker | None" = None
         self.is_shutting_down = False
         self.history_message: deque[RealtimeEvent] = deque(maxlen=_HISTORY_MAXLEN)
         self.current_status = None
         self.broadcaster: LogBroadcaster | None = None
-        self.scheduler_manager: SchedulerManager | None = None
+        self.scheduler_manager: "SchedulerManager | None" = None
         self.settings: SettingsModel | None = None
         self.subprocess_pipe: subprocess.Popen | None = None
         self.update_status: dict | None = None
         self.update_info: dict | None = None
+        # 运行时状态（合并自 maa_worker/runtime.py）
+        self.context: WorkerContext | None = None
+        self.device = DeviceRuntimeState()
+        self.task = TaskRuntimeState()
+        self.agent = AgentRuntimeState()
+        # 薄执行模块状态
+        self.active_run: ActiveRun | None = None
+        self.active_execution_task: asyncio.Task | None = None
+        self.update_in_progress = False
+        # 系统级调度状态
+        self.pending_scheduled_task_id: str | None = None
+        self.native_token: str | None = None
+        self.system_scheduler: "SystemScheduler | None" = None
+        self.scheduler_db_path = Path("config") / "scheduler.sqlite"
 
     def send_event(self, event: RealtimeEvent):
         self.message_conn.put(event)
 
     def send_log(self, msg: str):
         self.send_event(build_log_event(msg))
+
+    def set_update_in_progress(self) -> None:
+        self.update_in_progress = True
+
+    def clear_update_in_progress(self) -> None:
+        self.update_in_progress = False

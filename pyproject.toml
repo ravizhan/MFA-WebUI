@@ -5,8 +5,7 @@ description = "基于 Vue 的 通用 GUI。由 MaaFramework 强力驱动！"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "apscheduler>=3.11.3",
-    "aiosqlite>=0.22.1",
+    "apscheduler>=3.11.3,<4",
     "fastapi>=0.139.0",
     "httpx>=0.28.1",
     "maafw>=5.11.1",

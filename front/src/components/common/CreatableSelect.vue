@@ -7,7 +7,8 @@
       :aria-expanded="isOpen"
       :aria-controls="isOpen ? listboxId : undefined"
       :value="displayValue"
-      class="select select-sm w-full"
+      class="select w-full"
+      :class="size === 'sm' ? 'select-sm' : ''"
       :placeholder="placeholder"
       :disabled="disabled"
       @focus="handleFocus"
@@ -61,10 +62,17 @@ interface Option {
   disabled?: boolean
 }
 
-const { options, placeholder, disabled } = defineProps<{
+const {
+  options,
+  placeholder,
+  disabled,
+  size = "sm",
+} = defineProps<{
   options: Option[]
   placeholder?: string
   disabled?: boolean
+  /** sm: compact (panel rows); md: default DaisyUI size (settings dialogs) */
+  size?: "sm" | "md"
 }>()
 
 const modelValue = defineModel<string | null>()

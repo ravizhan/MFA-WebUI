@@ -22,7 +22,7 @@ const mockTask = (id: string, enabled: boolean): ScheduledTask => ({
   task_list: [],
   task_options: {},
   preTasks: [],
-  trigger_type: "cron",
+  wakeup_enabled: false,
   trigger_config: { type: "cron", cron: "* * * * *" },
   created_at: "2024-01-01T00:00:00Z",
   updated_at: "2024-01-01T00:00:00Z",
@@ -83,7 +83,7 @@ describe("useSchedulerStore", () => {
   })
 
   describe("createTask", () => {
-    it("pushes task and returns true on success", async () => {
+    it("pushes task and returns the created task on success", async () => {
       const created = mockTask("new", true)
       vi.mocked(api.createSchedulerTask).mockResolvedValue({
         status: "success",
@@ -93,17 +93,17 @@ describe("useSchedulerStore", () => {
       const result = await store.createTask({
         name: "new",
         enabled: true,
+        wakeup_enabled: false,
         task_list: [],
         task_options: {},
         preTasks: [],
-        trigger_type: "cron",
         trigger_config: { type: "cron", cron: "* * * * *" },
       })
-      expect(result).toBe(true)
+      expect(result).toEqual(created)
       expect(store.tasks).toContainEqual(created)
     })
 
-    it("sets error and returns false on failure", async () => {
+    it("sets error and returns null on failure", async () => {
       vi.mocked(api.createSchedulerTask).mockResolvedValue({
         status: "failed",
         message: "create failed",
@@ -112,13 +112,13 @@ describe("useSchedulerStore", () => {
       const result = await store.createTask({
         name: "new",
         enabled: true,
+        wakeup_enabled: false,
         task_list: [],
         task_options: {},
         preTasks: [],
-        trigger_type: "cron",
         trigger_config: { type: "cron", cron: "* * * * *" },
       })
-      expect(result).toBe(false)
+      expect(result).toBeNull()
       expect(store.error).toBe("create failed")
     })
   })
@@ -203,6 +203,9 @@ describe("useSchedulerStore", () => {
           id: "e1",
           task_id: "1",
           task_name: "task-1",
+          origin: "in_app",
+          occurrence_id: null,
+          blocker_task_name: null,
           started_at: "2024-01-01T00:00:00Z",
           status: "success",
         },
