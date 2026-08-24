@@ -1176,7 +1176,7 @@ async function handleSave() {
       showGlobalMessage("error", msg)
       return
     }
-    if (path.startsWith("trigger_config")) {
+    if (!path || path.startsWith("trigger_config")) {
       activeSection.value = "schedule"
       showGlobalMessage("error", t("settings.scheduler.rules.intervalRequired"))
       return

@@ -20,7 +20,7 @@ export function makeRuntimeNumberSchema(min: number, max: number) {
   return z.union([z.literal(""), z.string(), z.number()]).transform((val) => {
     if (val === "") return undefined // no update
     const n = typeof val === "string" ? Number(val) : val
-    if (Number.isNaN(n) || !Number.isFinite(n)) return undefined
+    if (Number.isNaN(n) || !Number.isFinite(n) || !Number.isInteger(n)) return undefined
     return Math.round(Math.min(Math.max(n, min), max))
   })
 }

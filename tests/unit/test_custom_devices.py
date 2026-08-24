@@ -318,6 +318,29 @@ class TestCustomDevicePersistence:
         path.write_text('{"oops": true}', encoding="utf-8")
         assert service._load_custom_devices() == []
 
+    def test_legacy_adb_serial_preserved(self, service: DeviceService, app_root: Path):
+        """Persisted Adb serial records (e.g. emulator-5554) must survive loading."""
+        self._write_settings(
+            app_root,
+            [
+                {
+                    "controller_name": "AdbController",
+                    "type": "Adb",
+                    "address": "emulator-5554",
+                },
+                {
+                    "controller_name": "AdbController",
+                    "type": "Adb",
+                    "address": "192.168.1.1:5555",
+                },
+            ],
+        )
+        records = service._load_custom_devices()
+        assert len(records) == 2
+        addresses = {r["address"] for r in records}
+        assert "emulator-5554" in addresses
+        assert "192.168.1.1:5555" in addresses
+
     def test_skips_invalid_loaded_entries(self, service: DeviceService, app_root: Path):
         self._write_settings(
             app_root,

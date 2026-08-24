@@ -1,5 +1,6 @@
 import { z } from "zod"
 import { cronExpressionSchema } from "./cron"
+import { runtimeDeviceAddressSchema } from "./device"
 
 const taskNameSchema = z
   .string()
@@ -72,11 +73,23 @@ const preTaskCommandSchema = z.object({
   timeout: z.number().int().min(1).max(3600).default(30),
 })
 
-const deviceConfigSchema = z.object({
-  controller_name: z.string().trim().min(1),
-  device_type: z.enum(["Adb", "Win32", "Gamepad", "PlayCover"]),
-  device_address: z.string().trim().min(1),
-})
+const deviceConfigSchema = z
+  .object({
+    controller_name: z.string().trim().min(1),
+    device_type: z.enum(["Adb", "Win32", "Gamepad", "PlayCover"]),
+    device_address: z.string().trim().min(1),
+  })
+  .superRefine((val, ctx) => {
+    const result = runtimeDeviceAddressSchema.safeParse({
+      type: val.device_type,
+      address: val.device_address,
+    })
+    if (!result.success) {
+      for (const issue of result.error.issues) {
+        ctx.addIssue({ ...issue, path: ["device_address"] })
+      }
+    }
+  })
 
 /** Full scheduler task form payload schema. */
 export const schedulerTaskFormSchema = z.object({

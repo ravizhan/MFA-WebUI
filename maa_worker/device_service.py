@@ -18,7 +18,6 @@ from maa.toolkit import Toolkit
 from models.api import CustomDeviceCreate, DeviceModel
 from models.device_address import (
     canonicalize_custom_device_address,
-    try_canonicalize_custom_device_address,
     try_canonicalize_runtime_device_address,
 )
 from settings_io import SETTINGS_LOCK, atomic_write_settings, read_settings_raw
@@ -145,7 +144,7 @@ class DeviceService:
                     "PlayCover",
                 ):
                     continue
-                address = try_canonicalize_custom_device_address(
+                address = try_canonicalize_runtime_device_address(
                     device_type, str(item.get("address", ""))
                 )
                 if address is None:
