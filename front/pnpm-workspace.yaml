@@ -42,3 +42,5 @@ catalog:
   vue-draggable-plus: ^0.6.1
   vue-i18n: ^11.4.6
   vue-router: ^5.1.0
+  cron-converter: ^2.1.0
+  zod: ^4.4.3

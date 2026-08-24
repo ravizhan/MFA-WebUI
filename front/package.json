@@ -18,6 +18,7 @@
   },
   "dependencies": {
     "@iconify/vue": "catalog:",
+    "cron-converter": "catalog:",
     "dompurify": "catalog:",
     "github-markdown-css": "catalog:",
     "marked": "catalog:",
@@ -25,7 +26,8 @@
     "vue": "catalog:",
     "vue-draggable-plus": "catalog:",
     "vue-i18n": "catalog:",
-    "vue-router": "catalog:"
+    "vue-router": "catalog:",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@eslint-community/eslint-plugin-eslint-comments": "catalog:",

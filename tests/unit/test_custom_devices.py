@@ -15,9 +15,9 @@ from pydantic import ValidationError
 
 from maa_worker.device_service import (
     DeviceService,
-    canonicalize_custom_address,
     custom_record_to_device,
 )
+from models.device_address import canonicalize_custom_device_address
 from app_state import WorkerContext
 from models.api import CustomDeviceCreate
 
@@ -77,28 +77,31 @@ class TestCustomDeviceCreateModel:
 
 class TestCanonicalizeCustomAddress:
     def test_adb_and_playcover_trim(self):
-        assert canonicalize_custom_address("Adb", "  1.2.3.4:5555  ") == "1.2.3.4:5555"
         assert (
-            canonicalize_custom_address("PlayCover", " 127.0.0.1:1717 ")
+            canonicalize_custom_device_address("Adb", "  1.2.3.4:5555  ")
+            == "1.2.3.4:5555"
+        )
+        assert (
+            canonicalize_custom_device_address("PlayCover", " 127.0.0.1:1717 ")
             == "127.0.0.1:1717"
         )
 
     def test_adb_empty_rejected(self):
         with pytest.raises(ValueError):
-            canonicalize_custom_address("Adb", "  ")
+            canonicalize_custom_device_address("Adb", "  ")
 
     def test_win32_positive_decimal_canonical(self):
-        assert canonicalize_custom_address("Win32", "00123") == "123"
-        assert canonicalize_custom_address("Win32", " 42 ") == "42"
+        assert canonicalize_custom_device_address("Win32", "00123") == "123"
+        assert canonicalize_custom_device_address("Win32", " 42 ") == "42"
 
     def test_win32_zero_negative_malformed_rejected(self):
         for bad in ("0", "-1", "abc", "12.3", "1e2", ""):
             with pytest.raises(ValueError):
-                canonicalize_custom_address("Win32", bad)
+                canonicalize_custom_device_address("Win32", bad)
 
     def test_gamepad_positive_hwnd_type_0_or_1(self):
-        assert canonicalize_custom_address("Gamepad", "0042|01") == "42|1"
-        assert canonicalize_custom_address("Gamepad", " 7 | 0 ") == "7|0"
+        assert canonicalize_custom_device_address("Gamepad", "0042|01") == "42|1"
+        assert canonicalize_custom_device_address("Gamepad", " 7 | 0 ") == "7|0"
 
     def test_gamepad_malformed_zero_negative_rejected(self):
         for bad in (
@@ -113,7 +116,7 @@ class TestCanonicalizeCustomAddress:
             "",
         ):
             with pytest.raises(ValueError):
-                canonicalize_custom_address("Gamepad", bad)
+                canonicalize_custom_device_address("Gamepad", bad)
 
 
 class TestCustomRecordToDevice:
@@ -244,7 +247,7 @@ class TestCustomDevicePersistence:
         assert records[0]["address"] == "8|1"
 
     def test_rejects_zero_win32(self, service: DeviceService):
-        with pytest.raises(ValueError, match="正整数"):
+        with pytest.raises(ValueError, match="positive integer"):
             service.add_custom_device(
                 CustomDeviceCreate(
                     controller_name="Win32Controller",
@@ -532,7 +535,7 @@ class TestScanCustomMerge:
             CustomDeviceCreate(
                 controller_name="AdbController",
                 type="Adb",
-                address="custom.only:5555",
+                address="10.99.99.1:5555",
             )
         )
         scanned = [
@@ -553,5 +556,5 @@ class TestScanCustomMerge:
 
         addresses = [d.get("address") for d in data["devices"]]
         assert "127.0.0.1:5555" in addresses
-        assert "custom.only:5555" in addresses
+        assert "10.99.99.1:5555" in addresses
         assert data["selected_controller"] == "AdbController"

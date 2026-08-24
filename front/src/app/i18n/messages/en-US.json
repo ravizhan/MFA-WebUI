@@ -201,7 +201,8 @@
         "dateInPast": "Execution time cannot be in the past",
         "intervalRequired": "Interval must be greater than 0",
         "endBeforeStart": "End time cannot be earlier than start time",
-        "taskListRequired": "Please select at least one task"
+        "taskListRequired": "Please select at least one task",
+        "invalidAddress": "Invalid device address format"
       }
     },
     "ui": {

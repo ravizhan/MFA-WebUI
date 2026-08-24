@@ -148,7 +148,7 @@ class TestTriggerRoundTrip:
         ["1-5", "1,3,5", "*/2", "1-5/2"],
     )
     async def test_composite_dow_round_trip(self, manager_env, unix_dow):
-        # Unix 星期 0=周日, 7=周日 → 复合表达式逐组件映射并对称还原
+        # Unix 星期复合表达式经语义数组展开后 canonical 还原
         mgr, _state, _system_scheduler = manager_env
         cron = f"0 9 * * {unix_dow}"
 
@@ -159,14 +159,17 @@ class TestTriggerRoundTrip:
         trigger_type, decoded = mgr._build_trigger_config(trigger)
         assert trigger_type == "cron"
         assert isinstance(decoded, CronTriggerConfig)
-        assert decoded.cron == cron
+        # 还原后应是 canonical 形式（语义等价，不一定文本相同）
+        decoded_trigger = mgr._create_trigger(decoded)
+        decoded_dow = next(f for f in decoded_trigger.fields if f.name == "day_of_week")
+        assert str(decoded_dow) == str(dow_field)
 
     @pytest.mark.parametrize(
         "unix_dow,aps_dow",
-        [("1-5", "0-4"), ("1,3,5", "0,2,4"), ("*/2", "*/2")],
+        [("1-5", "0,1,2,3,4"), ("1,3,5", "0,2,4"), ("*/2", "1,3,5,6")],
     )
     async def test_composite_dow_maps_to_aps(self, manager_env, unix_dow, aps_dow):
-        # 逐端点核对 Unix→APS 的映射方向（1-5 → 0-4 等）
+        # 语义数组展开后逐值映射 Unix→APS（1-5 → 0,1,2,3,4 等）
         mgr, _state, _system_scheduler = manager_env
         trigger = mgr._create_trigger(CronTriggerConfig(cron=f"0 9 * * {unix_dow}"))
         dow_field = next(f for f in trigger.fields if f.name == "day_of_week")

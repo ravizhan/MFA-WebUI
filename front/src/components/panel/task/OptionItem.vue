@@ -114,6 +114,7 @@ import { showGlobalMessage } from "@/services/feedback/message"
 import { useInterfaceStore } from "@/stores"
 import type { InputCase } from "@/types/interfaceModel"
 import type { NullableTaskOptionValue } from "@/types/schedulerModel"
+import { makeInterfaceInputSchema } from "@/schemas/interfaceInput"
 import { resolveInterfaceText } from "@/utils/interface/content"
 import { tryCatch } from "@/utils/tryCatch"
 
@@ -169,9 +170,7 @@ function resolveInputLabel(label: string | undefined, fallback: string) {
 
 function isInputAllowed(value: string, verify?: string): boolean {
   if (!verify || value === "") return true
-  const [ok, err] = tryCatch(() => new RegExp(verify).test(value))
-  if (err) return true
-  return ok === true
+  return makeInterfaceInputSchema(verify).safeParse(value).success
 }
 
 function isInputError(inputName: string, verify?: string): boolean {

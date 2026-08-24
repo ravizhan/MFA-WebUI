@@ -1,6 +1,7 @@
 import { defineStore } from "pinia"
 import { watch } from "vue"
 import i18n from "@/app/i18n"
+import { customDeviceAddressSchema, playCoverAddressSchema } from "@/schemas/device"
 import { tryCatch } from "@/utils/tryCatch"
 import {
   getDeviceState,
@@ -471,10 +472,14 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
         return
       }
 
-      const address = rawAddress.trim()
-      if (!address) {
+      const parseResult = customDeviceAddressSchema.safeParse({
+        type: capability.type,
+        address: rawAddress,
+      })
+      if (!parseResult.success) {
         return
       }
+      const address = parseResult.data.address
 
       const controllerName = capability.name
       const displayLabel = capability.display_label
@@ -503,15 +508,14 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
 
     buildPlayCoverDevice(): { device: ConnectableDevice } | { error: string } {
       const t = i18n.global.t
-      const address = this.playCoverAddress.trim()
-      if (!address) {
-        return { error: t("panel.playcoverAddress") }
+      const parseResult = playCoverAddressSchema.safeParse(this.playCoverAddress)
+      if (!parseResult.success) {
+        const msg = this.playCoverAddress.trim()
+          ? t("panel.invalidPlaycoverAddress")
+          : t("panel.playcoverAddress")
+        return { error: msg }
       }
-      const regex = /^((25[0-5]|(2[0-4]|1\d|[1-9]|)\d)\.?\b){4}:\d{1,5}$/
-      if (!regex.test(address)) {
-        return { error: t("panel.invalidPlaycoverAddress") }
-      }
-      return { device: { type: "PlayCover", address } }
+      return { device: { type: "PlayCover", address: parseResult.data } }
     },
 
     async connectDevices(): Promise<PostDeviceResult> {
@@ -674,10 +678,18 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
       const base = configStore.buildExecutionPayload(compatibleTaskIds)
       const controllerName = this.selectedControllerName || ""
       const deviceType = this.selectedControllerCapability?.type || "Adb"
-      const deviceAddress =
-        deviceType === "PlayCover"
-          ? this.playCoverAddress.trim()
-          : buildDeviceAddress(this.selectedDevice)
+      let deviceAddress = buildDeviceAddress(this.selectedDevice)
+      if (deviceType === "PlayCover") {
+        const playCoverResult = this.buildPlayCoverDevice()
+        if ("error" in playCoverResult) {
+          showGlobalMessage("error", "设备连接失败: " + playCoverResult.error)
+          return false
+        }
+        if (playCoverResult.device.type !== "PlayCover") {
+          return false
+        }
+        deviceAddress = playCoverResult.device.address
+      }
 
       const payload: ManualStartPayload = {
         ...base,

@@ -1,6 +1,12 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from models.device_address import (
+    DeviceType,
+    canonicalize_custom_device_address,
+    canonicalize_ipv4_port,
+)
 
 RealtimeEventName = Literal[
     "log",
@@ -11,8 +17,6 @@ RealtimeEventName = Literal[
     "notification.test",
 ]
 RealtimeEventLevel = Literal["info", "success", "error"]
-
-DeviceType = Literal["Adb", "Win32", "Gamepad", "PlayCover"]
 
 
 class DeviceModel(BaseModel):
@@ -27,6 +31,23 @@ class DeviceModel(BaseModel):
     gamepad_type: int = 0
     uuid: str = ""
     config: dict = {}
+
+    @model_validator(mode="after")
+    def _validate_device_fields(self) -> "DeviceModel":
+        if self.type == "Adb":
+            if not self.address.strip():
+                raise ValueError("Adb address must not be empty")
+        elif self.type == "PlayCover":
+            self.address = canonicalize_ipv4_port(self.address)
+        elif self.type == "Win32":
+            if self.hWnd <= 0:
+                raise ValueError("Win32 hWnd must be positive")
+        elif self.type == "Gamepad":
+            if self.hWnd <= 0:
+                raise ValueError("Gamepad hWnd must be positive")
+            if self.gamepad_type not in (0, 1):
+                raise ValueError("Gamepad type must be 0 or 1")
+        return self
 
 
 class CustomDeviceCreate(BaseModel):
@@ -45,6 +66,11 @@ class CustomDeviceCreate(BaseModel):
         if not text:
             raise ValueError("must not be empty")
         return text
+
+    @model_validator(mode="after")
+    def _canonicalize_address(self) -> "CustomDeviceCreate":
+        self.address = canonicalize_custom_device_address(self.type, self.address)
+        return self
 
 
 class RealtimeEvent(BaseModel):

@@ -27,6 +27,7 @@ from models.scheduler import (
     CronTriggerConfig,
     DateTriggerConfig,
     IntervalTriggerConfig,
+    PortableCronStr,
     ScheduledTask,
     ScheduledTaskCreate,
     ScheduledTaskDeviceConfig,
@@ -49,6 +50,7 @@ logger = logging.getLogger(__name__)
 _CALLBACK_STATE: Optional[AppState] = None
 
 _TriggerConfigAdapter = TypeAdapter(TriggerConfig)
+_PortableCronAdapter = TypeAdapter(PortableCronStr)
 
 
 def _bind_callback_runtime(state: AppState) -> None:
@@ -59,7 +61,7 @@ def _bind_callback_runtime(state: AppState) -> None:
 
 def _decode_trigger_config(raw: Any) -> TriggerConfig:
     """从 kwargs 中的 model_dump 字典还原触发器配置（按 type 判别字段）。"""
-    if isinstance(raw, TriggerConfig):
+    if isinstance(raw, (CronTriggerConfig, DateTriggerConfig, IntervalTriggerConfig)):
         return raw
     return _TriggerConfigAdapter.validate_python(raw)
 
@@ -91,22 +93,16 @@ def _map_dow_components(dow: str, mapper: Any) -> str:
     return ",".join(mapped)
 
 
-def _unix_val_to_aps(d: int) -> int:
-    """单个 Unix 星期值（0/7=周日）→ APS 星期值（0=周一）；7 先归一为 0。"""
-    return unix_dow_to_aps(0 if d == 7 else d)
-
-
-def _to_aps_day_of_week(dow: str) -> str:
-    """Unix 星期字段（0/7=周日）→ APS 星期（0=周一）。
-
-    逐组件转换复合表达式（范围/列表/步进端点经 unix_dow_to_aps 映射，
-    7 先归一为 0）；名称原样透传。
-    """
-    return _map_dow_components(dow, _unix_val_to_aps)
-
-
 def _aps_to_unix_day_of_week(dow: str) -> str:
-    """APS 星期字段（0=周一）→ Unix 星期（0/7=周日），复合表达式对称还原。"""
+    """Convert APS weekday values back to Unix values.
+
+    New triggers contain only numeric values or ``*``. The component mapper is
+    retained for reading older persisted jobs containing ranges, lists, or steps.
+    """
+    if dow.isdigit():
+        return str(aps_dow_to_unix(int(dow)))
+    if dow == "*":
+        return dow
     return _map_dow_components(dow, aps_dow_to_unix)
 
 
@@ -246,17 +242,45 @@ class SchedulerManager:
     def _create_trigger(self, trigger_config: TriggerConfig):
         """根据配置创建触发器"""
         if isinstance(trigger_config, CronTriggerConfig):
-            # 解析 cron 表达式
-            parts = trigger_config.cron.split()
-            if len(parts) != 5:
-                raise ValueError(f"无效的 Cron 表达式: {trigger_config.cron}")
-            minute, hour, day, month, day_of_week = parts
+            fields = trigger_config.cron.cron_obj.to_list()
+            minute_set, hour_set, day_set, month_set, dow_set = fields
+            full_minute = set(range(60))
+            full_hour = set(range(24))
+            full_day = set(range(1, 32))
+            full_month = set(range(1, 13))
+            full_dow = set(range(7))
+
+            minute = (
+                "*"
+                if set(minute_set) == full_minute
+                else ",".join(str(v) for v in sorted(minute_set))
+            )
+            hour = (
+                "*"
+                if set(hour_set) == full_hour
+                else ",".join(str(v) for v in sorted(hour_set))
+            )
+            day = (
+                "*"
+                if set(day_set) == full_day
+                else ",".join(str(v) for v in sorted(day_set))
+            )
+            month = (
+                "*"
+                if set(month_set) == full_month
+                else ",".join(str(v) for v in sorted(month_set))
+            )
+            if set(dow_set) == full_dow:
+                day_of_week = "*"
+            else:
+                aps_dows = sorted({unix_dow_to_aps(d) for d in dow_set})
+                day_of_week = ",".join(str(v) for v in aps_dows)
             return CronTrigger(
                 minute=minute,
                 hour=hour,
                 day=day,
                 month=month,
-                day_of_week=_to_aps_day_of_week(day_of_week),
+                day_of_week=day_of_week,
             )
         elif isinstance(trigger_config, DateTriggerConfig):
             return DateTrigger(run_date=trigger_config.run_date)
@@ -279,17 +303,19 @@ class SchedulerManager:
         """从 APScheduler trigger 重建触发器类型与配置"""
         if isinstance(trigger, CronTrigger):
             field_map = {field.name: str(field) for field in trigger.fields}
-            day_of_week = _aps_to_unix_day_of_week(field_map.get("day_of_week", "*"))
-            cron = " ".join(
+            aps_dow = field_map.get("day_of_week", "*")
+            unix_dow = _aps_to_unix_day_of_week(aps_dow)
+            cron_text = " ".join(
                 [
                     field_map.get("minute", "*"),
                     field_map.get("hour", "*"),
                     field_map.get("day", "*"),
                     field_map.get("month", "*"),
-                    day_of_week,
+                    unix_dow,
                 ]
             )
-            return "cron", CronTriggerConfig(cron=cron)
+            cron_str = _PortableCronAdapter.validate_python(cron_text)
+            return "cron", CronTriggerConfig(cron=cron_str)
 
         if isinstance(trigger, DateTrigger):
             run_date = getattr(trigger, "run_date", None)
@@ -413,7 +439,7 @@ class SchedulerManager:
                     "device": task.device.model_dump() if task.device else None,
                     "resource_name": task.resource_name,
                     "wakeup_enabled": task.wakeup_enabled,
-                    "trigger_config": task.trigger_config.model_dump(),
+                    "trigger_config": task.trigger_config.model_dump(mode="json"),
                 },
             )
 
@@ -675,7 +701,7 @@ class SchedulerManager:
                         "device": new_device,
                         "resource_name": new_resource_name,
                         "wakeup_enabled": new_wakeup_enabled,
-                        "trigger_config": new_trigger_config.model_dump(),
+                        "trigger_config": new_trigger_config.model_dump(mode="json"),
                     },
                 )
 

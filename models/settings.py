@@ -4,7 +4,7 @@ from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
-DeviceType = Literal["Adb", "Win32", "Gamepad", "PlayCover"]
+from models.device_address import DeviceType
 
 
 def _normalize_str(value: Any) -> str:

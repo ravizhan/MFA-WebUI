@@ -497,6 +497,8 @@ import type { TaskListItem } from "@/types/taskConfigModel"
 import TaskSelectList from "@/components/panel/task/TaskSelectList.vue"
 import TaskOptionPanel from "@/components/panel/task/TaskOptionPanel.vue"
 import PreTaskList from "@/components/panel/task/PreTaskList.vue"
+import { customDeviceAddressSchema } from "@/schemas/device"
+import { schedulerTaskFormSchema } from "@/schemas/scheduler"
 import { resolveInterfaceText } from "@/utils/interface/content"
 import { getDevices, getResource, postCustomDevice } from "@/services/api"
 import type { ConnectableDevice, DeviceControllerType } from "@/services/api"
@@ -1109,8 +1111,15 @@ async function handleCustomDeviceCreate(rawAddress: string) {
   const controllerType = selectedControllerType.value
   if (!controllerName || !controllerType || !isDeviceControllerType(controllerType)) return
 
-  const address = rawAddress.trim()
-  if (!address) return
+  const parseResult = customDeviceAddressSchema.safeParse({
+    type: controllerType,
+    address: rawAddress,
+  })
+  if (!parseResult.success) {
+    showGlobalMessage("error", t("settings.scheduler.rules.invalidAddress"))
+    return
+  }
+  const address = parseResult.data.address
 
   const [result, err] = await tryCatch(() =>
     postCustomDevice({
@@ -1135,123 +1144,7 @@ async function handleCustomDeviceCreate(rawAddress: string) {
   selectedDeviceAddress.value = address
 }
 
-function validateName(): boolean {
-  const name = formData.value.name.trim()
-  if (!name) {
-    showGlobalMessage("error", t("settings.scheduler.rules.nameRequired"))
-    activeSection.value = "basic"
-    return false
-  }
-  if (name.length > 100) {
-    showGlobalMessage("error", t("settings.scheduler.rules.nameLength"))
-    activeSection.value = "basic"
-    return false
-  }
-  return true
-}
-
-function validateCron(): boolean {
-  const config = formData.value.trigger_config
-  if (config.type !== "cron") {
-    return false
-  }
-  if (!config.cron) {
-    showGlobalMessage("error", t("settings.scheduler.rules.cronRequired"))
-    activeSection.value = "schedule"
-    return false
-  }
-  const pattern =
-    /^(\*|[0-9\-*,/]+)\s+(\*|[0-9\-*,/]+)\s+(\*|[0-9\-*,/]+)\s+(\*|[0-9\-*,/]+)\s+(\*|[0-9\-*,/]+)$/
-  if (!pattern.test(config.cron)) {
-    showGlobalMessage("error", t("settings.scheduler.rules.cronInvalid"))
-    activeSection.value = "schedule"
-    return false
-  }
-  return true
-}
-
-function validateDate(): boolean {
-  const config = formData.value.trigger_config
-  if (config.type !== "date") {
-    return false
-  }
-  if (!config.run_date) {
-    showGlobalMessage("error", t("settings.scheduler.rules.dateRequired"))
-    activeSection.value = "schedule"
-    return false
-  }
-  if (new Date(config.run_date).getTime() < Date.now()) {
-    showGlobalMessage("error", t("settings.scheduler.rules.dateInPast"))
-    activeSection.value = "schedule"
-    return false
-  }
-  return true
-}
-
-function nonNegative(value: number | undefined): number {
-  return value || 0
-}
-
-function validateInterval(): boolean {
-  const config = formData.value.trigger_config
-  if (config.type !== "interval") {
-    return false
-  }
-  const total =
-    nonNegative(config.weeks) +
-    nonNegative(config.days) +
-    nonNegative(config.hours) +
-    nonNegative(config.minutes) +
-    nonNegative(config.seconds)
-  if (total <= 0) {
-    showGlobalMessage("error", t("settings.scheduler.rules.intervalRequired"))
-    activeSection.value = "schedule"
-    return false
-  }
-  if (config.start_date && config.end_date) {
-    const startAt = new Date(config.start_date).getTime()
-    const endAt = new Date(config.end_date).getTime()
-    if (endAt < startAt) {
-      showGlobalMessage("error", t("settings.scheduler.rules.endBeforeStart"))
-      activeSection.value = "schedule"
-      return false
-    }
-  }
-  return true
-}
-
-function validateTaskList(): boolean {
-  if (formData.value.task_list.length === 0) {
-    showGlobalMessage("error", t("settings.scheduler.rules.taskListRequired"))
-    activeSection.value = "content"
-    activeTab.value = "task-list"
-    return false
-  }
-  return true
-}
-
-function validateForm(): boolean {
-  if (!validateName()) {
-    return false
-  }
-  if (triggerType.value === "cron" && !validateCron()) {
-    return false
-  }
-  if (triggerType.value === "date" && !validateDate()) {
-    return false
-  }
-  if (triggerType.value === "interval" && !validateInterval()) {
-    return false
-  }
-  return validateTaskList()
-}
-
 async function handleSave() {
-  if (!validateForm()) {
-    return
-  }
-
-  loading.value = true
   const taskPayload = {
     ...formData.value,
     wakeup_enabled:
@@ -1259,12 +1152,61 @@ async function handleSave() {
     ...configStore.buildExecutionPayload(formData.value.task_list, formData.value.task_options),
     preTasks: formData.value.preTasks ?? [],
   }
+
+  const parseResult = schedulerTaskFormSchema.safeParse(taskPayload)
+  if (!parseResult.success) {
+    const firstIssue = parseResult.error.issues[0]
+    const path = firstIssue.path.join(".")
+    // Route to correct section based on issue path
+    if (path.startsWith("name")) {
+      activeSection.value = "basic"
+      showGlobalMessage("error", t("settings.scheduler.rules.nameRequired"))
+      return
+    }
+    if (path.startsWith("trigger_config.cron")) {
+      activeSection.value = "schedule"
+      showGlobalMessage("error", t("settings.scheduler.rules.cronInvalid"))
+      return
+    }
+    if (path.startsWith("trigger_config.run_date")) {
+      activeSection.value = "schedule"
+      const msg = firstIssue.message.includes("future")
+        ? t("settings.scheduler.rules.dateInPast")
+        : t("settings.scheduler.rules.dateRequired")
+      showGlobalMessage("error", msg)
+      return
+    }
+    if (path.startsWith("trigger_config")) {
+      activeSection.value = "schedule"
+      showGlobalMessage("error", t("settings.scheduler.rules.intervalRequired"))
+      return
+    }
+    if (path.startsWith("task_list")) {
+      activeSection.value = "content"
+      activeTab.value = "task-list"
+      showGlobalMessage("error", t("settings.scheduler.rules.taskListRequired"))
+      return
+    }
+    showGlobalMessage("error", firstIssue.message)
+    return
+  }
+
+  const parsedTask = {
+    ...parseResult.data,
+    description: parseResult.data.description ?? undefined,
+    preTasks: parseResult.data.preTasks.map((preTask) => ({
+      ...preTask,
+      id: preTask.id ?? crypto.randomUUID(),
+    })),
+  }
+
+  loading.value = true
   const [savedTask, err] = await tryCatch(async () => {
     if (isEditMode.value && task) {
-      const ok = await schedulerStore.updateTask(task.id, taskPayload)
+      const ok = await schedulerStore.updateTask(task.id, parsedTask)
       return ok ? task : null
     }
-    return schedulerStore.createTask(taskPayload)
+    return schedulerStore.createTask(parsedTask)
   })
   loading.value = false
   if (err || !savedTask) {

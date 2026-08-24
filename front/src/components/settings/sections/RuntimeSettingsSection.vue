@@ -80,6 +80,7 @@
 <script setup lang="ts">
 import { computed } from "vue"
 import { useI18n } from "vue-i18n"
+import { makeRuntimeNumberSchema } from "@/schemas/settings"
 import { useSettingsStore } from "@/stores"
 import type { SettingsModel } from "@/types/settingsModel"
 
@@ -111,14 +112,12 @@ async function handleNumberChange(key: RuntimeNumberKey, event: Event, min: numb
   if (!(target instanceof HTMLInputElement)) return
 
   const raw = target.value
-  if (raw === "" || raw.trim() === "") return
+  const parseResult = makeRuntimeNumberSchema(min, max).safeParse(raw)
+  if (!parseResult.success || parseResult.data === undefined) return
 
-  const num = Number(raw)
-  if (Number.isNaN(num)) return
-
-  const clamped = Math.min(max, Math.max(min, num))
+  const clamped = parseResult.data
   // Keep controlled input in sync if browser allowed out-of-range value
-  if (clamped !== num) {
+  if (target.value !== String(clamped)) {
     target.value = String(clamped)
   }
   await handleSettingChange("runtime", key, clamped)
