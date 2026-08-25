@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 from pydantic import TypeAdapter
 
-from models.scheduler import NativeCronStr, PortableCronStr
+from models.scheduler import PortableCronStr
 from services.native_cron import (
     NativeCron,
     aps_dow_to_unix,
@@ -29,14 +29,13 @@ def _load_corpus():
 
 _CORPUS = _load_corpus()
 _portable_adapter = TypeAdapter(PortableCronStr)
-_native_adapter = TypeAdapter(NativeCronStr)
 
 
-class TestPortableCronCorpus:
-    """Verify PortableCronStr accept/reject/canonical against shared corpus."""
+class TestCronCorpus:
+    """Verify unified cron validation against shared corpus."""
 
     @pytest.mark.parametrize("case", _CORPUS, ids=[c["name"] for c in _CORPUS])
-    def test_cron_valid(self, case):
+    def test_valid(self, case):
         try:
             result = _portable_adapter.validate_python(case["input"])
             actual_valid = True
@@ -45,32 +44,15 @@ class TestPortableCronCorpus:
             actual_valid = False
             actual_canonical = None
 
-        assert actual_valid == case["cron_valid"], (
-            f"input={case['input']!r}: expected cron_valid={case['cron_valid']}, "
+        assert actual_valid == case["valid"], (
+            f"input={case['input']!r}: expected valid={case['valid']}, "
             f"got {actual_valid}"
         )
-        if case["cron_valid"]:
+        if case["valid"]:
             assert actual_canonical == case["canonical"], (
                 f"input={case['input']!r}: expected canonical={case['canonical']!r}, "
                 f"got {actual_canonical!r}"
             )
-
-
-class TestNativeCronCorpus:
-    """Verify NativeCronStr accept/reject against shared corpus."""
-
-    @pytest.mark.parametrize("case", _CORPUS, ids=[c["name"] for c in _CORPUS])
-    def test_native_valid(self, case):
-        try:
-            _native_adapter.validate_python(case["input"])
-            actual_valid = True
-        except Exception:
-            actual_valid = False
-
-        assert actual_valid == case["native_valid"], (
-            f"input={case['input']!r}: expected native_valid={case['native_valid']}, "
-            f"got {actual_valid}"
-        )
 
 
 class TestParseNativeCron:

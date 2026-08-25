@@ -12,7 +12,6 @@ from models.scheduler import (
     DateTriggerConfig,
     IntervalTriggerConfig,
     ManualStartPayload,
-    NativeCronStr,
     PortableCronStr,
     PreTaskCommand,
     ScheduledTaskCreate,
@@ -31,11 +30,10 @@ def _load_corpus():
 
 _CORPUS = _load_corpus()
 _portable_adapter = TypeAdapter(PortableCronStr)
-_native_adapter = TypeAdapter(NativeCronStr)
 _trigger_adapter = TypeAdapter(TriggerConfig)
 
 
-class TestPortableCronStr:
+class TestCronStr:
     @pytest.mark.parametrize("case", _CORPUS, ids=[c["name"] for c in _CORPUS])
     def test_corpus(self, case):
         try:
@@ -45,20 +43,9 @@ class TestPortableCronStr:
         except Exception:
             valid = False
             canonical = None
-        assert valid == case["cron_valid"]
-        if case["cron_valid"]:
+        assert valid == case["valid"]
+        if case["valid"]:
             assert canonical == case["canonical"]
-
-
-class TestNativeCronStr:
-    @pytest.mark.parametrize("case", _CORPUS, ids=[c["name"] for c in _CORPUS])
-    def test_corpus(self, case):
-        try:
-            _native_adapter.validate_python(case["input"])
-            valid = True
-        except Exception:
-            valid = False
-        assert valid == case["native_valid"]
 
 
 class TestTriggerConfig:

@@ -28,7 +28,7 @@ _MONTH_MAX_DAYS = (31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
 
 
 def _normalize_portable_cron(value: Any) -> str:
-    """Normalize the portable cron wire format before CronStr validation."""
+    """Normalize the strict cron wire format before CronStr validation."""
     if not isinstance(value, str):
         raise ValueError("cron expression must be a string")
     text = re.sub(r"\s+", " ", value.strip())
@@ -55,11 +55,12 @@ def _normalize_portable_cron(value: Any) -> str:
     return text
 
 
-PortableCronStr = Annotated[CronStr, BeforeValidator(_normalize_portable_cron)]
-
-
 def _validate_native_cron(value: CronStr) -> CronStr:
-    """Validate the scalar subset supported by native OS schedulers."""
+    """Validate the strict subset shared by APScheduler and native OS schedulers.
+
+    统一 cron 校验：5 字段、单值或 *、分钟必须具体。任一遍历（APScheduler
+    CronTrigger 或 OS 原生调度）都可直接消费，无需二次校验。
+    """
     minute_set, hour_set, day_set, month_set, dow_set = value.cron_obj.to_list()
     full_minute = set(range(60))
     full_hour = set(range(24))
@@ -75,9 +76,7 @@ def _validate_native_cron(value: CronStr) -> CronStr:
             return None
         if len(values) == 1:
             return values[0]
-        raise ValueError(
-            f"{name} field must be * or a single value for native scheduling"
-        )
+        raise ValueError(f"{name} field must be * or a single value")
 
     minute = scalar_or_none(minute_set, full_minute, "minute")
     hour = scalar_or_none(hour_set, full_hour, "hour")
@@ -93,13 +92,17 @@ def _validate_native_cron(value: CronStr) -> CronStr:
     if month is not None and day is None:
         raise ValueError("when month is restricted, day must also be restricted")
     if month is not None and day is not None:
-        max_day = (31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+        max_day = _MONTH_MAX_DAYS
         if day > max_day[month - 1]:
             raise ValueError(f"month {month} has no day {day}")
     return value
 
 
-NativeCronStr = Annotated[PortableCronStr, AfterValidator(_validate_native_cron)]
+PortableCronStr = Annotated[
+    CronStr,
+    BeforeValidator(_normalize_portable_cron),
+    AfterValidator(_validate_native_cron),
+]
 
 
 def _validate_task_name(value: Any) -> str:

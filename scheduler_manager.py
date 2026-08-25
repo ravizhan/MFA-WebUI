@@ -27,7 +27,6 @@ from models.scheduler import (
     CronTriggerConfig,
     DateTriggerConfig,
     IntervalTriggerConfig,
-    PortableCronStr,
     ScheduledTask,
     ScheduledTaskCreate,
     ScheduledTaskDeviceConfig,
@@ -50,7 +49,6 @@ logger = logging.getLogger(__name__)
 _CALLBACK_STATE: Optional[AppState] = None
 
 _TriggerConfigAdapter = TypeAdapter(TriggerConfig)
-_PortableCronAdapter = TypeAdapter(PortableCronStr)
 
 
 def _bind_callback_runtime(state: AppState) -> None:
@@ -242,39 +240,12 @@ class SchedulerManager:
     def _create_trigger(self, trigger_config: TriggerConfig):
         """根据配置创建触发器"""
         if isinstance(trigger_config, CronTriggerConfig):
-            fields = trigger_config.cron.cron_obj.to_list()
-            minute_set, hour_set, day_set, month_set, dow_set = fields
-            full_minute = set(range(60))
-            full_hour = set(range(24))
-            full_day = set(range(1, 32))
-            full_month = set(range(1, 13))
-            full_dow = set(range(7))
-
-            minute = (
-                "*"
-                if set(minute_set) == full_minute
-                else ",".join(str(v) for v in sorted(minute_set))
-            )
-            hour = (
-                "*"
-                if set(hour_set) == full_hour
-                else ",".join(str(v) for v in sorted(hour_set))
-            )
-            day = (
-                "*"
-                if set(day_set) == full_day
-                else ",".join(str(v) for v in sorted(day_set))
-            )
-            month = (
-                "*"
-                if set(month_set) == full_month
-                else ",".join(str(v) for v in sorted(month_set))
-            )
-            if set(dow_set) == full_dow:
-                day_of_week = "*"
-            else:
-                aps_dows = sorted({unix_dow_to_aps(d) for d in dow_set})
-                day_of_week = ",".join(str(v) for v in aps_dows)
+            nc = parse_native_cron(trigger_config.cron)
+            minute = str(nc.minute)
+            hour = "*" if nc.hour is None else str(nc.hour)
+            day = "*" if nc.day is None else str(nc.day)
+            month = "*" if nc.month is None else str(nc.month)
+            day_of_week = "*" if nc.dow is None else str(unix_dow_to_aps(nc.dow))
             return CronTrigger(
                 minute=minute,
                 hour=hour,
@@ -314,8 +285,8 @@ class SchedulerManager:
                     unix_dow,
                 ]
             )
-            cron_str = _PortableCronAdapter.validate_python(cron_text)
-            return "cron", CronTriggerConfig(cron=cron_str)
+            # 统一校验（PortableCronStr 严格子集）在模型层执行，roundtrip 恒等
+            return "cron", CronTriggerConfig(cron=cron_text)
 
         if isinstance(trigger, DateTrigger):
             run_date = getattr(trigger, "run_date", None)

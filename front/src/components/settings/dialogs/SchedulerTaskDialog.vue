@@ -503,7 +503,7 @@ import { resolveInterfaceText } from "@/utils/interface/content"
 import { getDevices, getResource, postCustomDevice } from "@/services/api"
 import type { ConnectableDevice, DeviceControllerType } from "@/services/api"
 import { buildDeviceLabel } from "@/utils/panel/device"
-import { checkCronNativeEligibility } from "@/utils/scheduler/cronNative"
+import { checkNativeEligibility } from "@/schemas/cron"
 import type { PanelLastConnectedDevice } from "@/types/settingsModel"
 import type {
   ScheduledTask,
@@ -746,7 +746,7 @@ const taskListData = ref<TaskListItem[]>([])
 const triggerType = computed(() => formData.value.trigger_config.type)
 const isCronNativeEligible = computed(() => {
   const config = formData.value.trigger_config
-  return config.type === "cron" && checkCronNativeEligibility(config.cron)
+  return config.type === "cron" && checkNativeEligibility(config.cron)
 })
 
 function syncDialogVisibility(open: boolean) {

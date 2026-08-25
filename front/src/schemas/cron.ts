@@ -6,7 +6,11 @@ import { tryCatch } from "@/utils/tryCatch"
 const PORTABLE_CRON_ALPHABET = /^[0-9*,\-/\s]+$/
 const MONTH_MAX_DAYS = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
 
-/** Normalize and validate a portable cron expression (5-field, ASCII digits only). */
+/**
+ * 统一 cron 校验（与后端 PortableCronStr 严格子集对齐）：
+ * 5 字段、单值或 *、分钟必须具体。任一消费端（应用内 APScheduler 或
+ * OS 原生唤醒）都接受同一份表达式，无需二次校验。
+ */
 export const cronExpressionSchema = z
   .string()
   .trim()
@@ -53,6 +57,27 @@ export const cronExpressionSchema = z
     }
     return result
   })
+  .refine(
+    (canonical) => {
+      const [result, err] = tryCatch(() => {
+        const arr = stringToArray(canonical, { enableLastDayOfMonth: false })
+        const [minuteSet, hourSet, daySet, monthSet, dowSet] = arr
+        const minute = scalarOrFail(minuteSet, FULL_MINUTE, "minute")
+        const hour = scalarOrFail(hourSet, FULL_HOUR, "hour")
+        const day = scalarOrFail(daySet, FULL_DAY, "day")
+        const month = scalarOrFail(monthSet, FULL_MONTH, "month")
+        const dow = scalarOrFail(dowSet, FULL_DOW, "dow")
+        if (minute === null) return false
+        if (day !== null && dow !== null) return false
+        if (hour === null && (day !== null || month !== null || dow !== null)) return false
+        if (month !== null && day === null) return false
+        if (month !== null && day !== null && day > MONTH_MAX_DAYS[month - 1]) return false
+        return true
+      })
+      return err === null && result === true
+    },
+    { message: "cron does not meet strict scheduling requirements" },
+  )
 
 export type CronExpression = z.output<typeof cronExpressionSchema>
 
@@ -70,35 +95,10 @@ function isFullSet(values: number[], full: Set<number>): boolean {
 function scalarOrFail(values: number[], full: Set<number>, name: string): number | null {
   if (isFullSet(values, full)) return null
   if (values.length === 1) return values[0]
-  throw new Error(`${name} field must be * or a single value for native scheduling`)
+  throw new Error(`${name} field must be * or a single value`)
 }
 
-/** Native (strict subset) cron: single values only, minute required. */
-export const nativeCronExpressionSchema = cronExpressionSchema.refine(
-  (canonical) => {
-    const [result, err] = tryCatch(() => {
-      const arr = stringToArray(canonical, { enableLastDayOfMonth: false })
-      const [minuteSet, hourSet, daySet, monthSet, dowSet] = arr
-      const minute = scalarOrFail(minuteSet, FULL_MINUTE, "minute")
-      const hour = scalarOrFail(hourSet, FULL_HOUR, "hour")
-      const day = scalarOrFail(daySet, FULL_DAY, "day")
-      const month = scalarOrFail(monthSet, FULL_MONTH, "month")
-      const dow = scalarOrFail(dowSet, FULL_DOW, "dow")
-      if (minute === null) return false
-      if (day !== null && dow !== null) return false
-      if (hour === null && (day !== null || month !== null || dow !== null)) return false
-      if (month !== null && day === null) return false
-      if (month !== null && day !== null && day > MONTH_MAX_DAYS[month - 1]) return false
-      return true
-    })
-    return err === null && result === true
-  },
-  { message: "cron does not meet native scheduling requirements" },
-)
-
-export type NativeCronExpression = z.output<typeof nativeCronExpressionSchema>
-
-/** Check if a cron expression is eligible for native (OS-level) scheduling. */
+/** Check if a cron expression satisfies the unified strict subset. */
 export function checkNativeEligibility(cron: string): boolean {
-  return nativeCronExpressionSchema.safeParse(cron).success
+  return cronExpressionSchema.safeParse(cron).success
 }

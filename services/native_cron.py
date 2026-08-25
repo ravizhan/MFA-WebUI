@@ -1,13 +1,12 @@
-"""严格的原生 cron 解析与跨平台转换（纯函数，无 I/O）。
+"""原生 cron 解析与跨平台转换（纯函数，无 I/O）。
 
-供系统级调度（schtasks / launchctl / crontab）使用的 cron 子集：
-5 个字段、单值语义（不支持列表/范围/步进），分钟必须具体。
+输入已由 ``PortableCronStr`` 统一校验为严格子集（5 字段、单值或 *、
+分钟必须具体），此处只做结构提取与 OS 格式转换。
 """
 
 from dataclasses import dataclass
-from typing import Annotated
 
-from pydantic import AfterValidator, TypeAdapter
+from pydantic import TypeAdapter
 from pydantic_extra_types.cron import CronStr
 
 from models.scheduler import PortableCronStr
@@ -51,7 +50,7 @@ _adapter = TypeAdapter(PortableCronStr)
 
 
 def parse_native_cron(cron: str) -> NativeCron:
-    """Parse a strict native cron subset from CronStr semantic field sets."""
+    """将已校验的严格 cron 表达式解析为 NativeCron 结构体。"""
     cron_str = _adapter.validate_python(cron)
     fields = cron_str.cron_obj.to_list()
     minute_set, hour_set, day_set, month_set, dow_set = fields
@@ -91,14 +90,6 @@ def _scalar_or_none(field_set: set[int], full_set: set[int], name: str) -> int |
     if len(values) == 1:
         return values[0]
     raise ValueError(f"{name} field must be * or a single value for native scheduling")
-
-
-def _validate_native_cron(value: CronStr) -> CronStr:
-    parse_native_cron(str(value))
-    return value
-
-
-NativeCronStr = Annotated[PortableCronStr, AfterValidator(_validate_native_cron)]
 
 
 def to_schtasks_args(nc: NativeCron) -> list[str]:
