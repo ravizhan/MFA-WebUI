@@ -2,46 +2,40 @@
   <div class="space-y-3 max-w-screen-xl mx-auto">
     <!-- Header stats row -->
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-      <div class="card bg-base-100 shadow-xl">
-        <div class="card-body p-4">
-          <div class="stat-title text-sm opacity-70">{{ t("panel.device") }}</div>
-          <div class="stat-value text-lg flex items-center gap-2">
-            <div
-              class="w-3 h-3 rounded-full"
-              :class="indexStore.Connected ? 'bg-success' : 'bg-error'"
-            />
-            {{
-              indexStore.Connected
-                ? t("panel.connection.connected")
-                : t("panel.connection.disconnected")
-            }}
-          </div>
+      <NCard :bordered="false" content-style="padding: 16px">
+        <div class="text-sm opacity-70">{{ t("panel.device") }}</div>
+        <div class="text-2xl font-bold flex items-center gap-2">
+          <div
+            class="w-3 h-3 rounded-full"
+            :style="{
+              backgroundColor: indexStore.Connected ? 'var(--success-color)' : 'var(--error-color)',
+            }"
+          />
+          {{
+            indexStore.Connected
+              ? t("panel.connection.connected")
+              : t("panel.connection.disconnected")
+          }}
         </div>
-      </div>
-      <div class="card bg-base-100 shadow-xl">
-        <div class="card-body p-4">
-          <div class="stat-title text-sm opacity-70">{{ t("panel.taskList") }}</div>
-          <div class="stat-value text-lg">
-            {{ selectedTaskCount }} {{ t("common.slash") }} {{ configStore.taskList.length }}
-          </div>
+      </NCard>
+      <NCard :bordered="false" content-style="padding: 16px">
+        <div class="text-sm opacity-70">{{ t("panel.taskList") }}</div>
+        <div class="text-2xl font-bold">
+          {{ selectedTaskCount }} {{ t("common.slash") }} {{ configStore.taskList.length }}
         </div>
-      </div>
-      <div class="card bg-base-100 shadow-xl">
-        <div class="card-body p-4">
-          <div class="stat-title text-sm opacity-70">{{ t("nav.routines") }}</div>
-          <div class="stat-value text-lg">
-            {{ schedulerStore.enabledTasks.length }}
-          </div>
+      </NCard>
+      <NCard :bordered="false" content-style="padding: 16px">
+        <div class="text-sm opacity-70">{{ t("nav.routines") }}</div>
+        <div class="text-2xl font-bold">
+          {{ schedulerStore.enabledTasks.length }}
         </div>
-      </div>
-      <div class="card bg-base-100 shadow-xl">
-        <div class="card-body p-4">
-          <div class="stat-title text-sm opacity-70">{{ t("settings.about.version") }}</div>
-          <div class="stat-value text-lg">
-            {{ settingsStore.settings.about.version || "-" }}
-          </div>
+      </NCard>
+      <NCard :bordered="false" content-style="padding: 16px">
+        <div class="text-sm opacity-70">{{ t("settings.about.version") }}</div>
+        <div class="text-2xl font-bold">
+          {{ settingsStore.settings.about.version || "-" }}
         </div>
-      </div>
+      </NCard>
     </div>
 
     <!-- Main grid -->
@@ -49,95 +43,95 @@
       <!-- Left: Device + Resource -->
       <div class="space-y-3">
         <!-- Device Selection Card -->
-        <div class="card bg-base-100 shadow-xl">
-          <div class="card-body p-4">
-            <h2 class="card-title text-base">
-              <Icon icon="mdi:cellphone-link" class="text-primary text-2xl" />
-              {{ t("panel.device") }}
-            </h2>
-            <PanelConnectionTabs
-              mode="device"
-              :selected-controller="deviceStore.selectedController"
-              :selected-device-key="deviceStore.selectedDeviceKey"
-              :play-cover-address="deviceStore.playCoverAddress"
-              :controller-options="deviceStore.controllerOptions"
-              :device-options="deviceStore.deviceOptions"
-              :device-disabled="deviceStore.isDeviceResourceLocked"
-              :resource-disabled="
-                !deviceStore.selectedController || deviceStore.isDeviceResourceLocked
-              "
-              :selected-controller-disabled="deviceStore.selectedControllerDisabled"
-              :is-play-cover="deviceStore.selectedControllerCapability?.type === 'PlayCover'"
-              :resource="deviceStore.resource"
-              :resources-list="deviceStore.resourcesList"
-              @update:selected-controller="deviceStore.selectedController = $event"
-              @update:selected-device-key="deviceStore.selectedDeviceKey = $event"
-              @update:play-cover-address="deviceStore.playCoverAddress = $event"
-              @update:resource="deviceStore.resource = $event"
-              @controller-change="deviceStore.handleControllerChange()"
-              @open-devices="deviceStore.openDevices()"
-              @create-device="deviceStore.createCustomDevice($event)"
-            />
-          </div>
-        </div>
+        <NCard :bordered="false" content-style="padding: 16px">
+          <h2 class="text-base font-semibold flex items-center gap-2">
+            <NIcon size="24" style="color: var(--primary-color)">
+              <PhonePortraitOutline />
+            </NIcon>
+            {{ t("panel.device") }}
+          </h2>
+          <PanelConnectionTabs
+            mode="device"
+            :selected-controller="deviceStore.selectedController"
+            :selected-device-key="deviceStore.selectedDeviceKey"
+            :play-cover-address="deviceStore.playCoverAddress"
+            :controller-options="deviceStore.controllerOptions"
+            :device-options="deviceStore.deviceOptions"
+            :device-disabled="deviceStore.isDeviceResourceLocked"
+            :resource-disabled="
+              !deviceStore.selectedController || deviceStore.isDeviceResourceLocked
+            "
+            :selected-controller-disabled="deviceStore.selectedControllerDisabled"
+            :is-play-cover="deviceStore.selectedControllerCapability?.type === 'PlayCover'"
+            :resource="deviceStore.resource"
+            :resources-list="deviceStore.resourcesList"
+            @update:selected-controller="deviceStore.selectedController = $event"
+            @update:selected-device-key="deviceStore.selectedDeviceKey = $event"
+            @update:play-cover-address="deviceStore.playCoverAddress = $event"
+            @update:resource="deviceStore.resource = $event"
+            @controller-change="deviceStore.handleControllerChange()"
+            @open-devices="deviceStore.openDevices()"
+            @create-device="deviceStore.createCustomDevice($event)"
+          />
+        </NCard>
 
         <!-- Resource Selection Card -->
-        <div class="card bg-base-100 shadow-xl">
-          <div class="card-body p-4">
-            <h2 class="card-title text-base">
-              <Icon icon="mdi:folder-open-outline" class="text-primary text-2xl" />
-              {{ t("panel.resource") }}
-            </h2>
-            <PanelConnectionTabs
-              mode="resource"
-              :selected-controller="deviceStore.selectedController"
-              :selected-device-key="deviceStore.selectedDeviceKey"
-              :play-cover-address="deviceStore.playCoverAddress"
-              :controller-options="deviceStore.controllerOptions"
-              :device-options="deviceStore.deviceOptions"
-              :device-disabled="deviceStore.isDeviceResourceLocked"
-              :resource-disabled="
-                !deviceStore.selectedController || deviceStore.isDeviceResourceLocked
-              "
-              :selected-controller-disabled="deviceStore.selectedControllerDisabled"
-              :is-play-cover="deviceStore.selectedControllerCapability?.type === 'PlayCover'"
-              :resource="deviceStore.resource"
-              :resources-list="deviceStore.resourcesList"
-              @update:resource="deviceStore.resource = $event"
-            />
-          </div>
-        </div>
+        <NCard :bordered="false" content-style="padding: 16px">
+          <h2 class="text-base font-semibold flex items-center gap-2">
+            <NIcon size="24" style="color: var(--primary-color)">
+              <FolderOpenOutline />
+            </NIcon>
+            {{ t("panel.resource") }}
+          </h2>
+          <PanelConnectionTabs
+            mode="resource"
+            :selected-controller="deviceStore.selectedController"
+            :selected-device-key="deviceStore.selectedDeviceKey"
+            :play-cover-address="deviceStore.playCoverAddress"
+            :controller-options="deviceStore.controllerOptions"
+            :device-options="deviceStore.deviceOptions"
+            :device-disabled="deviceStore.isDeviceResourceLocked"
+            :resource-disabled="
+              !deviceStore.selectedController || deviceStore.isDeviceResourceLocked
+            "
+            :selected-controller-disabled="deviceStore.selectedControllerDisabled"
+            :is-play-cover="deviceStore.selectedControllerCapability?.type === 'PlayCover'"
+            :resource="deviceStore.resource"
+            :resources-list="deviceStore.resourcesList"
+            @update:resource="deviceStore.resource = $event"
+          />
+        </NCard>
       </div>
 
       <!-- Right: Recipe Cards + Routine Health -->
       <div class="space-y-3 lg:col-span-2">
-        <div class="card bg-base-100 shadow-xl">
-          <div class="card-body p-4">
-            <h2 class="card-title text-base">
-              <Icon icon="mdi:book-open-variant" class="text-primary text-2xl" />
-              {{ t("panel.preset.title") }}
-            </h2>
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
-              <HomeRecipeCard
-                v-for="preset in recipeCards"
-                :key="preset.name"
-                :preset="preset"
-                @apply="applyPreset"
-              />
-            </div>
+        <NCard :bordered="false" content-style="padding: 16px">
+          <h2 class="text-base font-semibold flex items-center gap-2">
+            <NIcon size="24" style="color: var(--primary-color)">
+              <BookOutline />
+            </NIcon>
+            {{ t("panel.preset.title") }}
+          </h2>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-2">
+            <HomeRecipeCard
+              v-for="preset in recipeCards"
+              :key="preset.name"
+              :preset="preset"
+              @apply="applyPreset"
+            />
           </div>
-        </div>
+        </NCard>
 
         <!-- Routine Health -->
-        <div class="card bg-base-100 shadow-xl">
-          <div class="card-body p-4">
-            <h2 class="card-title text-base">
-              <Icon icon="mdi:heart-pulse" class="text-primary text-2xl" />
-              {{ t("nav.routines") }}
-            </h2>
-            <RoutineHealthCard />
-          </div>
-        </div>
+        <NCard :bordered="false" content-style="padding: 16px">
+          <h2 class="text-base font-semibold flex items-center gap-2">
+            <NIcon size="24" style="color: var(--primary-color)">
+              <PulseOutline />
+            </NIcon>
+            {{ t("nav.routines") }}
+          </h2>
+          <RoutineHealthCard />
+        </NCard>
       </div>
     </div>
   </div>
@@ -147,7 +141,13 @@
 import { computed, onMounted, onUnmounted } from "vue"
 import { useI18n } from "vue-i18n"
 import { useRouter } from "vue-router"
-import { Icon } from "@iconify/vue"
+import { NCard, NIcon } from "naive-ui"
+import {
+  BookOutline,
+  FolderOpenOutline,
+  PhonePortraitOutline,
+  PulseOutline,
+} from "@vicons/ionicons5"
 import HomeRecipeCard from "@/components/home/HomeRecipeCard.vue"
 import RoutineHealthCard from "@/components/home/RoutineHealthCard.vue"
 import PanelConnectionTabs from "@/components/panel/PanelConnectionTabs.vue"

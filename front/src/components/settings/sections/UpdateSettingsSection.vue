@@ -1,83 +1,76 @@
 <template>
   <div class="space-y-0">
     <div
-      class="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-2 md:gap-4 items-center py-4 border-b border-base-200 last:border-b-0"
+      class="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-2 md:gap-4 items-center py-4 border-b last:border-b-0"
+      style="border-color: var(--divider-color)"
     >
       <label class="text-sm font-medium md:text-right">
         {{ t("settings.update.auto") }}
       </label>
-      <div class="flex items-center justify-between">
-        <input
-          type="checkbox"
-          class="toggle toggle-primary"
-          :checked="settings.update.autoUpdate"
-          @change="
-            handleSettingChange('update', 'autoUpdate', ($event.target as HTMLInputElement).checked)
-          "
+      <div class="flex items-center justify-between gap-2">
+        <NSwitch
+          :value="settings.update.autoUpdate"
+          :aria-label="t('settings.update.auto')"
+          @update:value="handleSettingChange('update', 'autoUpdate', $event)"
         />
-        <button class="btn btn-primary btn-sm" :disabled="checkingUpdate" @click="checkForUpdate">
-          <Icon v-if="checkingUpdate" icon="mdi:loading" class="animate-spin mr-1 text-base" />
-          <Icon v-else icon="mdi:update" class="mr-1 text-base" />
+        <NButton type="primary" size="small" :loading="checkingUpdate" @click="checkForUpdate">
+          <template #icon>
+            <NIcon size="18"><ArrowUpCircleOutline /></NIcon>
+          </template>
           {{ t("settings.update.check") }}
-        </button>
+        </NButton>
       </div>
     </div>
 
     <div
-      class="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-2 md:gap-4 items-center py-4 border-b border-base-200 last:border-b-0"
+      class="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-2 md:gap-4 items-center py-4 border-b last:border-b-0"
+      style="border-color: var(--divider-color)"
     >
       <label class="text-sm font-medium md:text-right">
         {{ t("settings.update.channel") }}
       </label>
-      <select
+      <NSelect
         :value="settings.update.updateChannel"
-        class="select select-bordered w-full md:w-auto"
-        @change="handleUpdateChannelChange($event)"
-      >
-        <option value="stable">{{ t("settings.update.channelOptions.stable") }}</option>
-        <option value="beta">{{ t("settings.update.channelOptions.beta") }}</option>
-      </select>
+        class="w-full md:w-auto"
+        :options="updateChannelOptions"
+        @update:value="handleUpdateChannelChange"
+      />
     </div>
 
     <div
-      class="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-2 md:gap-4 items-center py-4 border-b border-base-200 last:border-b-0"
+      class="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-2 md:gap-4 items-center py-4 border-b last:border-b-0"
+      style="border-color: var(--divider-color)"
     >
       <label class="text-sm font-medium md:text-right">
         {{ t("settings.update.proxy") }}
       </label>
-      <input
+      <NInput
         :value="settings.update.proxy"
-        type="text"
-        class="input input-bordered w-full"
+        class="w-full"
         placeholder="http://127.0.0.1:7890"
-        @input="handleSettingChange('update', 'proxy', ($event.target as HTMLInputElement).value)"
+        @update:value="handleSettingChange('update', 'proxy', $event)"
       />
     </div>
 
     <div
       v-if="interfaceStore.interface?.mirrorchyan_rid"
-      class="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-2 md:gap-4 items-center py-4 border-b border-base-200 last:border-b-0"
+      class="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-2 md:gap-4 items-center py-4 border-b last:border-b-0"
+      style="border-color: var(--divider-color)"
     >
       <label class="text-sm font-medium md:text-right">
         {{ t("settings.update.mirrorchyanCdk") }}
       </label>
       <div class="flex gap-2">
-        <input
-          :value="settings.update.mirrorchyanCdk"
+        <NInput
           type="password"
-          class="input input-bordered flex-1"
+          :value="settings.update.mirrorchyanCdk"
+          class="flex-1"
           :placeholder="t('settings.update.mirrorchyanCdkPlaceholder')"
-          @input="
-            handleSettingChange(
-              'update',
-              'mirrorchyanCdk',
-              ($event.target as HTMLInputElement).value,
-            )
-          "
+          @update:value="handleSettingChange('update', 'mirrorchyanCdk', $event)"
         />
-        <a href="https://mirrorchyan.com" target="_blank" class="btn btn-outline">
+        <NButton type="secondary" tag="a" href="https://mirrorchyan.com" target="_blank">
           {{ t("settings.update.mirrorchyanCdkHint") }}
-        </a>
+        </NButton>
       </div>
     </div>
   </div>
@@ -86,7 +79,8 @@
 <script setup lang="ts">
 import { computed, ref } from "vue"
 import { useI18n } from "vue-i18n"
-import { Icon } from "@iconify/vue"
+import { NButton, NIcon, NInput, NSelect, NSwitch } from "naive-ui"
+import { ArrowUpCircleOutline } from "@vicons/ionicons5"
 import { checkUpdateApi, type UpdateInfo } from "@/services/api"
 import { showGlobalMessage } from "@/services/feedback/message"
 import { updateChannelSchema } from "@/schemas/settings"
@@ -108,6 +102,11 @@ const interfaceStore = useInterfaceStore()
 const settings = computed(() => settingsStore.settings)
 const checkingUpdate = ref(false)
 
+const updateChannelOptions = computed(() => [
+  { label: t("settings.update.channelOptions.stable"), value: "stable" },
+  { label: t("settings.update.channelOptions.beta"), value: "beta" },
+])
+
 type EditableCategory = Exclude<keyof SettingsModel, "about">
 type MaybeNullForNumbers<T> = T extends number ? T | null : T
 type EditableSettingValue<
@@ -124,11 +123,8 @@ async function handleSettingChange<K extends EditableCategory, P extends keyof S
   await settingsStore.updateSetting(category, key, value)
 }
 
-function handleUpdateChannelChange(event: Event) {
-  const target = event.target
-  if (!(target instanceof HTMLSelectElement)) return
-  const value = target.value
-  if (!isUpdateChannel(value)) return
+function handleUpdateChannelChange(value: string | number | null) {
+  if (typeof value !== "string" || !isUpdateChannel(value)) return
   void handleSettingChange("update", "updateChannel", value)
 }
 

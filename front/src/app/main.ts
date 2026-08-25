@@ -16,6 +16,11 @@ app.use(pinia)
 app.use(router)
 app.use(i18n)
 
+// naive-ui style anchor: keeps naive styles injected before Tailwind preflight
+const meta = document.createElement("meta")
+meta.name = "naive-ui-style"
+document.head.appendChild(meta)
+
 const indexStore = useIndexStore(pinia)
 const settingsStore = useSettingsStore(pinia)
 

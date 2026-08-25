@@ -1,48 +1,35 @@
 <template>
   <div class="space-y-4 max-w-screen-xl mx-auto">
-    <div class="card bg-base-100 shadow-xl">
-      <div class="card-body">
-        <div class="flex items-center justify-between mb-4">
-          <h2 class="card-title">
-            <Icon icon="mdi:clock-outline" class="text-primary text-2xl" />
-            {{ t("settings.scheduler.title") }}
-          </h2>
-          <button class="btn btn-primary btn-sm" @click="openCreateTaskDialog">
-            <Icon icon="mdi:plus" class="text-base" />
-            {{ t("settings.scheduler.create") }}
-          </button>
-        </div>
+    <NCard :bordered="false" class="shadow-xl">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-base font-semibold flex items-center gap-2">
+          <NIcon size="24" style="color: var(--primary-color)">
+            <TimeOutline />
+          </NIcon>
+          {{ t("settings.scheduler.title") }}
+        </h2>
+        <NButton type="primary" size="small" @click="openCreateTaskDialog">
+          <template #icon>
+            <NIcon size="16"><AddOutline /></NIcon>
+          </template>
+          {{ t("settings.scheduler.create") }}
+        </NButton>
+      </div>
 
-        <div class="tabs tabs-boxed mb-4">
-          <a
-            class="tab"
-            :class="{ 'tab-active': activeTab === 'tasks' }"
-            @click="activeTab = 'tasks'"
-          >
-            {{ t("settings.scheduler.taskList") }}
-          </a>
-          <a
-            class="tab"
-            :class="{ 'tab-active': activeTab === 'history' }"
-            @click="activeTab = 'history'"
-          >
-            {{ t("settings.scheduler.historyTitle") }}
-          </a>
-        </div>
-
-        <div v-if="activeTab === 'tasks'">
+      <NTabs v-model:value="activeTab" type="segment" class="mb-4">
+        <NTabPane name="tasks" :tab="t('settings.scheduler.taskList')">
           <SchedulerTaskList
             :tasks="schedulerStore.tasks"
             @toggle="handleToggleTask"
             @edit="openEditTaskDialog"
             @delete="handleDeleteTask"
           />
-        </div>
-        <div v-else>
+        </NTabPane>
+        <NTabPane name="history" :tab="t('settings.scheduler.historyTitle')">
           <SchedulerExecutionHistory :executions="schedulerStore.executions" />
-        </div>
-      </div>
-    </div>
+        </NTabPane>
+      </NTabs>
+    </NCard>
 
     <SchedulerTaskDialog
       v-model:show="showTaskDialog"
@@ -55,7 +42,8 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue"
 import { useI18n } from "vue-i18n"
-import { Icon } from "@iconify/vue"
+import { NButton, NCard, NIcon, NTabPane, NTabs } from "naive-ui"
+import { AddOutline, TimeOutline } from "@vicons/ionicons5"
 import SchedulerTaskDialog from "@/components/settings/dialogs/SchedulerTaskDialog.vue"
 import SchedulerTaskList from "@/components/settings/scheduler/SchedulerTaskList.vue"
 import SchedulerExecutionHistory from "@/components/settings/scheduler/SchedulerExecutionHistory.vue"

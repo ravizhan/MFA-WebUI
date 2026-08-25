@@ -1,100 +1,60 @@
 <template>
-  <dialog
-    ref="dialogRef"
-    class="modal modal-bottom sm:modal-middle"
-    aria-labelledby="start-conflict-dialog-title"
+  <NModal
+    v-model:show="showDialog"
+    preset="dialog"
+    type="warning"
+    :title="t('settings.scheduler.conflict.title')"
+    :content="conflictContent"
+    :mask-closable="true"
     @close="handleClose"
   >
-    <div class="modal-box w-full max-w-md">
-      <!-- Header -->
-      <header
-        class="border-base-200 flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3 sm:px-5"
-      >
-        <div class="flex min-w-0 items-center gap-2">
-          <Icon icon="mdi:alert-circle" class="text-warning shrink-0 text-xl" aria-hidden="true" />
-          <h3 id="start-conflict-dialog-title" class="truncate text-base font-semibold sm:text-lg">
-            {{ t("settings.scheduler.conflict.title") }}
-          </h3>
-        </div>
-        <button
-          type="button"
-          class="btn btn-ghost btn-sm btn-square shrink-0"
-          :title="t('common.cancel')"
-          :aria-label="t('common.cancel')"
-          @click="handleClose"
-        >
-          <Icon icon="mdi:close" class="text-lg" aria-hidden="true" />
-        </button>
-      </header>
-
-      <!-- Body -->
-      <div class="p-4">
-        <div v-if="conflict?.code === 'update_in_progress'" class="alert alert-info">
-          <Icon icon="mdi:information-outline" class="shrink-0" aria-hidden="true" />
-          <span>{{ t("settings.scheduler.conflict.updateInProgress") }}</span>
-        </div>
-        <div v-else-if="conflict" class="alert alert-warning">
-          <Icon icon="mdi:alert-outline" class="shrink-0" aria-hidden="true" />
-          <span>
-            {{ t("settings.scheduler.conflict.busyMessage", { name: conflict.active_task_name }) }}
-          </span>
-        </div>
-      </div>
-
-      <!-- Footer -->
-      <div class="modal-action">
-        <button
+    <template #action>
+      <NSpace justify="end">
+        <NButton
           v-if="conflict && conflict.code !== 'update_in_progress'"
-          type="button"
-          class="btn btn-warning"
+          type="warning"
           @click="handleStopRestart"
         >
           {{ t("settings.scheduler.conflict.stopAndRestart") }}
-        </button>
-        <button type="button" class="btn" @click="handleClose">
+        </NButton>
+        <NButton @click="handleClose">
           {{ t("common.cancel") }}
-        </button>
-      </div>
-    </div>
-  </dialog>
+        </NButton>
+      </NSpace>
+    </template>
+  </NModal>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, useTemplateRef, watch } from "vue"
+import { computed } from "vue"
 import { useI18n } from "vue-i18n"
 import { useRouter } from "vue-router"
-import { Icon } from "@iconify/vue"
+import { NButton, NModal, NSpace } from "naive-ui"
 import { useDeviceConnectionStore } from "@/stores/device/deviceConnection"
 
 const { t } = useI18n()
 const router = useRouter()
 const deviceStore = useDeviceConnectionStore()
 
-const dialogRef = useTemplateRef<HTMLDialogElement>("dialogRef")
 const conflict = computed(() => deviceStore.startConflict)
-
-function syncVisibility(value: unknown) {
-  const el = dialogRef.value
-  if (!el) {
-    return
-  }
-  if (value) {
-    if (!el.open) {
-      el.showModal()
+const showDialog = computed({
+  get: () => Boolean(conflict.value),
+  set: (value: boolean) => {
+    if (!value) {
+      handleClose()
     }
-    return
+  },
+})
+const conflictContent = computed(() => {
+  if (conflict.value?.code === "update_in_progress") {
+    return t("settings.scheduler.conflict.updateInProgress")
   }
-  if (el.open) {
-    el.close()
+  if (conflict.value) {
+    return t("settings.scheduler.conflict.busyMessage", {
+      name: conflict.value.active_task_name,
+    })
   }
-}
-
-watch(conflict, (value) => syncVisibility(value), { immediate: true })
-
-// 立即 watcher 在 dialogRef 尚未挂载时提前 return；组件重建时若 Pinia 已持有冲突，
-// 需要在此补一次同步，否则对话框永远打不开。
-onMounted(() => {
-  syncVisibility(conflict.value)
+  return ""
 })
 
 function handleClose() {
