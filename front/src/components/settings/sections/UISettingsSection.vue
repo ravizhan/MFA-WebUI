@@ -1,9 +1,6 @@
 <template>
   <div class="space-y-0">
-    <div
-      class="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-2 md:gap-4 items-center py-4 border-b last:border-b-0"
-      style="border-color: var(--divider-color)"
-    >
+    <div class="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-2 md:gap-4 items-center py-4">
       <label class="text-sm font-medium md:text-right">
         {{ t("settings.ui.language") }}
       </label>
@@ -15,10 +12,7 @@
       />
     </div>
 
-    <div
-      class="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-2 md:gap-4 items-center py-4 border-b last:border-b-0"
-      style="border-color: var(--divider-color)"
-    >
+    <div class="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-2 md:gap-4 items-center py-4">
       <label class="text-sm font-medium md:text-right">
         {{ t("settings.ui.darkMode") }}
       </label>

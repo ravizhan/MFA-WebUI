@@ -1,5 +1,5 @@
 <template>
-  <div class="space-y-3 max-w-screen-xl mx-auto">
+  <div class="space-y-3 max-w-7xl mx-auto">
     <!-- Header stats row -->
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
       <NCard :bordered="false" content-style="padding: 16px">
@@ -8,7 +8,7 @@
           <div
             class="w-3 h-3 rounded-full"
             :style="{
-              backgroundColor: indexStore.Connected ? 'var(--success-color)' : 'var(--error-color)',
+              backgroundColor: indexStore.Connected ? 'green' : 'rgb(255,76,76)',
             }"
           />
           {{
@@ -44,8 +44,8 @@
       <div class="space-y-3">
         <!-- Device Selection Card -->
         <NCard :bordered="false" content-style="padding: 16px">
-          <h2 class="text-base font-semibold flex items-center gap-2">
-            <NIcon size="24" style="color: var(--primary-color)">
+          <h2 class="text-base font-semibold flex items-center gap-2 pb-3">
+            <NIcon size="22">
               <PhonePortraitOutline />
             </NIcon>
             {{ t("panel.device") }}
@@ -77,8 +77,8 @@
 
         <!-- Resource Selection Card -->
         <NCard :bordered="false" content-style="padding: 16px">
-          <h2 class="text-base font-semibold flex items-center gap-2">
-            <NIcon size="24" style="color: var(--primary-color)">
+          <h2 class="text-base font-semibold flex items-center gap-2 pb-3">
+            <NIcon size="22">
               <FolderOpenOutline />
             </NIcon>
             {{ t("panel.resource") }}
@@ -106,8 +106,8 @@
       <!-- Right: Recipe Cards + Routine Health -->
       <div class="space-y-3 lg:col-span-2">
         <NCard :bordered="false" content-style="padding: 16px">
-          <h2 class="text-base font-semibold flex items-center gap-2">
-            <NIcon size="24" style="color: var(--primary-color)">
+          <h2 class="text-base font-semibold flex items-center gap-2 pb-3">
+            <NIcon size="22">
               <BookOutline />
             </NIcon>
             {{ t("panel.preset.title") }}
@@ -124,8 +124,8 @@
 
         <!-- Routine Health -->
         <NCard :bordered="false" content-style="padding: 16px">
-          <h2 class="text-base font-semibold flex items-center gap-2">
-            <NIcon size="24" style="color: var(--primary-color)">
+          <h2 class="text-base font-semibold flex items-center gap-2 pb-3">
+            <NIcon size="22">
               <PulseOutline />
             </NIcon>
             {{ t("nav.routines") }}

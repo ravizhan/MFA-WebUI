@@ -4,7 +4,6 @@
     class="rounded-lg overflow-hidden"
     :class="{ 'overflow-y-auto': maxHeight }"
     :style="maxHeight ? { maxHeight } : undefined"
-    style="background: var(--card-color)"
   >
     <VueDraggable v-model="taskListData" :animation="150" ghost-class="ghost">
       <NEl
@@ -15,25 +14,28 @@
         :style="{ borderColor: 'var(--divider-color)', background: 'var(--card-color)' }"
         @click="handleRowClick(item.id)"
       >
-        <NIcon
-          size="18"
-          class="cursor-grab active:cursor-grabbing shrink-0"
-          style="color: var(--text-color-3)"
-        >
+        <NIcon size="20" class="cursor-grab active:cursor-grabbing shrink-0">
           <ReorderThreeOutline />
         </NIcon>
         <NCheckbox
           class="shrink-0"
           :checked="isTaskSelected(item.id)"
+          size="large"
           @click.stop
           @update:checked="handleSelectedChange(item.id, $event)"
         />
         <span class="flex-1 text-base truncate select-none">{{
           resolveTaskLabel(item.id, item.name)
         }}</span>
-        <NButton quaternary circle size="tiny" class="shrink-0" @click.stop="handleConfig(item.id)">
+        <NButton
+          quaternary
+          circle
+          size="small"
+          class="shrink-0"
+          @click.stop="handleConfig(item.id)"
+        >
           <template #icon>
-            <NIcon size="18"><SettingsOutline /></NIcon>
+            <NIcon size="20"><SettingsOutline /></NIcon>
           </template>
         </NButton>
       </NEl>

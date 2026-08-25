@@ -1,35 +1,37 @@
 <template>
-  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-start max-w-screen-xl mx-auto">
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-start max-w-7xl mx-auto">
     <!-- Left: Task list with start/stop -->
-    <NCard :bordered="false" content-style="display: flex; flex-direction: column">
+    <NCard
+      :bordered="false"
+      content-style="display: flex; flex-direction: column; padding-bottom: 0"
+    >
       <template #header>
         <h2 class="text-base mb-3 shrink-0 flex items-center gap-2">
-          <NIcon size="24" style="color: var(--primary-color)">
+          <NIcon size="24">
             <ListOutline />
           </NIcon>
           {{ t("panel.taskList") }}
         </h2>
       </template>
       <PreTaskList v-model="configStore.preTasks" />
-      <div
-        class="mt-3 task-list-scroll rounded-lg border border-solid"
-        style="border-color: var(--divider-color)"
-      >
-        <TaskSelectList
-          :tasks="configStore.taskList"
-          :selected-tasks="selectedTaskIds"
-          :controller-name="deviceStore.selectedControllerName"
-          :resource-name="deviceStore.resource"
-          :hide-incompatible="true"
-          @update:tasks="handleTasksUpdate"
-          @update:selected-tasks="handleSelectedTasksUpdate"
-          @config="handleConfigTask"
-        />
-      </div>
-      <div class="flex justify-center gap-2 pt-3 shrink-0">
+      <NCard size="small" content-style="padding: 0">
+        <div class="mt-3 task-list-scroll rounded-lg">
+          <TaskSelectList
+            :tasks="configStore.taskList"
+            :selected-tasks="selectedTaskIds"
+            :controller-name="deviceStore.selectedControllerName"
+            :resource-name="deviceStore.resource"
+            :hide-incompatible="true"
+            @update:tasks="handleTasksUpdate"
+            @update:selected-tasks="handleSelectedTasksUpdate"
+            @config="handleConfigTask"
+          />
+        </div>
+      </NCard>
+      <div class="flex justify-center gap-2 pt-4 shrink-0">
         <NButton
           type="primary"
-          class="min-w-[8rem]"
+          class="min-w-32"
           :disabled="indexStore.TaskRunning"
           @click="handleStart"
         >
@@ -40,7 +42,7 @@
         </NButton>
         <NButton
           type="warning"
-          class="min-w-[8rem]"
+          class="min-w-32"
           :disabled="!indexStore.TaskRunning"
           @click="handleStop"
         >
@@ -50,7 +52,7 @@
           {{ t("panel.stop") }}
         </NButton>
       </div>
-      <div class="text-center shrink-0">
+      <div class="text-center shrink-0 py-2">
         <NButton quaternary size="small" type="warning" @click="deviceStore.resetConfig()">
           {{ t("panel.resetConfig") }}
         </NButton>

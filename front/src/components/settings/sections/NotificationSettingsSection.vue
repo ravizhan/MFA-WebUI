@@ -4,7 +4,7 @@
     <section class="space-y-3">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <div class="flex min-w-0 items-center gap-2">
-          <NIcon size="18" style="color: var(--primary-color)" aria-hidden="true">
+          <NIcon size="18" aria-hidden="true">
             <NotificationsOutline />
           </NIcon>
           <h3 class="text-sm font-semibold">{{ t("settings.notification.sections.channels") }}</h3>
@@ -26,18 +26,13 @@
 
       <div class="flex flex-wrap gap-2">
         <NCheckbox
-          class="rounded-lg border px-3 py-2 transition-colors hover:border-primary/40"
+          class="rounded-lg px-3 py-2 transition-colors"
           :class="{ 'bg-primary/5': settings.notification.systemNotification }"
-          :style="{
-            borderColor: settings.notification.systemNotification
-              ? 'var(--primary-color)'
-              : 'var(--border-color)',
-          }"
           :checked="settings.notification.systemNotification"
           @update:checked="handleSettingChange('notification', 'systemNotification', $event)"
         >
           <span class="flex items-center gap-2">
-            <NIcon size="18" style="color: var(--text-color-2)" aria-hidden="true">
+            <NIcon size="18" aria-hidden="true">
               <DesktopOutline />
             </NIcon>
             <span class="text-sm">{{ t("settings.notification.system") }}</span>
@@ -45,18 +40,13 @@
         </NCheckbox>
 
         <NCheckbox
-          class="rounded-lg border px-3 py-2 transition-colors hover:border-primary/40"
+          class="rounded-lg px-3 py-2 transition-colors"
           :class="{ 'bg-primary/5': settings.notification.browserNotification }"
-          :style="{
-            borderColor: settings.notification.browserNotification
-              ? 'var(--primary-color)'
-              : 'var(--border-color)',
-          }"
           :checked="settings.notification.browserNotification"
           @update:checked="handleBrowserNotificationChange"
         >
           <span class="flex items-center gap-2">
-            <NIcon size="18" style="color: var(--text-color-2)" aria-hidden="true">
+            <NIcon size="18" aria-hidden="true">
               <GlobeOutline />
             </NIcon>
             <span class="text-sm">{{ t("settings.notification.browser") }}</span>
@@ -64,18 +54,13 @@
         </NCheckbox>
 
         <NCheckbox
-          class="rounded-lg border px-3 py-2 transition-colors hover:border-primary/40"
+          class="rounded-lg px-3 py-2 transition-colors"
           :class="{ 'bg-primary/5': settings.notification.externalNotification }"
-          :style="{
-            borderColor: settings.notification.externalNotification
-              ? 'var(--primary-color)'
-              : 'var(--border-color)',
-          }"
           :checked="settings.notification.externalNotification"
           @update:checked="handleSettingChange('notification', 'externalNotification', $event)"
         >
           <span class="flex items-center gap-2">
-            <NIcon size="18" style="color: var(--text-color-2)" aria-hidden="true">
+            <NIcon size="18" aria-hidden="true">
               <LinkOutline />
             </NIcon>
             <span class="text-sm">{{ t("settings.notification.external") }}</span>
@@ -85,13 +70,9 @@
     </section>
 
     <!-- External connection (collapses when off) -->
-    <section
-      v-if="settings.notification.externalNotification"
-      class="space-y-4 border-t pt-5"
-      style="border-color: var(--divider-color)"
-    >
+    <section v-if="settings.notification.externalNotification" class="space-y-4 pt-5">
       <div class="flex items-center gap-2">
-        <NIcon size="18" style="color: var(--primary-color)" aria-hidden="true">
+        <NIcon size="18" aria-hidden="true">
           <LinkOutline />
         </NIcon>
         <h3 class="text-sm font-semibold">
@@ -193,20 +174,17 @@
     </section>
 
     <!-- Trigger timing -->
-    <section class="space-y-1 border-t pt-5" style="border-color: var(--divider-color)">
+    <section class="space-y-1 pt-5">
       <div class="mb-3 flex items-center gap-2">
         <NBadge dot>
-          <NIcon size="18" style="color: var(--primary-color)" aria-hidden="true">
+          <NIcon size="18" aria-hidden="true">
             <NotificationsOutline />
           </NIcon>
         </NBadge>
         <h3 class="text-sm font-semibold">{{ t("settings.notification.sections.triggers") }}</h3>
       </div>
 
-      <div
-        class="grid grid-cols-1 items-center gap-2 border-b py-3 last:border-b-0 md:grid-cols-[1fr_auto] md:gap-4"
-        style="border-color: var(--divider-color)"
-      >
+      <div class="grid grid-cols-1 items-center gap-2 py-3 md:grid-cols-[1fr_auto] md:gap-4">
         <label class="text-sm" for="notify-on-complete">
           {{ t("settings.notification.onComplete") }}
         </label>
@@ -218,10 +196,7 @@
         />
       </div>
 
-      <div
-        class="grid grid-cols-1 items-center gap-2 border-b py-3 last:border-b-0 md:grid-cols-[1fr_auto] md:gap-4"
-        style="border-color: var(--divider-color)"
-      >
+      <div class="grid grid-cols-1 items-center gap-2 py-3 md:grid-cols-[1fr_auto] md:gap-4">
         <label class="text-sm" for="notify-on-error">
           {{ t("settings.notification.onError") }}
         </label>

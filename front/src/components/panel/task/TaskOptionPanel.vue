@@ -1,5 +1,5 @@
 <template>
-  <div class="task-option-panel">
+  <NCard :bordered="false" content-style="padding: 0.5rem">
     <div v-if="showHeader && currentTaskName" class="text-center mb-2">
       <NTag type="primary" size="large">{{ headerLabel }}{{ currentTaskName }}</NTag>
     </div>
@@ -10,12 +10,7 @@
         <p>{{ emptyText }}</p>
       </div>
       <div v-else>
-        <NEl
-          v-if="taskOptions.length > 0"
-          tag="div"
-          class="rounded-lg overflow-hidden"
-          style="background: var(--card-color)"
-        >
+        <NEl v-if="taskOptions.length > 0" tag="div" class="rounded-lg overflow-hidden">
           <OptionItem
             v-for="optName in taskOptions"
             :key="optName"
@@ -29,13 +24,13 @@
         </div>
       </div>
     </div>
-  </div>
+  </NCard>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from "vue"
 import { useI18n } from "vue-i18n"
-import { NEl, NIcon, NTag } from "naive-ui"
+import { NCard, NEl, NIcon, NTag } from "naive-ui"
 import { FileTrayOutline, SettingsOutline } from "@vicons/ionicons5"
 import { useInterfaceStore } from "@/stores"
 import type { TaskOptionsByTask } from "@/types/schedulerModel"
@@ -103,9 +98,3 @@ const taskOptions = computed(() => {
   return task?.option || []
 })
 </script>
-
-<style scoped>
-.task-option-panel {
-  min-height: 50px;
-}
-</style>

@@ -1,19 +1,12 @@
 <template>
-  <!-- Wrapper carries responsive hiding + positioning: naive's .n-card sets
-       display:flex (unlayered, beats Tailwind's layered lg:hidden), so the
-       breakpoint class must live on a plain div, not the NCard itself. -->
   <div
     class="lg:hidden fixed bottom-4 left-1/2 -translate-x-1/2 z-40"
     style="padding-bottom: calc(0.5rem + env(safe-area-inset-bottom))"
   >
     <NCard
-      size="small"
       :bordered="false"
-      content-style="display:flex;align-items:center;gap:2px;padding:6px 6px;width:max-content"
-      style="
-        background: color-mix(in srgb, var(--card-color) 90%, transparent);
-        backdrop-filter: blur(8px);
-      "
+      content-style="display:flex;align-items:center;gap:2px;padding:4px;width:max-content"
+      style="background: transparent; backdrop-filter: blur(5px)"
     >
       <NButton
         v-for="item in items"
@@ -21,12 +14,12 @@
         quaternary
         :focusable="false"
         :type="activeKey === item.key ? 'primary' : 'default'"
-        style="padding: 4px 6px"
+        style="padding: 2px 4px; --n-color-hover: rgba(46, 51, 56, 0.2); margin: 2px"
         @click="emit('select', item)"
       >
-        <div class="flex flex-col items-center gap-0.5 min-w-[2.75rem]">
+        <div class="flex flex-col items-center gap-0.5 min-w-11">
           <NIcon size="20"><component :is="item.iconComponent" /></NIcon>
-          <span class="text-[10px] truncate">{{ item.label }}</span>
+          <span class="text-[12px] truncate">{{ item.label }}</span>
         </div>
       </NButton>
     </NCard>

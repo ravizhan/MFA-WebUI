@@ -5,7 +5,6 @@
       :options="controllerOptions"
       :placeholder="t('panel.selectDeviceType')"
       :disabled="deviceDisabled"
-      size="small"
       class="flex-1 min-w-[8rem]"
       @update:value="handleControllerUpdate"
     />
@@ -14,7 +13,6 @@
       :value="playCoverAddress"
       :placeholder="t('panel.playcoverAddress')"
       :disabled="deviceDisabled"
-      size="small"
       class="flex-1 min-w-[10rem]"
       @update:value="emit('update:play-cover-address', $event)"
     />
@@ -26,7 +24,6 @@
       :options="deviceOptions"
       :placeholder="t('panel.selectDevice')"
       :disabled="!selectedController || selectedControllerDisabled || deviceDisabled"
-      size="small"
       class="flex-1 min-w-[10rem]"
       :on-create="(label: string) => ({ label, value: label })"
       @update:value="handleDeviceSelect"
@@ -41,7 +38,6 @@
       :options="resourcesList"
       :placeholder="t('panel.selectResource')"
       :disabled="resourceDisabled"
-      size="small"
       class="flex-1 min-w-[12rem]"
       @update:value="emit('update:resource', $event)"
     />
@@ -61,7 +57,6 @@
           :options="controllerOptions"
           :placeholder="t('panel.selectDeviceType')"
           :disabled="deviceDisabled"
-          size="small"
           class="flex-1 min-w-[8rem]"
           @update:value="handleControllerUpdate"
         />
@@ -70,7 +65,6 @@
           :value="playCoverAddress"
           :placeholder="t('panel.playcoverAddress')"
           :disabled="deviceDisabled"
-          size="small"
           class="flex-1 min-w-[10rem]"
           @update:value="emit('update:play-cover-address', $event)"
         />
@@ -82,7 +76,6 @@
           :options="deviceOptions"
           :placeholder="t('panel.selectDevice')"
           :disabled="!selectedController || selectedControllerDisabled || deviceDisabled"
-          size="small"
           class="flex-1 min-w-[10rem]"
           :on-create="(label: string) => ({ label, value: label })"
           @update:value="handleDeviceSelect"
@@ -96,7 +89,6 @@
           :options="resourcesList"
           :placeholder="t('panel.selectResource')"
           :disabled="resourceDisabled"
-          size="small"
           class="flex-1 min-w-[12rem]"
           @update:value="emit('update:resource', $event)"
         />

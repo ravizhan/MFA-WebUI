@@ -1,9 +1,6 @@
 <template>
   <div class="space-y-0">
-    <div
-      class="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-2 md:gap-4 items-center py-4 border-b last:border-b-0"
-      style="border-color: var(--divider-color)"
-    >
+    <div class="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-2 md:gap-4 items-center py-4">
       <label class="text-sm font-medium md:text-right">
         {{ t("settings.update.auto") }}
       </label>
@@ -22,10 +19,7 @@
       </div>
     </div>
 
-    <div
-      class="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-2 md:gap-4 items-center py-4 border-b last:border-b-0"
-      style="border-color: var(--divider-color)"
-    >
+    <div class="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-2 md:gap-4 items-center py-4">
       <label class="text-sm font-medium md:text-right">
         {{ t("settings.update.channel") }}
       </label>
@@ -37,10 +31,7 @@
       />
     </div>
 
-    <div
-      class="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-2 md:gap-4 items-center py-4 border-b last:border-b-0"
-      style="border-color: var(--divider-color)"
-    >
+    <div class="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-2 md:gap-4 items-center py-4">
       <label class="text-sm font-medium md:text-right">
         {{ t("settings.update.proxy") }}
       </label>
@@ -54,8 +45,7 @@
 
     <div
       v-if="interfaceStore.interface?.mirrorchyan_rid"
-      class="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-2 md:gap-4 items-center py-4 border-b last:border-b-0"
-      style="border-color: var(--divider-color)"
+      class="grid grid-cols-1 md:grid-cols-[140px_1fr] gap-2 md:gap-4 items-center py-4"
     >
       <label class="text-sm font-medium md:text-right">
         {{ t("settings.update.mirrorchyanCdk") }}
