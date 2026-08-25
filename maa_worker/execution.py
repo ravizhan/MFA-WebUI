@@ -94,6 +94,16 @@ def _to_iso(dt: Optional[datetime]) -> Optional[str]:
     return dt.isoformat()
 
 
+async def _record_prestart_cancel(db_path: Path, run_id: str) -> None:
+    """fire-and-forget 落库取消记录（与 _record_skip 一致，sqlite I/O 移出事件循环）。"""
+    try:
+        await asyncio.to_thread(
+            finish_execution, db_path, run_id, "stopped", "运行被取消"
+        )
+    except Exception as e:
+        logger.error(f"补记取消记录失败: {e}")
+
+
 def add_execution(path: Path, execution: TaskExecution) -> None:
     """写入执行记录并裁剪超量历史"""
     with sqlite3.connect(path) as db:
@@ -285,12 +295,9 @@ async def submit_manual(state: AppState, payload: ManualStartPayload) -> Admissi
             ):
                 state.active_run = None
                 state.active_execution_task = None
-                try:
-                    finish_execution(
-                        state.scheduler_db_path, run_id, "stopped", "运行被取消"
-                    )
-                except Exception as e:
-                    logger.error(f"补记取消记录失败: {e}")
+                asyncio.get_running_loop().create_task(
+                    _record_prestart_cancel(state.scheduler_db_path, run_id)
+                )
 
         state.active_execution_task.add_done_callback(_guard_prestart_cancel)
     except BaseException:
@@ -385,12 +392,9 @@ async def submit_scheduled(
             ):
                 state.active_run = None
                 state.active_execution_task = None
-                try:
-                    finish_execution(
-                        state.scheduler_db_path, run_id, "stopped", "运行被取消"
-                    )
-                except Exception as e:
-                    logger.error(f"补记取消记录失败: {e}")
+                asyncio.get_running_loop().create_task(
+                    _record_prestart_cancel(state.scheduler_db_path, run_id)
+                )
 
         state.active_execution_task.add_done_callback(_guard_prestart_cancel)
     except BaseException:
