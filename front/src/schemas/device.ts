@@ -1,81 +1,75 @@
 import { z } from "zod"
 
-const ipv4Segment = z
+const integerStringSchema = z.string().regex(z.regexes.integer)
+const portSchema = integerStringSchema.pipe(z.coerce.number<string>().int().min(1).max(65535))
+const positiveIntegerSchema = z
   .string()
-  .regex(/^\d{1,3}$/, "invalid IPv4 segment")
-  .refine((val) => {
-    const n = Number(val)
-    return n >= 0 && n <= 255
-  }, "IPv4 segment out of range")
+  .trim()
+  .pipe(integerStringSchema)
+  .pipe(z.coerce.number<string>().int().positive().safe())
+  .transform(String)
 
-/** IPv4:port address schema with canonicalization. */
-export const ipv4PortSchema = z
+/** IPv4 or hostname plus TCP port, normalized to host:port. */
+export const hostPortSchema = z
   .string()
   .trim()
   .min(1, "address must not be empty")
-  .refine((val) => !val.includes("://") && !val.includes("/"), {
-    message: "address must be IPv4:port, not a URL",
-  })
-  .refine(
-    (val) => {
-      const idx = val.lastIndexOf(":")
-      if (idx <= 0) return false
-      const host = val.slice(0, idx)
-      const port = val.slice(idx + 1)
-      // Check host is valid IPv4
-      const parts = host.split(".")
-      if (parts.length !== 4) return false
-      if (parts.some((part) => !ipv4Segment.safeParse(part).success)) return false
-      // Check port
-      if (!/^\d+$/.test(port)) return false
-      const p = Number(port)
-      return p >= 1 && p <= 65535
-    },
-    { message: "address must be in IPv4:port format" },
-  )
-  .transform((val) => {
-    const idx = val.lastIndexOf(":")
-    const host = val.slice(0, idx)
-    const port = Number(val.slice(idx + 1))
-    // Canonicalize IPv4 (remove leading zeros)
-    const canonical = host
-      .split(".")
-      .map((s) => String(Number(s)))
-      .join(".")
-    return `${canonical}:${port}`
+  .transform((address, ctx) => {
+    const separator = address.lastIndexOf(":")
+    const rawHost = address.slice(0, separator)
+    const ipv4Segments = rawHost.split(".")
+    const hostResult =
+      ipv4Segments.length === 4 &&
+      ipv4Segments.every((segment) => integerStringSchema.safeParse(segment).success)
+        ? z.ipv4().safeParse(ipv4Segments.map(Number).join("."))
+        : z.hostname().safeParse(rawHost)
+    const portResult = portSchema.safeParse(address.slice(separator + 1))
+
+    if (separator <= 0 || !hostResult.success || !portResult.success) {
+      ctx.issues.push({
+        code: "custom",
+        input: address,
+        message: "address must be a valid host:port",
+      })
+      return z.NEVER
+    }
+
+    return `${hostResult.data}:${portResult.data}`
   })
 
-export type Ipv4Port = z.output<typeof ipv4PortSchema>
+export type HostPort = z.output<typeof hostPortSchema>
 
-const win32AddressSchema = z
-  .string()
-  .trim()
-  .regex(/^\d+$/, "Win32 address must be a positive integer")
-  .refine((val) => Number(val) > 0, "hWnd must be positive")
-  .transform((val) => String(Number(val)))
+const win32AddressSchema = positiveIntegerSchema
 
 const gamepadAddressSchema = z
   .string()
   .trim()
-  .regex(/^\d+\|[01]$/, "Gamepad address must be hWnd|type (0 or 1)")
-  .refine((val) => {
-    const [hwnd] = val.split("|")
-    return Number(hwnd) > 0
-  }, "Gamepad hWnd must be positive")
-  .transform((val) => {
-    const [hwnd, type] = val.split("|")
-    return `${Number(hwnd)}|${type}`
+  .transform((address, ctx) => {
+    const [rawHwnd, rawType, extra] = address.split("|")
+    const hwndResult = positiveIntegerSchema.safeParse(rawHwnd)
+    const typeResult = z.enum(["0", "1"]).safeParse(rawType)
+
+    if (extra !== undefined || !hwndResult.success || !typeResult.success) {
+      ctx.issues.push({
+        code: "custom",
+        input: address,
+        message: "Gamepad address must be hWnd|type (0 or 1)",
+      })
+      return z.NEVER
+    }
+
+    return `${hwndResult.data}|${typeResult.data}`
   })
 
 /** Custom (user-entered) device address: strict validation. */
 export const customDeviceAddressSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("Adb"),
-    address: ipv4PortSchema,
+    address: hostPortSchema,
   }),
   z.object({
     type: z.literal("PlayCover"),
-    address: ipv4PortSchema,
+    address: hostPortSchema,
   }),
   z.object({
     type: z.literal("Win32"),
@@ -97,7 +91,7 @@ export const runtimeDeviceAddressSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("PlayCover"),
-    address: ipv4PortSchema,
+    address: hostPortSchema,
   }),
   z.object({
     type: z.literal("Win32"),
@@ -112,6 +106,6 @@ export const runtimeDeviceAddressSchema = z.discriminatedUnion("type", [
 export type RuntimeDeviceAddress = z.output<typeof runtimeDeviceAddressSchema>
 
 /** PlayCover address schema for connection store. */
-export const playCoverAddressSchema = ipv4PortSchema
+export const playCoverAddressSchema = hostPortSchema
 
 export type PlayCoverAddress = z.output<typeof playCoverAddressSchema>

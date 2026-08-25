@@ -2,58 +2,58 @@ import { describe, expect, it } from "vitest"
 
 import {
   customDeviceAddressSchema,
-  ipv4PortSchema,
+  hostPortSchema,
   playCoverAddressSchema,
   runtimeDeviceAddressSchema,
 } from "./device"
 
-describe("ipv4PortSchema", () => {
+describe("hostPortSchema", () => {
   it("accepts valid IPv4:port", () => {
-    expect(ipv4PortSchema.parse("192.168.1.1:5555")).toBe("192.168.1.1:5555")
+    expect(hostPortSchema.parse("192.168.1.1:5555")).toBe("192.168.1.1:5555")
   })
 
   it("trims whitespace", () => {
-    expect(ipv4PortSchema.parse(" 10.0.0.1:5555 ")).toBe("10.0.0.1:5555")
+    expect(hostPortSchema.parse(" 10.0.0.1:5555 ")).toBe("10.0.0.1:5555")
   })
 
-  it("canonicalizes leading zeros", () => {
-    expect(ipv4PortSchema.parse("192.168.001.001:5555")).toBe("192.168.1.1:5555")
+  it("canonicalizes zero-padded IPv4 and port", () => {
+    expect(hostPortSchema.parse("192.168.001.001:05555")).toBe("192.168.1.1:5555")
+  })
+
+  it("accepts a valid hostname", () => {
+    expect(hostPortSchema.parse("example.com:5555")).toBe("example.com:5555")
   })
 
   it("rejects empty", () => {
-    expect(ipv4PortSchema.safeParse("").success).toBe(false)
-  })
-
-  it("rejects hostname", () => {
-    expect(ipv4PortSchema.safeParse("example.com:5555").success).toBe(false)
+    expect(hostPortSchema.safeParse("").success).toBe(false)
   })
 
   it("rejects IPv6", () => {
-    expect(ipv4PortSchema.safeParse("::1:5555").success).toBe(false)
+    expect(hostPortSchema.safeParse("::1:5555").success).toBe(false)
   })
 
   it("rejects URL", () => {
-    expect(ipv4PortSchema.safeParse("http://192.168.1.1:5555").success).toBe(false)
+    expect(hostPortSchema.safeParse("http://192.168.1.1:5555").success).toBe(false)
   })
 
   it("rejects missing port", () => {
-    expect(ipv4PortSchema.safeParse("192.168.1.1").success).toBe(false)
+    expect(hostPortSchema.safeParse("192.168.1.1").success).toBe(false)
   })
 
   it("rejects port 0", () => {
-    expect(ipv4PortSchema.safeParse("192.168.1.1:0").success).toBe(false)
+    expect(hostPortSchema.safeParse("192.168.1.1:0").success).toBe(false)
   })
 
   it("rejects port 65536", () => {
-    expect(ipv4PortSchema.safeParse("192.168.1.1:65536").success).toBe(false)
+    expect(hostPortSchema.safeParse("192.168.1.1:65536").success).toBe(false)
   })
 
   it("accepts port 1", () => {
-    expect(ipv4PortSchema.parse("192.168.1.1:1")).toBe("192.168.1.1:1")
+    expect(hostPortSchema.parse("192.168.1.1:1")).toBe("192.168.1.1:1")
   })
 
   it("accepts port 65535", () => {
-    expect(ipv4PortSchema.parse("192.168.1.1:65535")).toBe("192.168.1.1:65535")
+    expect(hostPortSchema.parse("192.168.1.1:65535")).toBe("192.168.1.1:65535")
   })
 })
 
@@ -62,6 +62,14 @@ describe("customDeviceAddressSchema", () => {
     const r = customDeviceAddressSchema.safeParse({ type: "Adb", address: "10.0.0.1:5555" })
     expect(r.success).toBe(true)
     if (r.success) expect(r.data.address).toBe("10.0.0.1:5555")
+  })
+
+  it("accepts Adb with hostname", () => {
+    const result = customDeviceAddressSchema.parse({
+      type: "Adb",
+      address: "android-host.local:5555",
+    })
+    expect(result.address).toBe("android-host.local:5555")
   })
 
   it("rejects Adb with serial", () => {
@@ -76,10 +84,17 @@ describe("customDeviceAddressSchema", () => {
     ).toBe(true)
   })
 
+  it("accepts PlayCover with hostname", () => {
+    expect(
+      customDeviceAddressSchema.parse({ type: "PlayCover", address: "mac.local:1717" }),
+    ).toEqual({ type: "PlayCover", address: "mac.local:1717" })
+  })
+
   it("accepts Win32 with positive integer", () => {
-    const r = customDeviceAddressSchema.safeParse({ type: "Win32", address: "12345" })
-    expect(r.success).toBe(true)
-    if (r.success) expect(r.data.address).toBe("12345")
+    expect(customDeviceAddressSchema.parse({ type: "Win32", address: "0012345" })).toEqual({
+      type: "Win32",
+      address: "12345",
+    })
   })
 
   it("rejects Win32 with zero", () => {
@@ -87,9 +102,10 @@ describe("customDeviceAddressSchema", () => {
   })
 
   it("accepts Gamepad with hWnd|0", () => {
-    const r = customDeviceAddressSchema.safeParse({ type: "Gamepad", address: "12345|0" })
-    expect(r.success).toBe(true)
-    if (r.success) expect(r.data.address).toBe("12345|0")
+    expect(customDeviceAddressSchema.parse({ type: "Gamepad", address: "0012345|0" })).toEqual({
+      type: "Gamepad",
+      address: "12345|0",
+    })
   })
 
   it("accepts Gamepad with hWnd|1", () => {
