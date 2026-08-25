@@ -1,22 +1,15 @@
-"""严格的原生 cron 解析与跨平台转换（纯函数，无 I/O）。
+"""原生 cron 解析与跨平台转换（纯函数，无 I/O）。
 
-供系统级调度（schtasks / launchctl / crontab）使用的 cron 子集：
-5 个字段、单值语义（不支持列表/范围/步进），分钟必须具体。
+输入已由 ``PortableCronStr`` 统一校验为严格子集（5 字段、单值或 *、
+分钟必须具体），此处只做结构提取与 OS 格式转换。
 """
 
 from dataclasses import dataclass
 
-# 字段中文名，用于报错信息
-_FIELD_NAMES = ("分钟", "小时", "日", "月", "星期")
+from pydantic import TypeAdapter
+from pydantic_extra_types.cron import CronStr
 
-# 各字段取值范围
-_FIELD_RANGES = (
-    (0, 59),  # 分钟
-    (0, 23),  # 小时
-    (1, 31),  # 日
-    (1, 12),  # 月
-    (0, 7),  # 星期（Unix 约定，0 和 7 均为周日）
-)
+from models.scheduler import PortableCronStr
 
 # Unix 星期（0=周日）→ schtasks 三字母英文缩写
 _SCHTASKS_DOW = ("SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT")
@@ -53,75 +46,50 @@ class NativeCron:
     dow: int | None
 
 
+_adapter = TypeAdapter(PortableCronStr)
+
+
 def parse_native_cron(cron: str) -> NativeCron:
-    """解析严格 cron 表达式（5 字段，单值语义），失败抛出 ValueError。
+    """将已校验的严格 cron 表达式解析为 NativeCron 结构体。"""
+    cron_str = _adapter.validate_python(cron)
+    fields = cron_str.cron_obj.to_list()
+    minute_set, hour_set, day_set, month_set, dow_set = fields
 
-    规则：
-    - 必须恰好 5 个空白分隔字段：分钟 小时 日 月 星期。
-    - 每个字段为 ``*`` 或单个具体整数（分钟 0-59、小时 0-23、日 1-31、月 1-12、星期 0-7）；
-      不支持列表（``1,2``）、范围（``1-5``）、步进（``*/2``）。
-    - 分钟必须为具体数值。
-    - 日与星期不得同时受限。
-    - 小时为 ``*`` 时，日、月、星期必须全为 ``*``。
-    - 月受限时，日必须同时受限。
-    - 星期 7 归一化为 0。
-    """
-    fields = cron.split()
-    if len(fields) != 5:
-        raise ValueError(
-            f"cron 表达式必须包含 5 个字段（分钟 小时 日 月 星期），"
-            f"实际为 {len(fields)} 个：{cron!r}"
-        )
+    full_minute = set(range(60))
+    full_hour = set(range(24))
+    full_day = set(range(1, 32))
+    full_month = set(range(1, 13))
+    full_dow = set(range(7))
 
-    values: list[int | None] = []
-    for index, field in enumerate(fields):
-        if field == "*":
-            values.append(None)
-            continue
-        # 与前端 /^[0-9]+$/ 对齐：仅接受 ASCII 数字（isdigit 会放过全角等 Unicode 数字）
-        if not field.isascii() or not field.isdigit():
-            raise ValueError(
-                f"{_FIELD_NAMES[index]}字段无效：{field!r}（仅支持 * 或单个具体数值）"
-            )
-        value = int(field)
-        low, high = _FIELD_RANGES[index]
-        if not low <= value <= high:
-            raise ValueError(
-                f"{_FIELD_NAMES[index]}字段超出范围：{value}（允许 {low}-{high}）"
-            )
-        values.append(value)
-
-    minute, hour, day, month, dow = values
+    minute = _scalar_or_none(minute_set, full_minute, "minute")
+    hour = _scalar_or_none(hour_set, full_hour, "hour")
+    day = _scalar_or_none(day_set, full_day, "day")
+    month = _scalar_or_none(month_set, full_month, "month")
+    dow = _scalar_or_none(dow_set, full_dow, "dow")
 
     if minute is None:
-        raise ValueError("分钟字段必须为具体数值，不能为 *（避免每小时重复触发）")
-
+        raise ValueError("minute field must be a single value, not *")
     if day is not None and dow is not None:
-        raise ValueError("日与星期字段不得同时受限（cron 语义冲突）")
-
+        raise ValueError("day and day-of-week cannot both be restricted")
     if hour is None and (day is not None or month is not None or dow is not None):
-        raise ValueError("小时为 * 时，日、月、星期必须全部为 *")
-
+        raise ValueError("when hour is *, day/month/dow must all be *")
     if month is not None and day is None:
-        raise ValueError("月字段受限时，日字段必须同时受限")
-
-    # 显式月+日组合必须真实存在：schtasks /M 指定月份时拒绝该月没有的日期
+        raise ValueError("when month is restricted, day must also be restricted")
     if month is not None and day is not None:
-        _MAX_DAY = (31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
-        if day > _MAX_DAY[month - 1]:
-            raise ValueError(f"{month} 月没有 {day} 日，无法注册系统级唤醒")
+        max_day = (31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
+        if day > max_day[month - 1]:
+            raise ValueError(f"month {month} has no day {day}")
 
-    # 星期 7（=周日）归一化为 0
-    if dow == 7:
-        dow = 0
+    return NativeCron(minute=minute, hour=hour, day=day, month=month, dow=dow)
 
-    return NativeCron(
-        minute=minute,
-        hour=hour,
-        day=day,
-        month=month,
-        dow=dow,
-    )
+
+def _scalar_or_none(field_set: set[int], full_set: set[int], name: str) -> int | None:
+    values = sorted(field_set)
+    if set(values) == full_set:
+        return None
+    if len(values) == 1:
+        return values[0]
+    raise ValueError(f"{name} field must be * or a single value for native scheduling")
 
 
 def to_schtasks_args(nc: NativeCron) -> list[str]:

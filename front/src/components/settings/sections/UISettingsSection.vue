@@ -38,6 +38,7 @@
 <script setup lang="ts">
 import { computed } from "vue"
 import { useI18n } from "vue-i18n"
+import { darkModeSchema, localeSchema } from "@/schemas/settings"
 import { useSettingsStore } from "@/stores"
 import type { SettingsModel } from "@/types/settingsModel"
 
@@ -56,20 +57,16 @@ async function handleSettingChange<K extends EditableCategory, P extends keyof S
 }
 
 function handleLocaleChange(val: string) {
-  locale.value = val
-  localStorage.setItem("locale", val)
+  const parseResult = localeSchema.safeParse(val)
+  if (!parseResult.success) return
+  locale.value = parseResult.data
+  localStorage.setItem("locale", parseResult.data)
   window.location.reload()
 }
 
 function handleDarkModeChange(val: string) {
-  if (val === "auto") {
-    void handleSettingChange("ui", "darkMode", "auto")
-    return
-  }
-  if (val === "true") {
-    void handleSettingChange("ui", "darkMode", true)
-    return
-  }
-  void handleSettingChange("ui", "darkMode", false)
+  const parseResult = darkModeSchema.safeParse(val === "auto" ? "auto" : val === "true")
+  if (!parseResult.success) return
+  void handleSettingChange("ui", "darkMode", parseResult.data)
 }
 </script>

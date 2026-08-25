@@ -16,6 +16,7 @@ from pathlib import Path
 import httpx
 import uvicorn
 from fastapi import FastAPI, Query, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -281,6 +282,31 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_handler(
+    _request: Request, exc: RequestValidationError
+) -> JSONResponse:
+    """Pydantic 验证错误统一返回 422 + {status, message, errors} 信封。"""
+    errors: list[dict[str, str]] = []
+    for issue in exc.errors():
+        loc = issue.get("loc", ())
+        # Skip "body" prefix from FastAPI loc tuples
+        path_parts = [str(p) for p in loc if p != "body"]
+        field_path = ".".join(path_parts) if path_parts else "unknown"
+        msg = issue.get("msg", "validation error")
+        errors.append({"field": field_path, "message": msg})
+    return JSONResponse(
+        status_code=422,
+        content={
+            "status": "failed",
+            "message": "请求参数验证失败",
+            "errors": errors,
+        },
+    )
+
+
 app.mount("/assets", StaticFiles(directory=str(APP_ROOT_DIR / "page/assets")))
 app.mount("/resource", StaticFiles(directory=str(APP_ROOT_DIR / "resource")))
 

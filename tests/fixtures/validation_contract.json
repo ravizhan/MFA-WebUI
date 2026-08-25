@@ -1,0 +1,230 @@
+[
+  {
+    "name": "basic_daily",
+    "input": "0 9 * * *",
+    "canonical": "0 9 * * *",
+    "valid": true
+  },
+  {
+    "name": "basic_hourly",
+    "input": "30 * * * *",
+    "canonical": "30 * * * *",
+    "valid": true
+  },
+  {
+    "name": "whitespace_collapse",
+    "input": "  0   9  *  *  *  ",
+    "canonical": "0 9 * * *",
+    "valid": true
+  },
+  {
+    "name": "step_minute",
+    "input": "*/2 * * * *",
+    "canonical": null,
+    "valid": false
+  },
+  {
+    "name": "step_hour",
+    "input": "0 9-17/3 * * *",
+    "canonical": null,
+    "valid": false
+  },
+  {
+    "name": "range_hour",
+    "input": "0 9-17 * * *",
+    "canonical": null,
+    "valid": false
+  },
+  {
+    "name": "list_day",
+    "input": "0 9 1,15 * *",
+    "canonical": null,
+    "valid": false
+  },
+  {
+    "name": "list_dow",
+    "input": "0 9 * * 1,3,5",
+    "canonical": null,
+    "valid": false
+  },
+  {
+    "name": "dow_7_normalized",
+    "input": "0 9 * * 7",
+    "canonical": "0 9 * * 0",
+    "valid": true
+  },
+  {
+    "name": "dow_0_sunday",
+    "input": "0 9 * * 0",
+    "canonical": "0 9 * * 0",
+    "valid": true
+  },
+  {
+    "name": "specific_month_day",
+    "input": "0 9 15 6 *",
+    "canonical": "0 9 15 6 *",
+    "valid": true
+  },
+  {
+    "name": "invalid_4_fields",
+    "input": "0 9 * *",
+    "canonical": null,
+    "valid": false
+  },
+  {
+    "name": "invalid_6_fields",
+    "input": "0 0 9 * * *",
+    "canonical": null,
+    "valid": false
+  },
+  {
+    "name": "invalid_empty",
+    "input": "",
+    "canonical": null,
+    "valid": false
+  },
+  {
+    "name": "invalid_minute_oob",
+    "input": "60 9 * * *",
+    "canonical": null,
+    "valid": false
+  },
+  {
+    "name": "invalid_hour_oob",
+    "input": "0 24 * * *",
+    "canonical": null,
+    "valid": false
+  },
+  {
+    "name": "invalid_day_oob",
+    "input": "0 9 32 * *",
+    "canonical": null,
+    "valid": false
+  },
+  {
+    "name": "invalid_month_oob",
+    "input": "0 9 1 13 *",
+    "canonical": null,
+    "valid": false
+  },
+  {
+    "name": "invalid_dow_oob",
+    "input": "0 9 * * 8",
+    "canonical": null,
+    "valid": false
+  },
+  {
+    "name": "invalid_unicode_digits",
+    "input": "０ 9 * * *",
+    "canonical": null,
+    "valid": false
+  },
+  {
+    "name": "invalid_month_name",
+    "input": "0 9 1 jan *",
+    "canonical": null,
+    "valid": false
+  },
+  {
+    "name": "invalid_dow_name",
+    "input": "0 9 * * mon",
+    "canonical": null,
+    "valid": false
+  },
+  {
+    "name": "invalid_last_day",
+    "input": "0 9 L * *",
+    "canonical": null,
+    "valid": false
+  },
+  {
+    "name": "invalid_plus",
+    "input": "0 +9 * * *",
+    "canonical": null,
+    "valid": false
+  },
+  {
+    "name": "invalid_underscore",
+    "input": "0 _9 * * *",
+    "canonical": null,
+    "valid": false
+  },
+  {
+    "name": "invalid_feb_30",
+    "input": "0 9 30 2 *",
+    "canonical": null,
+    "valid": false
+  },
+  {
+    "name": "invalid_feb_31",
+    "input": "0 9 31 2 *",
+    "canonical": null,
+    "valid": false
+  },
+  {
+    "name": "feb_29_valid",
+    "input": "0 9 29 2 *",
+    "canonical": "0 9 29 2 *",
+    "valid": true
+  },
+  {
+    "name": "native_day_and_dow",
+    "input": "0 9 15 * 1",
+    "canonical": null,
+    "valid": false
+  },
+  {
+    "name": "native_hour_star_with_day",
+    "input": "30 * 15 * *",
+    "canonical": null,
+    "valid": false
+  },
+  {
+    "name": "native_month_without_day",
+    "input": "0 9 * 6 *",
+    "canonical": null,
+    "valid": false
+  },
+  {
+    "name": "native_minute_star",
+    "input": "* 9 * * *",
+    "canonical": null,
+    "valid": false
+  },
+  {
+    "name": "native_all_star_except_minute",
+    "input": "45 * * * *",
+    "canonical": "45 * * * *",
+    "valid": true
+  },
+  {
+    "name": "complex_all_fields",
+    "input": "*/15 0-6/2 1,15 1,6,12 0,3,6",
+    "canonical": null,
+    "valid": false
+  },
+  {
+    "name": "dow_7_in_list",
+    "input": "0 9 * * 1,7",
+    "canonical": null,
+    "valid": false
+  },
+  {
+    "name": "specific_dow_single",
+    "input": "0 9 * * 5",
+    "canonical": "0 9 * * 5",
+    "valid": true
+  },
+  {
+    "name": "specific_day_single",
+    "input": "0 9 25 * *",
+    "canonical": "0 9 25 * *",
+    "valid": true
+  },
+  {
+    "name": "specific_month_day_dec31",
+    "input": "0 0 31 12 *",
+    "canonical": "0 0 31 12 *",
+    "valid": true
+  }
+]

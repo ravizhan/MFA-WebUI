@@ -89,6 +89,7 @@ import { useI18n } from "vue-i18n"
 import { Icon } from "@iconify/vue"
 import { checkUpdateApi, type UpdateInfo } from "@/services/api"
 import { showGlobalMessage } from "@/services/feedback/message"
+import { updateChannelSchema } from "@/schemas/settings"
 import { useInterfaceStore, useSettingsStore } from "@/stores"
 import { tryCatch } from "@/utils/tryCatch"
 import type { SettingsModel } from "@/types/settingsModel"
@@ -98,7 +99,7 @@ const emit = defineEmits<{
 }>()
 
 function isUpdateChannel(value: string): value is SettingsModel["update"]["updateChannel"] {
-  return value === "stable" || value === "beta"
+  return updateChannelSchema.safeParse(value).success
 }
 
 const { t } = useI18n()

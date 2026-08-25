@@ -11,6 +11,7 @@ from unittest.mock import MagicMock
 
 import pytest
 from apscheduler.triggers.cron import CronTrigger
+from pydantic import ValidationError
 
 from app_state import AppState
 from models.scheduler import CronTriggerConfig, ScheduledTaskCreate, ScheduledTaskUpdate
@@ -143,34 +144,14 @@ class TestTriggerRoundTrip:
         assert isinstance(decoded, CronTriggerConfig)
         assert decoded.cron == "0 9 * * 1"
 
-    @pytest.mark.parametrize(
-        "unix_dow",
-        ["1-5", "1,3,5", "*/2", "1-5/2"],
-    )
-    async def test_composite_dow_round_trip(self, manager_env, unix_dow):
-        # Unix 星期 0=周日, 7=周日 → 复合表达式逐组件映射并对称还原
-        mgr, _state, _system_scheduler = manager_env
-        cron = f"0 9 * * {unix_dow}"
-
-        trigger = mgr._create_trigger(CronTriggerConfig(cron=cron))
-        dow_field = next(f for f in trigger.fields if f.name == "day_of_week")
-        assert str(dow_field) != "*"  # 复合表达式被解析，而非整段透传失效
-
-        trigger_type, decoded = mgr._build_trigger_config(trigger)
-        assert trigger_type == "cron"
-        assert isinstance(decoded, CronTriggerConfig)
-        assert decoded.cron == cron
-
-    @pytest.mark.parametrize(
-        "unix_dow,aps_dow",
-        [("1-5", "0-4"), ("1,3,5", "0,2,4"), ("*/2", "*/2")],
-    )
-    async def test_composite_dow_maps_to_aps(self, manager_env, unix_dow, aps_dow):
-        # 逐端点核对 Unix→APS 的映射方向（1-5 → 0-4 等）
-        mgr, _state, _system_scheduler = manager_env
-        trigger = mgr._create_trigger(CronTriggerConfig(cron=f"0 9 * * {unix_dow}"))
-        dow_field = next(f for f in trigger.fields if f.name == "day_of_week")
-        assert str(dow_field) == aps_dow
+    def test_composite_dow_rejected_by_unified_subset(self):
+        # 统一子集下复合 DOW（范围/列表/步进）不再合法，创建时即拒绝
+        with pytest.raises(ValidationError):
+            CronTriggerConfig(cron="0 9 * * 1-5")
+        with pytest.raises(ValidationError):
+            CronTriggerConfig(cron="0 9 * * 1,3,5")
+        with pytest.raises(ValidationError):
+            CronTriggerConfig(cron="0 9 * * */2")
 
 
 class TestUpdateTaskWakeup:

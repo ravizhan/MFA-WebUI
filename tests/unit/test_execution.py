@@ -318,6 +318,38 @@ class TestSubmitManual:
         assert rows[0].status == "failed"
         assert "Worker 未就绪" in rows[0].error_message
 
+    async def test_success_manual_run_with_fake_worker(self, state: AppState):
+        worker = _FakeWorker(start_result=True, ready=True)
+
+        class _SuccessTaskService(_FakeTaskService):
+            def start(self, task_list, options, task_name=None, pre_tasks=None):
+                self.called = True
+                # 模拟一次成功的手动运行：start 内部完成整个生命周期
+                self._task_state.running = True
+                self._task_state.last_status = "success"
+                self._task_state.running = False
+                return True
+
+        worker.tasks = _SuccessTaskService(result=True, task_state=worker.task_state)
+        state.worker = worker
+
+        admission = await submit_manual(state, make_payload("Startup"))
+        assert admission.accepted is True
+        assert admission.run_id is not None
+        assert state.active_run is not None
+
+        await _await_active_task(state)
+
+        # 运行结束后清槽
+        assert state.active_run is None
+        assert state.active_execution_task is None
+        # 成功运行落库 success
+        row = list_executions(state.scheduler_db_path)[0]
+        assert row.id == admission.run_id
+        assert row.status == "success"
+        assert row.finished_at is not None
+        assert worker.events.failed_events == []
+
     async def test_update_in_progress_conflict(self, state: AppState):
         state.update_in_progress = True
 
@@ -462,15 +494,22 @@ class TestStopAndCancel:
         task = state.active_execution_task
         assert task is not None
         task.cancel()
-        # 让取消回调（清槽 + 补记 stopped）执行
-        await asyncio.sleep(0)
-        await asyncio.sleep(0)
+        # 清槽在 done_callback 中同步完成；补记落库经 asyncio.to_thread 异步执行，轮询等待
+        for _ in range(100):
+            if state.active_run is None:
+                break
+            await asyncio.sleep(0.01)
 
         assert state.active_run is None
         assert state.active_execution_task is None
-        rows = list_executions(state.scheduler_db_path)
-        assert len(rows) == 1
-        row = rows[0]
+        row = None
+        for _ in range(100):
+            rows = list_executions(state.scheduler_db_path)
+            if rows and rows[0].status == "stopped":
+                row = rows[0]
+                break
+            await asyncio.sleep(0.01)
+        assert row is not None
         assert row.id == admission.run_id
         assert row.status == "stopped"
         assert "取消" in row.error_message

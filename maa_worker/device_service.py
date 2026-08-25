@@ -16,6 +16,10 @@ from maa.controller import (
 from maa.toolkit import Toolkit
 
 from models.api import CustomDeviceCreate, DeviceModel
+from models.device_address import (
+    canonicalize_custom_device_address,
+    try_canonicalize_runtime_device_address,
+)
 from settings_io import SETTINGS_LOCK, atomic_write_settings, read_settings_raw
 
 if TYPE_CHECKING:
@@ -46,43 +50,6 @@ def is_controller_supported(controller) -> tuple[bool, str]:
             return False, "controller_not_supported"
 
 
-def canonicalize_custom_address(device_type: str, address: str) -> str:
-    """Validate and return canonical address for persistence/identity.
-
-    Raises ValueError on invalid input.
-    """
-    text = str(address).strip()
-    if device_type in ("Adb", "PlayCover"):
-        if not text:
-            raise ValueError("设备地址不能为空")
-        return text
-    if device_type == "Win32":
-        if not text.isdigit() or int(text) <= 0:
-            raise ValueError("Win32 地址必须为正整数 hWnd")
-        return str(int(text))
-    if device_type == "Gamepad":
-        parts = text.split("|")
-        if len(parts) != 2:
-            raise ValueError("Gamepad 地址格式必须为 hWnd|type")
-        hwnd_raw, type_raw = parts[0].strip(), parts[1].strip()
-        if not hwnd_raw.isdigit() or int(hwnd_raw) <= 0:
-            raise ValueError("Gamepad hWnd 必须为正整数")
-        if not type_raw.isdigit():
-            raise ValueError("Gamepad type 只能为 0 或 1")
-        gamepad_type = int(type_raw)
-        if gamepad_type not in (0, 1):
-            raise ValueError("Gamepad type 只能为 0 或 1")
-        return f"{int(hwnd_raw)}|{gamepad_type}"
-    raise ValueError(f"不支持的设备类型: {device_type}")
-
-
-def try_canonicalize_custom_address(device_type: str, address: str) -> str | None:
-    try:
-        return canonicalize_custom_address(device_type, address)
-    except (ValueError, TypeError):
-        return None
-
-
 def _record_identity(
     controller_name: str, device_type: str, address: str
 ) -> tuple[str, str, str]:
@@ -92,13 +59,15 @@ def _record_identity(
 def _scan_device_address(device: dict[str, Any]) -> str | None:
     device_type = device.get("type")
     if device_type in ("Adb", "PlayCover"):
-        return try_canonicalize_custom_address(
+        return try_canonicalize_runtime_device_address(
             device_type, str(device.get("address", ""))
         )
     if device_type == "Win32":
-        return try_canonicalize_custom_address(device_type, str(device.get("hWnd", "")))
+        return try_canonicalize_runtime_device_address(
+            device_type, str(device.get("hWnd", ""))
+        )
     if device_type == "Gamepad":
-        return try_canonicalize_custom_address(
+        return try_canonicalize_runtime_device_address(
             device_type,
             f"{device.get('hWnd', 0)}|{device.get('gamepad_type', 0)}",
         )
@@ -175,7 +144,7 @@ class DeviceService:
                     "PlayCover",
                 ):
                     continue
-                address = try_canonicalize_custom_address(
+                address = try_canonicalize_runtime_device_address(
                     device_type, str(item.get("address", ""))
                 )
                 if address is None:
@@ -210,7 +179,7 @@ class DeviceService:
         if controller.type != payload.type:
             raise ValueError("控制器类型不匹配")
 
-        address = canonicalize_custom_address(payload.type, payload.address)
+        address = canonicalize_custom_device_address(payload.type, payload.address)
         record = {
             "controller_name": payload.controller_name,
             "type": payload.type,

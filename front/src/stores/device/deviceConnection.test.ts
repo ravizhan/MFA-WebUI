@@ -894,6 +894,34 @@ describe("useDeviceConnectionStore", () => {
       await store.createCustomDevice("192.168.1.10:5555")
       expect(api.postCustomDevice).not.toHaveBeenCalled()
     })
+
+    it("does not call the API for an invalid address", async () => {
+      const store = useDeviceConnectionStore()
+      store.controllerCapabilities = [adbCapability]
+      store.selectedController = "ADB"
+
+      await store.createCustomDevice("not-an-ip")
+
+      expect(api.postCustomDevice).not.toHaveBeenCalled()
+    })
+
+    it("sends the canonical address for a valid address", async () => {
+      const store = useDeviceConnectionStore()
+      store.controllerCapabilities = [adbCapability]
+      store.selectedController = "ADB"
+      vi.mocked(api.postCustomDevice).mockResolvedValue({
+        success: false,
+        message: "save failed",
+      })
+
+      await store.createCustomDevice("  192.168.001.001:05555  ")
+
+      expect(api.postCustomDevice).toHaveBeenCalledWith({
+        controller_name: "adb",
+        type: "Adb",
+        address: "192.168.1.1:5555",
+      })
+    })
   })
 
   describe("selectedDevice rebind", () => {
@@ -1069,6 +1097,29 @@ describe("useDeviceConnectionStore", () => {
       expect(indexStore.Connected).toBe(true)
       expect(settingsStore.settings.panel.lastConnectedDevice).not.toBeNull()
       expect(store.resourcesList).toEqual([{ label: "res1", value: "res1" }])
+    })
+  })
+
+  describe("buildPlayCoverDevice", () => {
+    it("returns an error without making API calls for an invalid address", () => {
+      const store = useDeviceConnectionStore()
+      store.playCoverAddress = "bad-address"
+
+      expect(store.buildPlayCoverDevice()).toEqual({
+        error: "panel.invalidPlaycoverAddress",
+      })
+      expect(api.postDevices).not.toHaveBeenCalled()
+      expect(api.postCustomDevice).not.toHaveBeenCalled()
+      expect(api.getDevices).not.toHaveBeenCalled()
+    })
+
+    it("returns a device with a canonical address", () => {
+      const store = useDeviceConnectionStore()
+      store.playCoverAddress = " 127.000.000.001:01717 "
+
+      expect(store.buildPlayCoverDevice()).toEqual({
+        device: { type: "PlayCover", address: "127.0.0.1:1717" },
+      })
     })
   })
 

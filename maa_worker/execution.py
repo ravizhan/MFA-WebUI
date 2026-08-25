@@ -22,7 +22,6 @@ from models.scheduler import (
     ExecutionStatus,
     ManualStartPayload,
     ScheduledTask,
-    ScheduledTaskDeviceConfig,
     StartConflict,
     TaskExecution,
 )
@@ -93,6 +92,16 @@ def _to_iso(dt: Optional[datetime]) -> Optional[str]:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.isoformat()
+
+
+async def _record_prestart_cancel(db_path: Path, run_id: str) -> None:
+    """fire-and-forget 落库取消记录（与 _record_skip 一致，sqlite I/O 移出事件循环）。"""
+    try:
+        await asyncio.to_thread(
+            finish_execution, db_path, run_id, "stopped", "运行被取消"
+        )
+    except Exception as e:
+        logger.error(f"补记取消记录失败: {e}")
 
 
 def add_execution(path: Path, execution: TaskExecution) -> None:
@@ -286,12 +295,9 @@ async def submit_manual(state: AppState, payload: ManualStartPayload) -> Admissi
             ):
                 state.active_run = None
                 state.active_execution_task = None
-                try:
-                    finish_execution(
-                        state.scheduler_db_path, run_id, "stopped", "运行被取消"
-                    )
-                except Exception as e:
-                    logger.error(f"补记取消记录失败: {e}")
+                asyncio.get_running_loop().create_task(
+                    _record_prestart_cancel(state.scheduler_db_path, run_id)
+                )
 
         state.active_execution_task.add_done_callback(_guard_prestart_cancel)
     except BaseException:
@@ -357,22 +363,24 @@ async def submit_scheduled(
         )
         await asyncio.to_thread(add_execution, state.scheduler_db_path, execution)
 
-        payload = ManualStartPayload(
-            task_list=task.task_list,
-            task_options=task.task_options,
-            preTasks=task.preTasks,
-            controller_name=task.controller_name
-            or (task.device.controller_name if task.device else ""),
-            device=task.device
-            or ScheduledTaskDeviceConfig(
-                controller_name=task.controller_name or "",
-                device_type="Adb",
-                device_address="",
-            ),
-            resource_name=task.resource_name or "",
+        # Do not manufacture an invalid empty Adb device when historical or
+        # incomplete scheduled-task records omit their device configuration.
+        # Passing no payload through to _complete_run keeps the normal failure
+        # recording/event path without bypassing ManualStartPayload validation.
+        payload = (
+            ManualStartPayload(
+                task_list=task.task_list,
+                task_options=task.task_options,
+                preTasks=task.preTasks,
+                controller_name=task.controller_name or task.device.controller_name,
+                device=task.device,
+                resource_name=task.resource_name or "",
+            )
+            if task.device is not None
+            else None
         )
         state.active_execution_task = asyncio.create_task(
-            _complete_run(state, run_id, payload)
+            _complete_run(state, run_id, payload, task_list=task.task_list)
         )
 
         # 防御：若协程在首次调度前被取消，finally 不会执行，立即清槽并补记
@@ -384,12 +392,9 @@ async def submit_scheduled(
             ):
                 state.active_run = None
                 state.active_execution_task = None
-                try:
-                    finish_execution(
-                        state.scheduler_db_path, run_id, "stopped", "运行被取消"
-                    )
-                except Exception as e:
-                    logger.error(f"补记取消记录失败: {e}")
+                asyncio.get_running_loop().create_task(
+                    _record_prestart_cancel(state.scheduler_db_path, run_id)
+                )
 
         state.active_execution_task.add_done_callback(_guard_prestart_cancel)
     except BaseException:
@@ -420,19 +425,24 @@ async def stop_active(state: AppState) -> bool:
 
 
 async def _complete_run(
-    state: AppState, run_id: str, payload: ManualStartPayload
+    state: AppState,
+    run_id: str,
+    payload: ManualStartPayload | None,
+    *,
+    task_list: list[str] | None = None,
 ) -> None:
     """后台执行协程：设备准备 → 任务运行 → 落库收尾 → 清槽"""
     worker = state.worker
     status: ExecutionStatus = "failed"
     error: Optional[str] = None
     task_started = False
+    event_task_list = payload.task_list if payload is not None else (task_list or [])
     try:
         if worker is None:
             raise RuntimeError("Worker 未就绪")
 
         # 1. 校验设备/资源配置
-        if not payload.device or not payload.resource_name:
+        if payload is None or not payload.device or not payload.resource_name:
             raise RuntimeError("设备或资源配置缺失")
 
         # 2. 复用已匹配连接；不匹配先解锁
@@ -527,7 +537,7 @@ async def _complete_run(
                 # 否则前端 TaskRunning 在 accept 后被置位却无 task.completed/failed 清除，UI 卡死。
                 try:
                     await asyncio.to_thread(
-                        worker.events.emit_task_failed, payload.task_list, error or ""
+                        worker.events.emit_task_failed, event_task_list, error or ""
                     )
                 except Exception as emit_err:
                     logger.error(f"发送任务失败事件失败: {emit_err}")
@@ -542,7 +552,7 @@ async def _complete_run(
                     await asyncio.shield(
                         asyncio.to_thread(
                             worker.events.emit_task_failed,
-                            payload.task_list,
+                            event_task_list,
                             error or "",
                         )
                     )
