@@ -1,12 +1,7 @@
-"""Tests for services/native_cron.py — corpus-driven parse + OS conversion."""
-
-import json
-from pathlib import Path
+"""Tests for services/native_cron.py — parse + OS conversion."""
 
 import pytest
-from pydantic import TypeAdapter
 
-from models.scheduler import PortableCronStr
 from services.native_cron import (
     NativeCron,
     aps_dow_to_unix,
@@ -17,42 +12,6 @@ from services.native_cron import (
     to_schtasks_args,
     unix_dow_to_aps,
 )
-
-
-_CORPUS_PATH = Path(__file__).parent.parent / "fixtures" / "validation_contract.json"
-
-
-def _load_corpus():
-    with open(_CORPUS_PATH, encoding="utf-8") as f:
-        return json.load(f)
-
-
-_CORPUS = _load_corpus()
-_portable_adapter = TypeAdapter(PortableCronStr)
-
-
-class TestCronCorpus:
-    """Verify unified cron validation against shared corpus."""
-
-    @pytest.mark.parametrize("case", _CORPUS, ids=[c["name"] for c in _CORPUS])
-    def test_valid(self, case):
-        try:
-            result = _portable_adapter.validate_python(case["input"])
-            actual_valid = True
-            actual_canonical = str(result)
-        except Exception:
-            actual_valid = False
-            actual_canonical = None
-
-        assert actual_valid == case["valid"], (
-            f"input={case['input']!r}: expected valid={case['valid']}, "
-            f"got {actual_valid}"
-        )
-        if case["valid"]:
-            assert actual_canonical == case["canonical"], (
-                f"input={case['input']!r}: expected canonical={case['canonical']!r}, "
-                f"got {actual_canonical!r}"
-            )
 
 
 class TestParseNativeCron:

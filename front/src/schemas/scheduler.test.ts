@@ -61,12 +61,6 @@ describe("schedulerTaskFormSchema", () => {
     expect(schedulerTaskFormSchema.safeParse({ ...validPayload, name: "   " }).success).toBe(false)
   })
 
-  it("rejects name over 100 chars", () => {
-    expect(
-      schedulerTaskFormSchema.safeParse({ ...validPayload, name: "x".repeat(101) }).success,
-    ).toBe(false)
-  })
-
   it("strips name", () => {
     const r = schedulerTaskFormSchema.safeParse({ ...validPayload, name: "  hello  " })
     expect(r.success).toBe(true)

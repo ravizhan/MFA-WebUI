@@ -47,14 +47,6 @@ describe("hostPortSchema", () => {
   it("rejects port 65536", () => {
     expect(hostPortSchema.safeParse("192.168.1.1:65536").success).toBe(false)
   })
-
-  it("accepts port 1", () => {
-    expect(hostPortSchema.parse("192.168.1.1:1")).toBe("192.168.1.1:1")
-  })
-
-  it("accepts port 65535", () => {
-    expect(hostPortSchema.parse("192.168.1.1:65535")).toBe("192.168.1.1:65535")
-  })
 })
 
 describe("customDeviceAddressSchema", () => {

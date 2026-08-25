@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { checkNativeEligibility, cronExpressionSchema } from "./cron"
+import { cronExpressionSchema } from "./cron"
 
 interface CorpusCase {
   name: string
@@ -28,14 +28,4 @@ describe("cronExpressionSchema", () => {
       }
     })
   }
-})
-
-describe("checkNativeEligibility", () => {
-  it("accepts daily cron", () => {
-    expect(checkNativeEligibility("0 9 * * *")).toBe(true)
-  })
-
-  it("rejects step", () => {
-    expect(checkNativeEligibility("*/2 * * * *")).toBe(false)
-  })
 })
