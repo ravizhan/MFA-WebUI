@@ -1,7 +1,7 @@
 import { defineStore } from "pinia"
 import { watch } from "vue"
 import i18n from "@/app/i18n"
-import { customDeviceAddressSchema, playCoverAddressSchema } from "@/schemas/device"
+import { customDeviceAddressSchema, playCoverAddressSchema } from "@/validation/device"
 import { tryCatch } from "@/utils/tryCatch"
 import {
   getDeviceState,
@@ -83,6 +83,9 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
     _fetchResourcesRequestId: 0,
   }),
 
+  // ---------------------------------------------------------------------------
+  // Getters: derived selection & connection state
+  // ---------------------------------------------------------------------------
   getters: {
     controllerOptions(state) {
       return state.controllerCapabilities.map((item) => ({
@@ -179,7 +182,11 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
     },
   },
 
+  // ---------------------------------------------------------------------------
+  // Actions
+  // ---------------------------------------------------------------------------
   actions: {
+    // --- Task config persistence ---
     handleTasksUpdate(tasks: TaskListItem[]) {
       const configStore = useTaskConfigStore()
       configStore.taskList = tasks
@@ -200,6 +207,7 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
       }
     },
 
+    // --- Device selection persistence & restore ---
     async persistLastConnectedDevice(deviceInfo: ConnectableDevice, controllerName: string) {
       const settingsStore = useSettingsStore()
       const storedDevice = buildStoredLastConnectedDevice(deviceInfo, controllerName)
@@ -271,6 +279,7 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
       }
     },
 
+    // --- Runtime state sync ---
     applyDeviceRuntimeState(state: Awaited<ReturnType<typeof getDeviceState>>) {
       const indexStore = useIndexStore()
       indexStore.setConnected(state.connected)
@@ -289,6 +298,7 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
       }
     },
 
+    // --- Device / resource fetching ---
     applyControllerData(data: Awaited<ReturnType<typeof getDevices>>) {
       this.controllerCapabilities = data.controllers
       const selectedCapability = data.controllers.find(
@@ -426,6 +436,7 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
       void this.fetchDevices(this.selectedControllerCapability.name)
     },
 
+    // --- Custom device creation ---
     isStillOnController(controllerName: string, displayLabel: string): boolean {
       return (
         this.selectedControllerCapability?.name === controllerName ||
@@ -518,6 +529,7 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
       return { device: { type: "PlayCover", address: parseResult.data } }
     },
 
+    // --- Connection ---
     async connectDevices(): Promise<PostDeviceResult> {
       const t = i18n.global.t
 
@@ -627,6 +639,7 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
       return result
     },
 
+    // --- Task control ---
     async StartTask(): Promise<boolean> {
       const t = i18n.global.t
       const indexStore = useIndexStore()
@@ -811,6 +824,7 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
       return activeRestartPromise
     },
 
+    // --- Config reset ---
     resetConfig() {
       const t = i18n.global.t
       const configStore = useTaskConfigStore()
@@ -821,6 +835,7 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
       }
     },
 
+    // --- Lifecycle ---
     init() {
       if (this.initialized) {
         return

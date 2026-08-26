@@ -377,36 +377,22 @@ import {
   TimeOutline,
   TimerOutline,
 } from "@vicons/ionicons5"
-import {
-  useInterfaceStore,
-  useSchedulerStore,
-  useSettingsStore,
-  useTaskConfigStore,
-} from "@/stores"
+import { useInterfaceStore, useTaskConfigStore } from "@/stores"
 import type { TaskListItem } from "@/types/taskConfigModel"
-import SchedulerTaskDialogContentTabs from "@/components/settings/dialogs/SchedulerTaskDialogContentTabs.vue"
-import SchedulerTaskDialogSectionNav from "@/components/settings/dialogs/SchedulerTaskDialogSectionNav.vue"
-import SchedulerTaskDialogTriggerType from "@/components/settings/dialogs/SchedulerTaskDialogTriggerType.vue"
-import { customDeviceAddressSchema } from "@/schemas/device"
-import { schedulerTaskFormSchema } from "@/schemas/scheduler"
-import { resolveInterfaceText } from "@/utils/interface/content"
-import { getDevices, getResource, postCustomDevice } from "@/services/api"
-import type { ConnectableDevice, DeviceControllerType } from "@/services/api"
-import { buildDeviceLabel } from "@/utils/panel/device"
-import { checkNativeEligibility } from "@/schemas/cron"
-import type { PanelLastConnectedDevice } from "@/types/settingsModel"
-import type {
-  ScheduledTask,
-  ScheduledTaskCreate,
-  TriggerType,
-  TriggerConfig,
-  CronTriggerConfig,
-  DateTriggerConfig,
-  IntervalTriggerConfig,
-} from "@/types/schedulerModel"
+import SchedulerTaskDialogContentTabs from "./SchedulerTaskDialogContentTabs.vue"
+import SchedulerTaskDialogSectionNav from "./SchedulerTaskDialogSectionNav.vue"
+import SchedulerTaskDialogTriggerType from "./SchedulerTaskDialogTriggerType.vue"
+import { toIsoOrEmpty, toDatetimeLocalValue } from "@/utils/datetime"
 import { showGlobalMessage } from "@/services/feedback/message"
-import { tryCatch } from "@/utils/tryCatch"
 import { useViewport } from "@/utils/viewport/useViewport"
+import type { ScheduledTask } from "@/types/schedulerModel"
+import { useSchedulerTaskForm } from "./composables/useSchedulerTaskForm"
+import { useTaskEnvironment } from "./composables/useTaskEnvironment"
+import {
+  useSchedulerTaskSave,
+  type DialogSection,
+  type ContentTab,
+} from "./composables/useSchedulerTaskSave"
 
 interface Props {
   show: boolean
@@ -418,18 +404,12 @@ interface Emits {
   (e: "saved"): void
 }
 
-type DialogSection = "basic" | "schedule" | "environment" | "content"
-
 const { show, task } = defineProps<Props>()
 const emit = defineEmits<Emits>()
 
-const { t, locale } = useI18n()
-const schedulerStore = useSchedulerStore()
+const { t } = useI18n()
 const configStore = useTaskConfigStore()
 const interfaceStore = useInterfaceStore()
-const settingsStore = useSettingsStore()
-
-const loading = ref(false)
 
 const { isMobile, width: viewportWidth } = useViewport()
 
@@ -443,15 +423,48 @@ const dialogBoxStyle = computed(() => {
 })
 
 const activeSection = ref<DialogSection>("basic")
-const activeTab = ref<"task-list" | "task-settings" | "pre-tasks">("task-list")
+const activeTab = ref<ContentTab>("task-list")
 const currentSettingTaskId = ref<string | null>(null)
 const suppressFormInit = ref(false)
-const wakeupEnabled = ref(false)
 
-const availableDevices = ref<ConnectableDevice[]>([])
-const availableResources = ref<Array<{ name: string; label?: string; controller?: string[] }>>([])
-const loadingDevices = ref(false)
-const loadingResources = ref(false)
+const {
+  formData,
+  wakeupEnabled,
+  triggerType,
+  isCronNativeEligible,
+  cronConfig,
+  dateConfig,
+  intervalConfig,
+  initFormData,
+  setTriggerType,
+  updateTriggerConfig,
+  setCronPreset,
+} = useSchedulerTaskForm()
+
+const {
+  loadingDevices,
+  loadingResources,
+  isPlayCover,
+  deviceControllerOptions,
+  deviceAddressOptions,
+  resourceOptions,
+  selectedDeviceAddress,
+  handleDeviceAddressUpdate,
+} = useTaskEnvironment(formData, suppressFormInit)
+
+const showDialog = computed({
+  get: () => show,
+  set: (value) => emit("update:show", value),
+})
+
+const isEditMode = computed(() => !!task)
+const availableTasks = computed(() => configStore.taskList)
+
+const dateConfigLocal = computed(() => toDatetimeLocalValue(dateConfig.value.run_date))
+const intervalStartLocal = computed(() => toDatetimeLocalValue(intervalConfig.value.start_date))
+const intervalEndLocal = computed(() => toDatetimeLocalValue(intervalConfig.value.end_date))
+
+const taskListData = ref<TaskListItem[]>([])
 
 const sections = computed(() => [
   {
@@ -494,144 +507,60 @@ const triggerOptions = computed(() => [
   },
 ])
 
-function isDeviceControllerType(type: string): type is DeviceControllerType {
-  return type === "Adb" || type === "Win32" || type === "Gamepad" || type === "PlayCover"
-}
+function syncTaskListData(preferredOrder: string[]) {
+  const allTasks = availableTasks.value
+  const taskMap = new Map(allTasks.map((task) => [task.id, task]))
+  const orderedTasks: TaskListItem[] = []
 
-/** Convert datetime-local / ISO string to ISO, or "" if empty/invalid. */
-function toIsoOrEmpty(value: string): string {
-  if (!value) return ""
-  const d = new Date(value)
-  if (Number.isNaN(d.getTime())) return ""
-  return d.toISOString()
-}
-
-/** Format ISO string for datetime-local input; "" if missing/invalid. */
-function toDatetimeLocalValue(iso: string | undefined): string {
-  if (!iso) return ""
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return ""
-  d.setMinutes(d.getMinutes() - d.getTimezoneOffset())
-  return d.toISOString().slice(0, 16)
-}
-
-const showDialog = computed({
-  get: () => show,
-  set: (value) => emit("update:show", value),
-})
-
-const isEditMode = computed(() => !!task)
-const availableTasks = computed(() => configStore.taskList)
-
-const selectedControllerType = computed(() => {
-  const controller = interfaceStore.interface?.controller?.find(
-    (item) => item.name === formData.value.controller_name,
-  )
-  return controller?.type || null
-})
-
-const isPlayCover = computed(() => selectedControllerType.value === "PlayCover")
-
-const deviceControllerOptions = computed(() =>
-  (interfaceStore.interface?.controller || [])
-    .filter((controller) => isDeviceControllerType(controller.type))
-    .map((controller) => ({
-      label: resolveInterfaceText(
-        interfaceStore.interface,
-        locale.value,
-        controller.label,
-        controller.name,
-      ),
-      value: controller.name,
-    })),
-)
-
-const deviceAddressOptions = computed(() => {
-  if (!formData.value.controller_name) {
-    return []
+  for (const taskId of preferredOrder) {
+    const task = taskMap.get(taskId)
+    if (task) {
+      orderedTasks.push(task)
+      taskMap.delete(taskId)
+    }
   }
 
-  const options = new Map<string, { label: string; value: string }>()
-  for (const device of availableDevices.value) {
-    const value = getDeviceAddressValue(device)
-    options.set(value, { label: buildDeviceLabel(device), value })
+  for (const task of allTasks) {
+    if (taskMap.has(task.id)) {
+      orderedTasks.push(task)
+    }
   }
 
-  const recentDevices = settingsStore.settings.panel.recentDevices ?? []
-  for (const device of recentDevices) {
-    if (device.controller_name !== formData.value.controller_name) {
-      continue
-    }
-    const value = getStoredDeviceAddress(device)
-    if (options.has(value)) {
-      continue
-    }
-    options.set(value, { label: buildStoredDeviceLabel(device), value })
-  }
+  taskListData.value = orderedTasks
+}
 
-  return Array.from(options.values())
-})
+function buildOrderedTaskList(selectedTasks: string[], tasks: TaskListItem[] = taskListData.value) {
+  const selectedSet = new Set(configStore.normalizeTaskIds(selectedTasks))
+  return tasks.filter((task) => selectedSet.has(task.id)).map((task) => task.id)
+}
 
-const resourceOptions = computed(() =>
-  availableResources.value.map((resource) => ({
-    label: resolveInterfaceText(
-      interfaceStore.interface,
-      locale.value,
-      resource.label,
-      resource.name,
-    ),
-    value: resource.name,
-  })),
-)
+function resetForm() {
+  formData.value = initFormData()
+  syncTaskListData(formData.value.task_list)
+  currentSettingTaskId.value = null
+  activeTab.value = "task-list"
+  activeSection.value = "basic"
+}
 
-const selectedDeviceAddress = computed<string | null>({
-  get: () => formData.value.device?.device_address ?? null,
-  set: (value) => {
-    const controller = interfaceStore.interface?.controller?.find(
-      (item) => item.name === formData.value.controller_name,
-    )
-    if (!controller || !value) {
-      formData.value.device = null
-      return
-    }
-    if (!isDeviceControllerType(controller.type)) {
-      formData.value.device = null
-      return
-    }
-    formData.value.device = {
-      controller_name: controller.name,
-      device_type: controller.type,
-      device_address: value,
-    }
+const { loading, handleSave } = useSchedulerTaskSave(
+  task,
+  formData,
+  wakeupEnabled,
+  isCronNativeEligible,
+  {
+    focusSection: (section, tab) => {
+      activeSection.value = section
+      if (tab) {
+        activeTab.value = tab
+      }
+    },
+    close: () => {
+      showDialog.value = false
+    },
+    saved: () => emit("saved"),
+    reset: resetForm,
   },
-})
-
-const cronConfig = computed<CronTriggerConfig>(() => {
-  const config = formData.value.trigger_config
-  return config.type === "cron" ? config : { type: "cron", cron: "" }
-})
-const dateConfig = computed<DateTriggerConfig>(() => {
-  const config = formData.value.trigger_config
-  return config.type === "date" ? config : { type: "date", run_date: "" }
-})
-const dateConfigLocal = computed(() => toDatetimeLocalValue(dateConfig.value.run_date))
-const intervalConfig = computed<IntervalTriggerConfig>(() => {
-  const config = formData.value.trigger_config
-  return config.type === "interval" ? config : { type: "interval" }
-})
-const intervalStartLocal = computed(() => toDatetimeLocalValue(intervalConfig.value.start_date))
-const intervalEndLocal = computed(() => toDatetimeLocalValue(intervalConfig.value.end_date))
-
-type SchedulerTaskFormData = Omit<ScheduledTaskCreate, "wakeup_enabled">
-
-const formData = ref<SchedulerTaskFormData>(initFormData(task))
-const taskListData = ref<TaskListItem[]>([])
-
-const triggerType = computed(() => formData.value.trigger_config.type)
-const isCronNativeEligible = computed(() => {
-  const config = formData.value.trigger_config
-  return config.type === "cron" && checkNativeEligibility(config.cron)
-})
+)
 
 watch(
   () => show,
@@ -656,34 +585,7 @@ watch(
   },
 )
 
-// cron 从合格变为不合格时同步清空唤醒开关，避免隐藏值随提交被静默屏蔽
-watch(isCronNativeEligible, (eligible) => {
-  if (!eligible) {
-    wakeupEnabled.value = false
-  }
-})
-
-watch(
-  () => formData.value.controller_name,
-  (newVal, oldVal) => {
-    const controller = interfaceStore.interface?.controller?.find((item) => item.name === newVal)
-    const type = controller?.type
-
-    if (!suppressFormInit.value && oldVal != null && oldVal !== newVal) {
-      formData.value.device = null
-      formData.value.resource_name = null
-    }
-
-    if (newVal && type) {
-      void fetchDevices(newVal)
-      void fetchResources(type)
-      return
-    }
-    availableDevices.value = []
-    availableResources.value = []
-  },
-)
-
+// 控制器或资源变更时剔除不兼容任务，避免静默提交隐藏任务
 watch(
   [() => formData.value.controller_name, () => formData.value.resource_name],
   ([controllerName, resourceName]) => {
@@ -728,161 +630,15 @@ watch(
   { immediate: true },
 )
 
-function resetForm() {
-  formData.value = initFormData()
-  syncTaskListData(formData.value.task_list)
-  currentSettingTaskId.value = null
-  activeTab.value = "task-list"
-  activeSection.value = "basic"
-}
-
-function syncTaskListData(preferredOrder: string[]) {
-  const allTasks = availableTasks.value
-  const taskMap = new Map(allTasks.map((task) => [task.id, task]))
-  const orderedTasks: TaskListItem[] = []
-
-  for (const taskId of preferredOrder) {
-    const task = taskMap.get(taskId)
-    if (task) {
-      orderedTasks.push(task)
-      taskMap.delete(taskId)
-    }
-  }
-
-  for (const task of allTasks) {
-    if (taskMap.has(task.id)) {
-      orderedTasks.push(task)
-    }
-  }
-
-  taskListData.value = orderedTasks
-}
-
-function buildOrderedTaskList(selectedTasks: string[], tasks: TaskListItem[] = taskListData.value) {
-  const selectedSet = new Set(configStore.normalizeTaskIds(selectedTasks))
-  return tasks.filter((task) => selectedSet.has(task.id)).map((task) => task.id)
-}
-
 function handleTasksUpdate(tasks: TaskListItem[]) {
   taskListData.value = tasks
   formData.value.task_list = buildOrderedTaskList(formData.value.task_list, tasks)
-}
-
-function initFormData(task?: ScheduledTask | null): SchedulerTaskFormData {
-  wakeupEnabled.value = task ? (task.wakeup_enabled ?? false) : false
-  if (task) {
-    const task_list = configStore.normalizeTaskIds(task.task_list)
-    return {
-      name: task.name,
-      description: task.description || "",
-      enabled: task.enabled,
-      trigger_config: getTriggerConfigByType(task.trigger_config.type, task.trigger_config),
-      task_list,
-      task_options: configStore.buildOptionsForTasks(task_list, task.task_options),
-      preTasks: Array.isArray(task.preTasks) ? task.preTasks.map((pt) => ({ ...pt })) : [],
-      controller_name: task.controller_name,
-      device: task.device ? { ...task.device } : null,
-      resource_name: task.resource_name,
-    }
-  }
-  return {
-    name: "",
-    description: "",
-    enabled: true,
-    trigger_config: getTriggerConfigByType("cron"),
-    task_list: [],
-    task_options: configStore.buildOptionsForTasks([]),
-    preTasks: [],
-    controller_name: null,
-    device: null,
-    resource_name: null,
-  }
-}
-
-function buildCronConfig(existing?: Partial<TriggerConfig>): CronTriggerConfig {
-  const config = existing?.type === "cron" ? existing : undefined
-  return { type: "cron", cron: config?.cron ?? "0 0 * * *" }
-}
-
-function buildDateConfig(existing?: Partial<TriggerConfig>): DateTriggerConfig {
-  const config = existing?.type === "date" ? existing : undefined
-  return { type: "date", run_date: config?.run_date ?? new Date().toISOString() }
-}
-
-function buildIntervalConfig(existing?: Partial<TriggerConfig>): IntervalTriggerConfig {
-  const config = existing?.type === "interval" ? existing : undefined
-  const result: IntervalTriggerConfig = {
-    type: "interval",
-    weeks: 0,
-    days: 0,
-    hours: 1,
-    minutes: 0,
-    seconds: 0,
-  }
-  if (config === undefined) {
-    return result
-  }
-  if (config.weeks !== undefined) {
-    result.weeks = config.weeks
-  }
-  if (config.days !== undefined) {
-    result.days = config.days
-  }
-  if (config.hours !== undefined) {
-    result.hours = config.hours
-  }
-  if (config.minutes !== undefined) {
-    result.minutes = config.minutes
-  }
-  if (config.seconds !== undefined) {
-    result.seconds = config.seconds
-  }
-  result.start_date = config.start_date
-  result.end_date = config.end_date
-  return result
-}
-
-function getTriggerConfigByType(
-  type: TriggerType,
-  existing?: Partial<TriggerConfig>,
-): TriggerConfig {
-  switch (type) {
-    case "cron":
-      return buildCronConfig(existing)
-    case "date":
-      return buildDateConfig(existing)
-    case "interval":
-      return buildIntervalConfig(existing)
-    default:
-      return buildCronConfig()
-  }
-}
-
-function setTriggerType(newType: TriggerType) {
-  formData.value.trigger_config = getTriggerConfigByType(newType)
-  if (newType !== "cron") {
-    wakeupEnabled.value = false
-  }
 }
 
 function handleTriggerTypeChange(value: string | number) {
   if (value === "cron" || value === "date" || value === "interval") {
     setTriggerType(value)
   }
-}
-
-function updateTriggerConfig(updates: Partial<TriggerConfig>) {
-  formData.value.trigger_config = Object.assign({}, formData.value.trigger_config, updates)
-}
-
-function setCronPreset(preset: string) {
-  const presets: Record<string, string> = {
-    daily: "0 0 * * *",
-    daily9am: "0 9 * * *",
-    weekly: "0 0 * * 1",
-    hourly: "0 * * * *",
-  }
-  updateTriggerConfig({ cron: presets[preset] })
 }
 
 function handleSelectedTasksUpdate(newSelectedTasks: string[]) {
@@ -910,195 +666,6 @@ function openTaskSettings(taskId: string) {
   currentSettingTaskId.value = taskId
   activeSection.value = "content"
   activeTab.value = "task-settings"
-}
-
-function getDeviceAddressValue(device: ConnectableDevice): string {
-  if (device.type === "Adb") {
-    return device.address
-  }
-  if (device.type === "Win32") {
-    return String(device.hWnd)
-  }
-  if (device.type === "Gamepad") {
-    return `${device.hWnd}|${device.gamepad_type}`
-  }
-  return device.address
-}
-
-function getStoredDeviceAddress(device: PanelLastConnectedDevice): string {
-  if (device.type === "Adb") {
-    return device.address
-  }
-  if (device.type === "Win32") {
-    return String(device.hWnd)
-  }
-  if (device.type === "Gamepad") {
-    return `${device.hWnd}|${device.gamepad_type}`
-  }
-  return device.address
-}
-
-function buildStoredDeviceLabel(device: PanelLastConnectedDevice): string {
-  if (device.type === "Adb") {
-    return device.address
-  }
-  if (device.type === "Win32" || device.type === "Gamepad") {
-    const name = device.window_name || device.class_name
-    return name ? `${name} (${device.hWnd})` : String(device.hWnd)
-  }
-  return device.address
-}
-
-async function fetchDevices(controllerName: string) {
-  loadingDevices.value = true
-  const [data, err] = await tryCatch(() => getDevices(controllerName))
-  loadingDevices.value = false
-  if (err) {
-    console.error("Failed to fetch devices:", err)
-    availableDevices.value = []
-    return
-  }
-  availableDevices.value = data.devices
-}
-
-async function fetchResources(controllerType: string) {
-  loadingResources.value = true
-  const [data, err] = await tryCatch(() => getResource(controllerType))
-  loadingResources.value = false
-  if (err) {
-    console.error("Failed to fetch resources:", err)
-    availableResources.value = []
-    return
-  }
-  availableResources.value = data
-}
-
-/** Persist a user-typed device address as a custom device and select it. */
-async function handleCustomDeviceCreate(rawAddress: string) {
-  const controllerName = formData.value.controller_name
-  const controllerType = selectedControllerType.value
-  if (!controllerName || !controllerType || !isDeviceControllerType(controllerType)) return
-
-  const parseResult = customDeviceAddressSchema.safeParse({
-    type: controllerType,
-    address: rawAddress,
-  })
-  if (!parseResult.success) {
-    showGlobalMessage("error", t("settings.scheduler.rules.invalidAddress"))
-    return
-  }
-  const address = parseResult.data.address
-
-  const [result, err] = await tryCatch(() =>
-    postCustomDevice({
-      controller_name: controllerName,
-      type: controllerType,
-      address,
-    }),
-  )
-  if (err || !result?.success) {
-    showGlobalMessage("error", result?.message || t("settings.scheduler.dialog.saveFail"))
-    return
-  }
-
-  // Refresh device list so the new device appears, then select it
-  await fetchDevices(controllerName)
-  // 用户在请求期间可能已切换控制器：仅当当前选择仍匹配才写入地址，避免把旧地址落到别的控制器上。
-  const currentControllerName = formData.value.controller_name
-  const currentControllerType = selectedControllerType.value
-  if (currentControllerName !== controllerName || currentControllerType !== controllerType) {
-    return
-  }
-  selectedDeviceAddress.value = address
-}
-
-function handleDeviceAddressUpdate(value: string | null) {
-  if (value && !deviceAddressOptions.value.some((option) => option.value === value)) {
-    void handleCustomDeviceCreate(value)
-    return
-  }
-  selectedDeviceAddress.value = value
-}
-
-async function handleSave() {
-  const taskPayload = {
-    ...formData.value,
-    wakeup_enabled:
-      triggerType.value === "cron" && isCronNativeEligible.value ? wakeupEnabled.value : false,
-    ...configStore.buildExecutionPayload(formData.value.task_list, formData.value.task_options),
-    preTasks: formData.value.preTasks ?? [],
-  }
-
-  const parseResult = schedulerTaskFormSchema.safeParse(taskPayload)
-  if (!parseResult.success) {
-    const firstIssue = parseResult.error.issues[0]
-    const path = firstIssue.path.join(".")
-    // Route to correct section based on issue path
-    if (path.startsWith("name")) {
-      activeSection.value = "basic"
-      showGlobalMessage("error", t("settings.scheduler.rules.nameRequired"))
-      return
-    }
-    if (path.startsWith("trigger_config.cron")) {
-      activeSection.value = "schedule"
-      showGlobalMessage("error", t("settings.scheduler.rules.cronInvalid"))
-      return
-    }
-    if (path.startsWith("trigger_config.run_date")) {
-      activeSection.value = "schedule"
-      const msg = firstIssue.message.includes("future")
-        ? t("settings.scheduler.rules.dateInPast")
-        : t("settings.scheduler.rules.dateRequired")
-      showGlobalMessage("error", msg)
-      return
-    }
-    if (!path || path.startsWith("trigger_config")) {
-      activeSection.value = "schedule"
-      showGlobalMessage("error", t("settings.scheduler.rules.intervalRequired"))
-      return
-    }
-    if (path.startsWith("task_list")) {
-      activeSection.value = "content"
-      activeTab.value = "task-list"
-      showGlobalMessage("error", t("settings.scheduler.rules.taskListRequired"))
-      return
-    }
-    showGlobalMessage("error", firstIssue.message)
-    return
-  }
-
-  const parsedTask = {
-    ...parseResult.data,
-    description: parseResult.data.description ?? undefined,
-    preTasks: parseResult.data.preTasks.map((preTask) => ({
-      ...preTask,
-      id: preTask.id ?? crypto.randomUUID(),
-    })),
-  }
-
-  loading.value = true
-  const [savedTask, err] = await tryCatch(async () => {
-    if (isEditMode.value && task) {
-      const ok = await schedulerStore.updateTask(task.id, parsedTask)
-      return ok ? task : null
-    }
-    return schedulerStore.createTask(parsedTask)
-  })
-  loading.value = false
-  if (err || !savedTask) {
-    showGlobalMessage("error", schedulerStore.error || t("settings.scheduler.dialog.saveFail"))
-    return
-  }
-
-  showGlobalMessage(
-    "success",
-    isEditMode.value
-      ? t("settings.scheduler.dialog.taskUpdated")
-      : t("settings.scheduler.dialog.taskCreated"),
-  )
-  showDialog.value = false
-  emit("saved")
-  resetForm()
 }
 
 function handleCancel() {

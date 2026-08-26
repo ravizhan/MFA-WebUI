@@ -57,6 +57,7 @@ import LogsLogHeader from "@/components/logs/LogsLogHeader.vue"
 import LogsLogPanel from "@/components/logs/LogsLogPanel.vue"
 import LogsPreviewHeader from "@/components/logs/LogsPreviewHeader.vue"
 import LogsPreviewStream from "@/components/logs/LogsPreviewStream.vue"
+import { downloadTextFile } from "@/utils/download"
 
 type StreamPreviewRef = {
   clearStream: () => void
@@ -101,15 +102,7 @@ function handleCopy() {
 
 function handleDownload() {
   if (!log.value) return
-  const blob = new Blob([log.value], { type: "text/plain;charset=utf-8" })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement("a")
-  link.href = url
-  link.download = "mwu.log"
-  document.body.appendChild(link)
-  link.click()
-  link.remove()
-  URL.revokeObjectURL(url)
+  downloadTextFile("mwu.log", log.value)
 }
 
 watch(connected, (newValue) => {

@@ -69,7 +69,7 @@ export function buildResourceUrl(path: string): string | undefined {
 }
 
 export function resolveInterfaceText(
-  _model: InterfaceModel | null | undefined,
+  _model: Partial<InterfaceModel> | null | undefined,
   _locale: string,
   value?: string | null,
   fallback = "",
