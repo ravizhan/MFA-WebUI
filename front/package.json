@@ -10,6 +10,7 @@
     "dev": "vite --host",
     "build": "vite build --emptyOutDir",
     "preview": "vite preview --host",
+    "type-check": "vue-tsc --noEmit",
     "lint": "oxlint && eslint",
     "format": "oxfmt",
     "test": "vitest",
@@ -57,6 +58,7 @@
     "typescript": "catalog:",
     "unplugin-auto-import": "catalog:",
     "vite": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "vue-tsc": "^3.3.11"
   }
 }
