@@ -1,5 +1,5 @@
 <template>
-  <div class="flex items-center justify-between mb-2">
+  <div class="flex items-center justify-between">
     <span class="text-sm opacity-60">{{ $t("taskConfig.preTasks.description") }}</span>
     <NButton type="primary" size="small" @click="emit('add')">
       <template #icon>

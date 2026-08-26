@@ -1,28 +1,28 @@
 <template>
-  <NCard size="small" :class="{ 'mb-2': !embedded }" content-style="padding: 0">
+  <NCard size="small" content-style="padding: 0">
     <NCollapse v-model:expanded-names="expandedNames" arrow-placement="right">
       <NCollapseItem name="pre-tasks">
         <template #header>
           <PreTaskHeader />
         </template>
-        <div class="px-3 pb-3">
+        <div class="px-3 pb-3 space-y-2">
           <PreTaskToolbar @add="handleAdd" />
 
-          <div v-if="preTasks.length > 0" class="space-y-1.5">
-            <VueDraggable
-              v-model="preTasks"
-              :animation="150"
-              handle=".pre-task-drag-handle"
-              ghost-class="ghost"
-            >
-              <PreTaskRow
-                v-for="(item, index) in preTasks"
-                :key="item.id"
-                :item="item"
-                @delete="handleDelete(index)"
-              />
-            </VueDraggable>
-          </div>
+          <VueDraggable
+            v-if="preTasks.length > 0"
+            v-model="preTasks"
+            class="space-y-1.5"
+            :animation="150"
+            handle=".pre-task-drag-handle"
+            ghost-class="ghost"
+          >
+            <PreTaskRow
+              v-for="(item, index) in preTasks"
+              :key="item.id"
+              :item="item"
+              @delete="handleDelete(index)"
+            />
+          </VueDraggable>
 
           <NEl
             v-else

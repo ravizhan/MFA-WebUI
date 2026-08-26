@@ -1,63 +1,57 @@
 <template>
-  <div class="flex min-h-0 flex-col gap-3">
-    <NTabs
-      v-model:value="activeTab"
-      type="segment"
-      size="small"
-      class="w-full flex-nowrap overflow-x-auto"
-    >
-      <NTabPane name="pre-tasks">
-        <template #tab>
-          <span class="flex items-center gap-1.5 whitespace-nowrap">
-            <NIcon size="16"><TerminalOutline /></NIcon>
-            {{ t("settings.scheduler.dialog.tab.preTasks") }}
-          </span>
-        </template>
-        <div class="min-h-48">
-          <PreTaskList v-model="preTasks" embedded />
-        </div>
-      </NTabPane>
-      <NTabPane name="task-list">
-        <template #tab>
-          <span class="flex items-center gap-1.5 whitespace-nowrap">
-            <NIcon size="16"><ListOutline /></NIcon>
-            {{ t("settings.scheduler.dialog.tab.taskList") }}
-          </span>
-        </template>
-        <div class="min-h-48">
-          <TaskSelectList
-            :tasks="taskListData"
-            :selected-tasks="selectedTasks"
-            :controller-name="controllerName"
-            :resource-name="resourceName"
-            :hide-incompatible="true"
-            max-height="20rem"
-            @update:tasks="emit('update:tasks', $event)"
-            @update:selected-tasks="emit('update:selected-tasks', $event)"
-            @config="emit('config', $event)"
-          />
-        </div>
-      </NTabPane>
-      <NTabPane name="task-settings">
-        <template #tab>
-          <span class="flex items-center gap-1.5 whitespace-nowrap">
-            <NIcon size="16"><OptionsOutline /></NIcon>
-            {{ t("settings.scheduler.dialog.tab.taskSettings") }}
-          </span>
-        </template>
-        <div class="min-h-48">
-          <TaskOptionPanel
-            :current-task-id="currentSettingTaskId"
-            :options="taskOptions"
-            :show-header="true"
-            :header-label="t('settings.scheduler.dialog.currentSetting')"
-            :empty-text="t('settings.scheduler.dialog.selectTaskTip')"
-            :no-options-text="t('settings.scheduler.dialog.noOptions')"
-          />
-        </div>
-      </NTabPane>
-    </NTabs>
-  </div>
+  <NTabs
+    v-model:value="activeTab"
+    type="segment"
+    size="small"
+    class="w-full flex-nowrap overflow-x-auto"
+  >
+    <NTabPane name="pre-tasks">
+      <template #tab>
+        <span class="flex items-center gap-1.5 whitespace-nowrap">
+          <NIcon size="16"><TerminalOutline /></NIcon>
+          {{ t("settings.scheduler.dialog.tab.preTasks") }}
+        </span>
+      </template>
+      <PreTaskList v-model="preTasks" class="min-h-48" embedded />
+    </NTabPane>
+    <NTabPane name="task-list">
+      <template #tab>
+        <span class="flex items-center gap-1.5 whitespace-nowrap">
+          <NIcon size="16"><ListOutline /></NIcon>
+          {{ t("settings.scheduler.dialog.tab.taskList") }}
+        </span>
+      </template>
+      <TaskSelectList
+        class="min-h-48"
+        :tasks="taskListData"
+        :selected-tasks="selectedTasks"
+        :controller-name="controllerName"
+        :resource-name="resourceName"
+        :hide-incompatible="true"
+        max-height="20rem"
+        @update:tasks="emit('update:tasks', $event)"
+        @update:selected-tasks="emit('update:selected-tasks', $event)"
+        @config="emit('config', $event)"
+      />
+    </NTabPane>
+    <NTabPane name="task-settings">
+      <template #tab>
+        <span class="flex items-center gap-1.5 whitespace-nowrap">
+          <NIcon size="16"><OptionsOutline /></NIcon>
+          {{ t("settings.scheduler.dialog.tab.taskSettings") }}
+        </span>
+      </template>
+      <TaskOptionPanel
+        class="min-h-48"
+        :current-task-id="currentSettingTaskId"
+        :options="taskOptions"
+        :show-header="true"
+        :header-label="t('settings.scheduler.dialog.currentSetting')"
+        :empty-text="t('settings.scheduler.dialog.selectTaskTip')"
+        :no-options-text="t('settings.scheduler.dialog.noOptions')"
+      />
+    </NTabPane>
+  </NTabs>
 </template>
 
 <script setup lang="ts">

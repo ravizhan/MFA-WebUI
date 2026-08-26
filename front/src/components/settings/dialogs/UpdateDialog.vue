@@ -7,7 +7,7 @@
     :mask-closable="true"
     style="max-width: min(480px, calc(100vw - 32px))"
   >
-    <div v-if="updateState === 'available'">
+    <template v-if="updateState === 'available'">
       <NAlert type="info" class="mb-4">
         <template #icon>
           <NIcon size="24"><ArrowUpCircleOutline /></NIcon>
@@ -20,7 +20,7 @@
         </template>
         <div class="markdown-body max-h-64 overflow-y-auto" v-html="renderedMarkdown" />
       </NCard>
-    </div>
+    </template>
 
     <div v-else-if="isUpdating" class="space-y-3">
       <NAlert :type="updateState === 'failed' ? 'error' : 'info'">
@@ -40,10 +40,8 @@
     </NAlert>
 
     <NAlert v-else-if="updateState === 'failed'" type="error">
-      <div>
-        <div class="font-bold">{{ t("settings.update.updateFailed") }}</div>
-        <div>{{ statusMessage }}</div>
-      </div>
+      <div class="font-bold">{{ t("settings.update.updateFailed") }}</div>
+      <div>{{ statusMessage }}</div>
     </NAlert>
 
     <template #action>

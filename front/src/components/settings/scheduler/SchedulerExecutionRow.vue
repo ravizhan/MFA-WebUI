@@ -1,40 +1,38 @@
 <template>
-  <div class="flex gap-3 items-start">
-    <div class="flex-1 min-w-0">
-      <div class="flex items-center justify-between gap-2">
-        <span class="flex items-center gap-2 min-w-0">
-          <span class="font-medium text-sm truncate">{{ execution.task_name }}</span>
-          <NTag size="small" :type="originTagType(execution.origin)" class="shrink-0">
-            <template #icon>
-              <NIcon size="14"><component :is="originIcon(execution.origin)" /></NIcon>
-            </template>
-            {{ getOriginLabelText(execution.origin) }}
-          </NTag>
-        </span>
-        <span class="text-xs opacity-50 shrink-0">{{
-          formatDateTimeText(execution.started_at)
-        }}</span>
-      </div>
-      <div class="mt-1">
-        <NTag size="small" :type="getStatusType(execution.status)">
+  <div>
+    <div class="flex items-center justify-between gap-2">
+      <span class="flex items-center gap-2 min-w-0">
+        <span class="font-medium text-sm truncate">{{ execution.task_name }}</span>
+        <NTag size="small" :type="originTagType(execution.origin)" class="shrink-0">
           <template #icon>
-            <NIcon size="14" :class="{ 'animate-spin': execution.status === 'running' }">
-              <component :is="statusIcon(execution.status)" />
-            </NIcon>
+            <NIcon size="14"><component :is="originIcon(execution.origin)" /></NIcon>
           </template>
-          {{ getStatusLabelText(execution.status) }}
+          {{ getOriginLabelText(execution.origin) }}
         </NTag>
-      </div>
-      <div v-if="execution.blocker_task_name" class="text-xs" style="color: var(--warning-color)">
-        {{ t("settings.scheduler.history.skippedBy", { name: execution.blocker_task_name }) }}
-      </div>
-      <div
-        v-if="execution.error_message"
-        class="text-xs opacity-80"
-        style="color: var(--error-color)"
-      >
-        {{ execution.error_message }}
-      </div>
+      </span>
+      <span class="text-xs opacity-50 shrink-0">{{
+        formatDateTimeText(execution.started_at)
+      }}</span>
+    </div>
+    <div class="mt-1">
+      <NTag size="small" :type="getStatusType(execution.status)">
+        <template #icon>
+          <NIcon size="14" :class="{ 'animate-spin': execution.status === 'running' }">
+            <component :is="statusIcon(execution.status)" />
+          </NIcon>
+        </template>
+        {{ getStatusLabelText(execution.status) }}
+      </NTag>
+    </div>
+    <div v-if="execution.blocker_task_name" class="text-xs" style="color: var(--warning-color)">
+      {{ t("settings.scheduler.history.skippedBy", { name: execution.blocker_task_name }) }}
+    </div>
+    <div
+      v-if="execution.error_message"
+      class="text-xs opacity-80"
+      style="color: var(--error-color)"
+    >
+      {{ execution.error_message }}
     </div>
   </div>
 </template>

@@ -17,14 +17,12 @@
           </NButton>
         </div>
         <div class="space-y-4">
-          <NCard size="small" :bordered="false" content-style="padding: 12px">
-            <TaskOptionPanel
-              :current-task-id="selectedTaskId"
-              :options="configStore.options"
-              :empty-text="t('settings.scheduler.dialog.selectTaskTip')"
-              :no-options-text="t('settings.scheduler.dialog.noOptions')"
-            />
-          </NCard>
+          <TaskOptionPanel
+            :current-task-id="selectedTaskId"
+            :options="configStore.options"
+            :empty-text="t('settings.scheduler.dialog.selectTaskTip')"
+            :no-options-text="t('settings.scheduler.dialog.noOptions')"
+          />
           <TaskDescriptionCard />
         </div>
       </div>
@@ -35,7 +33,7 @@
 <script setup lang="ts">
 import { computed } from "vue"
 import { useI18n } from "vue-i18n"
-import { NButton, NCard, NDrawer, NDrawerContent, NIcon } from "naive-ui"
+import { NButton, NDrawer, NDrawerContent, NIcon } from "naive-ui"
 import { CloseOutline } from "@vicons/ionicons5"
 import TaskDescriptionCard from "@/components/panel/task/TaskDescriptionCard.vue"
 import TaskOptionPanel from "@/components/panel/task/TaskOptionPanel.vue"

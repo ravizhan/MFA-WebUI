@@ -13,20 +13,19 @@
           {{ t("panel.taskList") }}
         </h2>
       </template>
-      <PreTaskList v-model="configStore.preTasks" />
+      <PreTaskList v-model="configStore.preTasks" class="mb-2" />
       <NCard size="small" content-style="padding: 0">
-        <div class="mt-3 task-list-scroll rounded-lg">
-          <TaskSelectList
-            :tasks="configStore.taskList"
-            :selected-tasks="selectedTaskIds"
-            :controller-name="deviceStore.selectedControllerName"
-            :resource-name="deviceStore.resource"
-            :hide-incompatible="true"
-            @update:tasks="handleTasksUpdate"
-            @update:selected-tasks="handleSelectedTasksUpdate"
-            @config="handleConfigTask"
-          />
-        </div>
+        <TaskSelectList
+          class="mt-3 task-list-scroll"
+          :tasks="configStore.taskList"
+          :selected-tasks="selectedTaskIds"
+          :controller-name="deviceStore.selectedControllerName"
+          :resource-name="deviceStore.resource"
+          :hide-incompatible="true"
+          @update:tasks="handleTasksUpdate"
+          @update:selected-tasks="handleSelectedTasksUpdate"
+          @config="handleConfigTask"
+        />
       </NCard>
       <div class="flex justify-center gap-2 pt-4 shrink-0">
         <NButton

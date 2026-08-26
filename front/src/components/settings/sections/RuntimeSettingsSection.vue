@@ -38,13 +38,11 @@
       <label class="text-sm font-medium md:text-right">
         {{ t("settings.runtime.autoRetry") }}
       </label>
-      <div class="flex items-center">
-        <NSwitch
-          :value="settings.runtime.autoRetry"
-          :aria-label="t('settings.runtime.autoRetry')"
-          @update:value="handleSettingChange('runtime', 'autoRetry', $event)"
-        />
-      </div>
+      <NSwitch
+        :value="settings.runtime.autoRetry"
+        :aria-label="t('settings.runtime.autoRetry')"
+        @update:value="handleSettingChange('runtime', 'autoRetry', $event)"
+      />
     </div>
 
     <div

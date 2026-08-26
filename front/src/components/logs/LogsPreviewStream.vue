@@ -4,28 +4,26 @@
     class="aspect-video w-full flex items-center justify-center rounded-xl overflow-hidden"
     style="background: var(--card-color)"
   >
-    <div class="h-full w-full flex items-center justify-center">
-      <template v-if="connected">
-        <img
-          v-if="streaming"
-          ref="streamImage"
-          :src="streamUrl"
-          class="h-full w-full object-contain"
-          alt="live preview"
-        />
-        <div v-else class="text-center opacity-50">
-          <NIcon size="30" class="mx-auto mb-2" style="color: var(--text-color-3)">
-            <VideocamOffOutline />
-          </NIcon>
-          <p>{{ t("panel.previewHint") }}</p>
-        </div>
-      </template>
+    <template v-if="connected">
+      <img
+        v-if="streaming"
+        ref="streamImage"
+        :src="streamUrl"
+        class="h-full w-full object-contain"
+        alt="live preview"
+      />
       <div v-else class="text-center opacity-50">
         <NIcon size="30" class="mx-auto mb-2" style="color: var(--text-color-3)">
-          <LinkOutline />
+          <VideocamOffOutline />
         </NIcon>
-        <p>{{ t("panel.connectFirstHint") }}</p>
+        <p>{{ t("panel.previewHint") }}</p>
       </div>
+    </template>
+    <div v-else class="text-center opacity-50">
+      <NIcon size="30" class="mx-auto mb-2" style="color: var(--text-color-3)">
+        <LinkOutline />
+      </NIcon>
+      <p>{{ t("panel.connectFirstHint") }}</p>
     </div>
   </NEl>
 </template>

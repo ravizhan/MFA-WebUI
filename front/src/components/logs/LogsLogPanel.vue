@@ -1,9 +1,5 @@
 <template>
-  <NEl
-    tag="div"
-    class="flex-1 min-h-0 log-panel rounded-xl overflow-hidden"
-    style="background: var(--card-color)"
-  >
+  <NEl tag="div" class="log-panel rounded-xl overflow-hidden" style="background: var(--card-color)">
     <div ref="logContainer" class="h-full w-full p-4 overflow-y-auto">
       <pre v-if="log">{{ log }}</pre>
       <div v-else class="text-center opacity-50 py-12">

@@ -9,19 +9,17 @@
         <NIcon size="30" class="mx-auto mb-2"><SettingsOutline /></NIcon>
         <p>{{ emptyText }}</p>
       </div>
-      <div v-else>
-        <NEl v-if="taskOptions.length > 0" tag="div" class="rounded-lg overflow-hidden">
-          <OptionItem
-            v-for="optName in taskOptions"
-            :key="optName"
-            :name="optName"
-            :task-options="currentTaskOptions"
-          />
-        </NEl>
-        <div v-else class="text-center py-8 opacity-50">
-          <NIcon size="30" class="mx-auto mb-2"><FileTrayOutline /></NIcon>
-          <p>{{ noOptionsText }}</p>
-        </div>
+      <NEl v-else-if="taskOptions.length > 0" tag="div" class="rounded-lg overflow-hidden">
+        <OptionItem
+          v-for="optName in taskOptions"
+          :key="optName"
+          :name="optName"
+          :task-options="currentTaskOptions"
+        />
+      </NEl>
+      <div v-else class="text-center py-8 opacity-50">
+        <NIcon size="30" class="mx-auto mb-2"><FileTrayOutline /></NIcon>
+        <p>{{ noOptionsText }}</p>
       </div>
     </div>
   </NCard>

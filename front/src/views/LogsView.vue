@@ -7,43 +7,43 @@
         class="w-full"
         content-style="padding: 16px; display: flex; flex-direction: column"
       >
-        <LogsPreviewHeader
-          :connected="connected"
-          :fps="fps"
-          :fps-options="fpsOptions"
-          :streaming="streaming"
-          @start="handleStartStream"
-          @stop="handleStopStream"
-          @update:fps="fps = $event"
-        />
-        <LogsPreviewStream
-          ref="streamPreview"
-          :connected="connected"
-          :stream-url="streamUrl"
-          :streaming="streaming"
-        />
+        <div class="flex flex-col gap-3 h-full">
+          <LogsPreviewHeader
+            :connected="connected"
+            :fps="fps"
+            :fps-options="fpsOptions"
+            :streaming="streaming"
+            @start="handleStartStream"
+            @stop="handleStopStream"
+            @update:fps="fps = $event"
+          />
+          <LogsPreviewStream
+            ref="streamPreview"
+            :connected="connected"
+            :stream-url="streamUrl"
+            :streaming="streaming"
+          />
+        </div>
       </NCard>
     </div>
 
     <!-- Right: Log Stream -->
-    <div class="flex-1 min-h-0">
-      <NCard
-        :bordered="false"
-        class="h-full logs-log-card"
-        content-style="padding: 0; height: 100%; display: flex; flex-direction: column"
-      >
-        <div class="h-full flex flex-col p-4">
-          <LogsLogHeader
-            :auto-scroll="autoScroll"
-            :has-log="Boolean(log)"
-            @copy="handleCopy"
-            @download="handleDownload"
-            @toggle-auto-scroll="autoScroll = !autoScroll"
-          />
-          <LogsLogPanel ref="logPanel" :log="log" />
-        </div>
-      </NCard>
-    </div>
+    <NCard
+      :bordered="false"
+      class="h-full flex-1 min-h-0 logs-log-card"
+      content-style="padding: 0; height: 100%; display: flex; flex-direction: column"
+    >
+      <div class="h-full flex flex-col gap-3 p-4">
+        <LogsLogHeader
+          :auto-scroll="autoScroll"
+          :has-log="Boolean(log)"
+          @copy="handleCopy"
+          @download="handleDownload"
+          @toggle-auto-scroll="autoScroll = !autoScroll"
+        />
+        <LogsLogPanel ref="logPanel" :log="log" class="flex-1 min-h-0" />
+      </div>
+    </NCard>
   </div>
 </template>
 

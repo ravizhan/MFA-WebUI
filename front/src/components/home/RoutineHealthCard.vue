@@ -54,16 +54,14 @@
       </div>
     </NEl>
 
-    <div class="flex gap-2">
-      <RouterLink :to="{ name: 'routines' }" class="flex-1">
-        <NButton secondary type="primary" size="small" block>
-          <template #icon>
-            <NIcon size="16"><AddCircleOutline /></NIcon>
-          </template>
-          {{ t("settings.scheduler.create") }}
-        </NButton>
-      </RouterLink>
-    </div>
+    <RouterLink :to="{ name: 'routines' }">
+      <NButton secondary type="primary" size="small" block>
+        <template #icon>
+          <NIcon size="16"><AddCircleOutline /></NIcon>
+        </template>
+        {{ t("settings.scheduler.create") }}
+      </NButton>
+    </RouterLink>
   </div>
 </template>
 

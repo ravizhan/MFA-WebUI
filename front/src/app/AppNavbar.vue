@@ -8,9 +8,7 @@
         0 4px 6px -4px rgb(0 0 0 / 0.1);
     "
   >
-    <div class="flex-1 min-w-0">
-      <span class="text-xl font-bold tracking-wide">{{ name }}</span>
-    </div>
+    <span class="flex-1 min-w-0 truncate text-xl font-bold tracking-wide">{{ name }}</span>
     <div class="hidden lg:flex flex-none">
       <NMenu mode="horizontal" :value="menuValue" :options="menuOptions" @update:value="onSelect" />
     </div>

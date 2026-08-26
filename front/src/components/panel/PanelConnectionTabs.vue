@@ -44,57 +44,55 @@
   </div>
 
   <!-- Tabs mode (default): full card with tab toggle -->
-  <div v-else class="space-y-3">
-    <NCard size="small" content-style="padding: 12px">
-      <NTabs v-model:value="activeTab" type="segment" size="small" class="mb-3">
-        <NTabPane name="device" :tab="t('panel.device')" />
-        <NTabPane name="resource" :tab="t('panel.resource')" />
-      </NTabs>
+  <NCard v-else size="small" content-style="padding: 12px">
+    <NTabs v-model:value="activeTab" type="segment" size="small" class="mb-3">
+      <NTabPane name="device" :tab="t('panel.device')" />
+      <NTabPane name="resource" :tab="t('panel.resource')" />
+    </NTabs>
 
-      <div v-if="activeTab === 'device'" class="flex flex-wrap gap-2">
-        <NSelect
-          :value="selectedController"
-          :options="controllerOptions"
-          :placeholder="t('panel.selectDeviceType')"
-          :disabled="deviceDisabled"
-          class="flex-1 min-w-[8rem]"
-          @update:value="handleControllerUpdate"
-        />
-        <NInput
-          v-if="isPlayCover"
-          :value="playCoverAddress"
-          :placeholder="t('panel.playcoverAddress')"
-          :disabled="deviceDisabled"
-          class="flex-1 min-w-[10rem]"
-          @update:value="emit('update:play-cover-address', $event)"
-        />
-        <NSelect
-          v-else
-          filterable
-          tag
-          :value="selectedDeviceKey"
-          :options="deviceOptions"
-          :placeholder="t('panel.selectDevice')"
-          :disabled="!selectedController || selectedControllerDisabled || deviceDisabled"
-          class="flex-1 min-w-[10rem]"
-          :on-create="(label: string) => ({ label, value: label })"
-          @update:value="handleDeviceSelect"
-          @update:show="(show: boolean) => show && emit('open-devices')"
-        />
-      </div>
+    <div v-if="activeTab === 'device'" class="flex flex-wrap gap-2">
+      <NSelect
+        :value="selectedController"
+        :options="controllerOptions"
+        :placeholder="t('panel.selectDeviceType')"
+        :disabled="deviceDisabled"
+        class="flex-1 min-w-[8rem]"
+        @update:value="handleControllerUpdate"
+      />
+      <NInput
+        v-if="isPlayCover"
+        :value="playCoverAddress"
+        :placeholder="t('panel.playcoverAddress')"
+        :disabled="deviceDisabled"
+        class="flex-1 min-w-[10rem]"
+        @update:value="emit('update:play-cover-address', $event)"
+      />
+      <NSelect
+        v-else
+        filterable
+        tag
+        :value="selectedDeviceKey"
+        :options="deviceOptions"
+        :placeholder="t('panel.selectDevice')"
+        :disabled="!selectedController || selectedControllerDisabled || deviceDisabled"
+        class="flex-1 min-w-[10rem]"
+        :on-create="(label: string) => ({ label, value: label })"
+        @update:value="handleDeviceSelect"
+        @update:show="(show: boolean) => show && emit('open-devices')"
+      />
+    </div>
 
-      <div v-else class="flex flex-wrap gap-2">
-        <NSelect
-          :value="resource"
-          :options="resourcesList"
-          :placeholder="t('panel.selectResource')"
-          :disabled="resourceDisabled"
-          class="flex-1 min-w-[12rem]"
-          @update:value="emit('update:resource', $event)"
-        />
-      </div>
-    </NCard>
-  </div>
+    <div v-else class="flex flex-wrap gap-2">
+      <NSelect
+        :value="resource"
+        :options="resourcesList"
+        :placeholder="t('panel.selectResource')"
+        :disabled="resourceDisabled"
+        class="flex-1 min-w-[12rem]"
+        @update:value="emit('update:resource', $event)"
+      />
+    </div>
+  </NCard>
 </template>
 
 <script setup lang="ts">
