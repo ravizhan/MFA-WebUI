@@ -23,7 +23,7 @@ export interface SchedulerTaskSave {
 }
 
 export function useSchedulerTaskSave(
-  task: ScheduledTask | null | undefined,
+  task: Ref<ScheduledTask | null | undefined>,
   formData: Ref<SchedulerTaskFormData>,
   wakeupEnabled: Ref<boolean>,
   isCronNativeEligible: Ref<boolean>,
@@ -94,9 +94,10 @@ export function useSchedulerTaskSave(
 
     loading.value = true
     const [savedTask, err] = await tryCatch(async () => {
-      if (task) {
-        const ok = await schedulerStore.updateTask(task.id, parsedTask)
-        return ok ? task : null
+      const currentTask = task.value
+      if (currentTask) {
+        const ok = await schedulerStore.updateTask(currentTask.id, parsedTask)
+        return ok ? currentTask : null
       }
       return schedulerStore.createTask(parsedTask)
     })
@@ -108,7 +109,7 @@ export function useSchedulerTaskSave(
 
     showGlobalMessage(
       "success",
-      task
+      task.value
         ? t("settings.scheduler.dialog.taskUpdated")
         : t("settings.scheduler.dialog.taskCreated"),
     )

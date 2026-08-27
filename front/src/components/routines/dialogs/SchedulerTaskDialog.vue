@@ -348,7 +348,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, watch } from "vue"
+import { ref, computed, nextTick, toRef, watch } from "vue"
 import { useI18n } from "vue-i18n"
 import {
   CalendarNumberOutline,
@@ -395,6 +395,8 @@ interface Emits {
 
 const { show, task } = defineProps<Props>()
 const emit = defineEmits<Emits>()
+
+const taskRef = toRef(() => task)
 
 const { t } = useI18n()
 const configStore = useTaskConfigStore()
@@ -532,7 +534,7 @@ function resetForm() {
 }
 
 const { loading, handleSave } = useSchedulerTaskSave(
-  task,
+  taskRef,
   formData,
   wakeupEnabled,
   isCronNativeEligible,
