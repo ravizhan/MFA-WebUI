@@ -1,51 +1,39 @@
 <template>
-  <div
-    class="fixed inset-0 z-50"
-    :class="{ 'pointer-events-none': !indexStore.TaskSettingsDrawerVisible }"
+  <NDrawer
+    v-model:show="drawerVisible"
+    placement="bottom"
+    height="80%"
+    :mask-closable="true"
+    @mask-click="indexStore.closeTaskSettingsDrawer()"
   >
-    <!-- Backdrop -->
-    <div
-      class="absolute inset-0 bg-black/50 transition-opacity"
-      :class="indexStore.TaskSettingsDrawerVisible ? 'opacity-100' : 'opacity-0'"
-      @click="indexStore.closeTaskSettingsDrawer()"
-    />
-    <!-- Drawer -->
-    <div
-      class="absolute right-0 top-0 h-full w-full max-w-md bg-base-100 shadow-2xl transform transition-transform duration-300 overflow-y-auto"
-      :class="indexStore.TaskSettingsDrawerVisible ? 'translate-x-0' : 'translate-x-full'"
-    >
+    <NDrawerContent :native-scrollbar="false">
       <div class="p-4">
         <div class="flex items-center justify-between mb-4">
           <h3 class="text-lg font-bold">{{ drawerTitle }}</h3>
-          <button
-            class="btn btn-ghost btn-circle btn-sm"
-            @click="indexStore.closeTaskSettingsDrawer()"
-          >
-            <Icon icon="mdi:close" class="text-base" />
-          </button>
+          <NButton quaternary circle size="small" @click="indexStore.closeTaskSettingsDrawer()">
+            <template #icon>
+              <NIcon size="16"><CloseOutline /></NIcon>
+            </template>
+          </NButton>
         </div>
         <div class="space-y-4">
-          <div class="card bg-base-200">
-            <div class="card-body p-3">
-              <TaskOptionPanel
-                :current-task-id="selectedTaskId"
-                :options="configStore.options"
-                :empty-text="t('settings.scheduler.dialog.selectTaskTip')"
-                :no-options-text="t('settings.scheduler.dialog.noOptions')"
-              />
-            </div>
-          </div>
+          <TaskOptionPanel
+            :current-task-id="selectedTaskId"
+            :options="configStore.options"
+            :empty-text="t('settings.scheduler.dialog.selectTaskTip')"
+            :no-options-text="t('settings.scheduler.dialog.noOptions')"
+          />
           <TaskDescriptionCard />
         </div>
       </div>
-    </div>
-  </div>
+    </NDrawerContent>
+  </NDrawer>
 </template>
 
 <script setup lang="ts">
 import { computed } from "vue"
 import { useI18n } from "vue-i18n"
-import { Icon } from "@iconify/vue"
+import { CloseOutline } from "@vicons/ionicons5"
 import TaskDescriptionCard from "@/components/panel/task/TaskDescriptionCard.vue"
 import TaskOptionPanel from "@/components/panel/task/TaskOptionPanel.vue"
 import { useIndexStore, useInterfaceStore, useTaskConfigStore } from "@/stores"
@@ -57,6 +45,10 @@ const indexStore = useIndexStore()
 const interfaceStore = useInterfaceStore()
 
 const selectedTaskId = computed(() => indexStore.SelectedTaskID || null)
+const drawerVisible = computed({
+  get: () => indexStore.TaskSettingsDrawerVisible,
+  set: (visible: boolean) => indexStore.setTaskSettingsDrawerVisible(visible),
+})
 const drawerTitle = computed(() => {
   const task = selectedTaskId.value ? interfaceStore.getTaskByEntry(selectedTaskId.value) : null
   if (!task) {

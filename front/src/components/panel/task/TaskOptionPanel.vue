@@ -1,36 +1,34 @@
 <template>
-  <div class="task-option-panel">
+  <NCard :bordered="false" content-style="padding: 0.5rem">
     <div v-if="showHeader && currentTaskName" class="text-center mb-2">
-      <span class="badge badge-primary badge-lg"> {{ headerLabel }}{{ currentTaskName }} </span>
+      <NTag type="primary" size="large">{{ headerLabel }}{{ currentTaskName }}</NTag>
     </div>
 
     <div :class="scrollbarClass">
       <div v-if="!currentTaskId" class="text-center py-8 opacity-50">
-        <Icon icon="mdi:cog-off" class="text-3xl mx-auto mb-2" />
+        <NIcon size="30" class="mx-auto mb-2"><SettingsOutline /></NIcon>
         <p>{{ emptyText }}</p>
       </div>
-      <div v-else>
-        <div v-if="taskOptions.length > 0" class="bg-base-200 rounded-lg overflow-hidden">
-          <OptionItem
-            v-for="optName in taskOptions"
-            :key="optName"
-            :name="optName"
-            :task-options="currentTaskOptions"
-          />
-        </div>
-        <div v-else class="text-center py-8 opacity-50">
-          <Icon icon="mdi:inbox" class="text-3xl mx-auto mb-2" />
-          <p>{{ noOptionsText }}</p>
-        </div>
+      <NEl v-else-if="taskOptions.length > 0" tag="div" class="rounded-lg overflow-hidden">
+        <OptionItem
+          v-for="optName in taskOptions"
+          :key="optName"
+          :name="optName"
+          :task-options="currentTaskOptions"
+        />
+      </NEl>
+      <div v-else class="text-center py-8 opacity-50">
+        <NIcon size="30" class="mx-auto mb-2"><FileTrayOutline /></NIcon>
+        <p>{{ noOptionsText }}</p>
       </div>
     </div>
-  </div>
+  </NCard>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from "vue"
 import { useI18n } from "vue-i18n"
-import { Icon } from "@iconify/vue"
+import { FileTrayOutline, SettingsOutline } from "@vicons/ionicons5"
 import { useInterfaceStore } from "@/stores"
 import type { TaskOptionsByTask } from "@/types/schedulerModel"
 import OptionItem from "@/components/panel/task/OptionItem.vue"
@@ -97,9 +95,3 @@ const taskOptions = computed(() => {
   return task?.option || []
 })
 </script>
-
-<style scoped>
-.task-option-panel {
-  min-height: 50px;
-}
-</style>

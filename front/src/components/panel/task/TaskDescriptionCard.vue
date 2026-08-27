@@ -1,5 +1,7 @@
 <template>
-  <div class="markdown-body min-h-20 max-h-52 overflow-y-auto" v-html="htmlContent" />
+  <NCard :bordered="false" content-style="padding: 0.5rem">
+    <div class="markdown-body min-h-20 max-h-52 overflow-y-auto" v-html="htmlContent" />
+  </NCard>
 </template>
 
 <script setup lang="ts">

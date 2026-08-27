@@ -69,7 +69,7 @@ export function buildResourceUrl(path: string): string | undefined {
 }
 
 export function resolveInterfaceText(
-  _model: InterfaceModel | null | undefined,
+  _model: Partial<InterfaceModel> | null | undefined,
   _locale: string,
   value?: string | null,
   fallback = "",
@@ -86,7 +86,7 @@ export function resolveInterfaceText(
 }
 
 export function resolveInterfaceAssetUrl(
-  model: InterfaceModel | null | undefined,
+  model: Partial<InterfaceModel> | null | undefined,
   locale: string,
   value?: string | null,
 ): string | undefined {
@@ -101,7 +101,7 @@ export function resolveInterfaceAssetUrl(
 }
 
 export async function resolveInterfaceDocumentContent(
-  model: InterfaceModel | null | undefined,
+  model: Partial<InterfaceModel> | null | undefined,
   locale: string,
   value?: string | null,
 ): Promise<string> {

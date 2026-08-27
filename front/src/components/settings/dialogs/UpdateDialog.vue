@@ -1,75 +1,80 @@
 <template>
-  <div class="modal" :class="{ 'modal-open': showModal }" @click.self="handleClose">
-    <div class="modal-box max-w-lg">
-      <h3 class="font-bold text-lg">{{ dialogTitle }}</h3>
+  <NModal
+    v-model:show="showDialog"
+    preset="card"
+    :title="dialogTitle"
+    :closable="false"
+    :mask-closable="true"
+    style="max-width: min(480px, calc(100vw - 32px))"
+  >
+    <template v-if="updateState === 'available'">
+      <NAlert type="info" class="mb-4">
+        <template #icon>
+          <NIcon size="24"><ArrowUpCircleOutline /></NIcon>
+        </template>
+        {{ version_info }}
+      </NAlert>
+      <NCard size="small" :bordered="false" content-style="padding: 12px">
+        <template #header>
+          <span class="text-sm font-semibold">{{ t("settings.update.updateLog") }}</span>
+        </template>
+        <div class="markdown-body max-h-64 overflow-y-auto" v-html="renderedMarkdown" />
+      </NCard>
+    </template>
 
-      <div class="py-4">
-        <div v-if="updateState === 'available'">
-          <div class="alert alert-info mb-4">
-            <Icon icon="mdi:update" class="text-2xl" />
-            <span>{{ version_info }}</span>
-          </div>
-          <div class="card bg-base-200">
-            <div class="card-body p-3">
-              <h4 class="card-title text-sm">{{ t("settings.update.updateLog") }}</h4>
-              <div class="markdown-body max-h-64 overflow-y-auto" v-html="renderedMarkdown" />
-            </div>
-          </div>
-        </div>
+    <div v-else-if="isUpdating" class="space-y-3">
+      <NAlert :type="updateState === 'failed' ? 'error' : 'info'">
+        {{ statusMessage }}
+      </NAlert>
+      <NProgress
+        v-if="updateState !== 'failed' && updateState !== 'success'"
+        type="line"
+        :percentage="0"
+        :show-indicator="false"
+        processing
+      />
+    </div>
 
-        <div v-else-if="isUpdating" class="space-y-3">
-          <div class="alert" :class="updateState === 'failed' ? 'alert-error' : 'alert-info'">
-            <span>{{ statusMessage }}</span>
-          </div>
-          <progress
-            v-if="updateState !== 'failed' && updateState !== 'success'"
-            class="progress progress-primary w-full"
-            max="100"
-          />
-        </div>
+    <NAlert v-else-if="updateState === 'success'" type="success">
+      {{ t("settings.update.updateSuccess") }}
+    </NAlert>
 
-        <div v-else-if="updateState === 'success'" class="alert alert-success">
-          {{ t("settings.update.updateSuccess") }}
-        </div>
+    <NAlert v-else-if="updateState === 'failed'" type="error">
+      <div class="font-bold">{{ t("settings.update.updateFailed") }}</div>
+      <div>{{ statusMessage }}</div>
+    </NAlert>
 
-        <div v-else-if="updateState === 'failed'" class="alert alert-error">
-          <div>
-            <div class="font-bold">{{ t("settings.update.updateFailed") }}</div>
-            <div>{{ statusMessage }}</div>
-          </div>
-        </div>
-      </div>
-
-      <div class="modal-action">
-        <button
+    <template #action>
+      <NSpace justify="end">
+        <NButton
           v-if="updateState === 'available'"
-          class="btn btn-ghost"
+          quaternary
           :disabled="isUpdating"
           @click="handleClose"
         >
           {{ t("settings.update.later") }}
-        </button>
-        <button
+        </NButton>
+        <NButton
           v-if="updateState === 'available'"
-          class="btn btn-primary"
+          type="primary"
+          :loading="isUpdating"
           :disabled="isUpdating"
           @click="handleUpdate"
         >
-          <Icon v-if="isUpdating" icon="mdi:loading" class="animate-spin mr-1 text-lg" />
           {{ t("settings.update.updateNow") }}
-        </button>
-        <button v-if="updateState === 'failed'" class="btn btn-primary" @click="handleClose">
+        </NButton>
+        <NButton v-if="updateState === 'failed'" type="primary" @click="handleClose">
           {{ t("common.confirm") }}
-        </button>
-      </div>
-    </div>
-  </div>
+        </NButton>
+      </NSpace>
+    </template>
+  </NModal>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch, onUnmounted } from "vue"
 import { useI18n } from "vue-i18n"
-import { Icon } from "@iconify/vue"
+import { ArrowUpCircleOutline } from "@vicons/ionicons5"
 import { marked } from "marked"
 import { performUpdateApi, getUpdateStatusApi, type UpdateInfo } from "@/services/api"
 import DOMPurify from "dompurify"
@@ -99,7 +104,7 @@ const version_info = computed(() => {
   )
 })
 
-const showModal = computed({
+const showDialog = computed({
   get: () => show,
   set: (value) => emit("update:show", value),
 })
@@ -130,10 +135,11 @@ const dialogTitle = computed(() => {
 })
 
 const renderedMarkdown = computed(() => {
-  if (!updateInfo?.release_notes) {
+  const notes = updateInfo?.release_notes
+  if (!notes) {
     return "<p>" + t("panel.empty") + "</p>"
   }
-  const raw = marked.parse(updateInfo.release_notes)
+  const raw = marked.parse(notes)
   return typeof raw === "string" ? DOMPurify.sanitize(raw) : ""
 })
 
@@ -237,7 +243,7 @@ const handleUpdate = async () => {
 }
 
 const handleClose = () => {
-  showModal.value = false
+  showDialog.value = false
   stopPolling()
 }
 

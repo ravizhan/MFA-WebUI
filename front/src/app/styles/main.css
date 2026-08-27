@@ -4,6 +4,7 @@ body {
   padding: 0;
   height: 100%;
 }
+
 #app {
   height: 100%;
 }
@@ -68,5 +69,12 @@ body {
 /* Ghost class for draggable */
 .ghost {
   opacity: 0.5;
-  background: oklch(85% 0.1 200);
+}
+
+/* Card elevation: naive-ui only renders var(--n-box-shadow) on .n-card--hoverable:hover,
+   leaving resting cards flat. The MWU design language (former daisyUI shadow-lg cards)
+   requires a permanent resting shadow, so apply the themed box-shadow to every card.
+   The value comes from the theme override (theme.ts Card.boxShadow). */
+.n-card {
+  box-shadow: var(--n-box-shadow);
 }

@@ -1,24 +1,38 @@
-import { ref } from "vue"
+import type { MessageApiInjection } from "naive-ui/es/message/src/MessageProvider"
 
 export type GlobalMessageType = "info" | "success" | "warning" | "error"
 
-interface ToastItem {
-  id: number
+interface QueuedMessage {
   type: GlobalMessageType
   content: string
 }
 
-const toasts = ref<ToastItem[]>([])
-let toastId = 0
+let messageApi: MessageApiInjection | null = null
+let queue: QueuedMessage[] = []
 
-export function showGlobalMessage(type: GlobalMessageType, content: string): void {
-  const id = ++toastId
-  toasts.value.push({ id, type, content })
-  setTimeout(() => {
-    toasts.value = toasts.value.filter((t) => t.id !== id)
-  }, 3000)
+/**
+ * Registers the naive-ui message API. Called once by FeedbackBridge after mount.
+ * Any messages queued before registration are flushed immediately.
+ */
+export function registerMessageApi(api: MessageApiInjection): void {
+  messageApi = api
+  const pending = queue
+  queue = []
+  for (const { type, content } of pending) {
+    messageApi.create(content, { type, duration: 3000 })
+  }
 }
 
-export function useToasts() {
-  return toasts
+export function showGlobalMessage(type: GlobalMessageType, content: string): void {
+  if (messageApi) {
+    messageApi.create(content, { type, duration: 3000 })
+    return
+  }
+  queue.push({ type, content })
+}
+
+/** Test-only: resets the bridge so unit tests start from a clean slate. */
+export function _resetMessageApiForTest(): void {
+  messageApi = null
+  queue = []
 }

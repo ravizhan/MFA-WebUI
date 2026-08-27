@@ -1,28 +1,30 @@
 import { createI18n } from "vue-i18n"
-import zhCN from "@/app/i18n/messages/zh-CN.json"
 import enUS from "@/app/i18n/messages/en-US.json"
+import zhCN from "@/app/i18n/messages/zh-CN.json"
 
 type MessageSchema = typeof zhCN
+type Locale = "zh-CN" | "en-US"
 
-function isLocale(value: string | null): value is "zh-CN" | "en-US" {
-  return value === "zh-CN" || value === "en-US"
-}
+const DEFAULT_LOCALE = "zh-CN" as const
 
 const savedLocale = localStorage.getItem("locale")
 const savedLang = localStorage.getItem("lang")
-let locale: "zh-CN" | "en-US" = "zh-CN"
-if (isLocale(savedLocale)) {
+let locale: Locale = DEFAULT_LOCALE
+if (savedLocale === "zh-CN" || savedLocale === "en-US") {
   locale = savedLocale
 }
-if (!isLocale(savedLocale) && isLocale(savedLang)) {
+if (
+  !(savedLocale === "zh-CN" || savedLocale === "en-US") &&
+  (savedLang === "zh-CN" || savedLang === "en-US")
+) {
   locale = savedLang
 }
 
-const i18n = createI18n<[MessageSchema], "zh-CN" | "en-US">({
+const i18n = createI18n<[MessageSchema], Locale>({
   legacy: false,
   globalInjection: true,
   locale,
-  fallbackLocale: "zh-CN",
+  fallbackLocale: DEFAULT_LOCALE,
   messages: {
     "zh-CN": zhCN,
     "en-US": enUS,

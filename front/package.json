@@ -10,6 +10,7 @@
     "dev": "vite --host",
     "build": "vite build --emptyOutDir",
     "preview": "vite preview --host",
+    "type-check": "vue-tsc --noEmit",
     "lint": "oxlint && eslint",
     "format": "oxfmt",
     "test": "vitest",
@@ -17,11 +18,12 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@iconify/vue": "catalog:",
+    "@vicons/ionicons5": "catalog:",
     "cron-converter": "catalog:",
     "dompurify": "catalog:",
     "github-markdown-css": "catalog:",
     "marked": "catalog:",
+    "naive-ui": "catalog:",
     "pinia": "catalog:",
     "vue": "catalog:",
     "vue-draggable-plus": "catalog:",
@@ -40,7 +42,6 @@
     "@vue/eslint-config-prettier": "catalog:",
     "@vue/eslint-config-typescript": "catalog:",
     "@vue/tsconfig": "catalog:",
-    "daisyui": "catalog:",
     "eslint": "catalog:",
     "eslint-plugin-oxlint": "catalog:",
     "eslint-plugin-pnpm": "catalog:",
@@ -54,7 +55,9 @@
     "tailwindcss": "catalog:",
     "typescript": "catalog:",
     "unplugin-auto-import": "catalog:",
+    "unplugin-vue-components": "catalog:",
     "vite": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "vue-tsc": "catalog:"
   }
 }

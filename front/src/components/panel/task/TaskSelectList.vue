@@ -1,49 +1,61 @@
 <template>
-  <div
-    class="bg-base-100 rounded-lg overflow-hidden"
-    :class="{ 'overflow-y-auto': maxHeight }"
-    :style="maxHeight ? { maxHeight } : undefined"
-  >
-    <VueDraggable v-model="taskListData" :animation="150" ghost-class="ghost">
-      <div
-        v-for="(item, index) in taskListData"
-        :key="item.id"
-        class="flex items-center gap-3 px-3 py-2.5 border-b border-base-200 last:border-b-0 cursor-pointer transition-colors"
-        :class="
-          index % 2 === 0 ? 'bg-base-100 hover:bg-base-200' : 'bg-base-200/60 hover:bg-base-300/50'
-        "
-        @click="handleRowClick(item.id)"
+  <NCard size="small" content-style="padding: 0">
+    <NEl
+      tag="div"
+      class="rounded-lg overflow-hidden"
+      :class="{ 'overflow-y-auto': maxHeight }"
+      :style="maxHeight ? { maxHeight } : undefined"
+    >
+      <VueDraggable
+        v-model="taskListData"
+        :animation="150"
+        :delay="120"
+        :delay-on-touch-only="true"
+        ghost-class="ghost"
       >
-        <Icon
-          icon="mdi:drag"
-          class="text-base-content/40 cursor-grab active:cursor-grabbing text-lg shrink-0"
-        />
-        <input
-          type="checkbox"
-          class="checkbox checkbox-primary checkbox-sm shrink-0"
-          :checked="isTaskSelected(item.id)"
-          @click.stop
-          @change="handleToggle(item.id, getChecked($event))"
-        />
-        <span class="flex-1 text-base truncate select-none">{{
-          resolveTaskLabel(item.id, item.name)
-        }}</span>
-        <button
-          class="btn btn-ghost btn-xs btn-circle shrink-0 w-7 h-7 min-h-0"
-          @click.stop="handleConfig(item.id)"
+        <NEl
+          tag="div"
+          v-for="item in taskListData"
+          :key="item.id"
+          class="task-row flex items-center gap-3 px-3 py-2.5 border-b border-solid last:border-b-0 cursor-pointer transition-colors"
+          :style="{ borderColor: 'var(--divider-color)', background: 'var(--card-color)' }"
+          @click="handleRowClick(item.id)"
         >
-          <Icon icon="mdi:cog-outline" class="text-lg" />
-        </button>
-      </div>
-    </VueDraggable>
-  </div>
+          <NIcon size="20" class="cursor-grab active:cursor-grabbing shrink-0">
+            <ReorderThreeOutline />
+          </NIcon>
+          <NCheckbox
+            class="shrink-0"
+            :checked="isTaskSelected(item.id)"
+            size="large"
+            @click.stop
+            @update:checked="handleSelectedChange(item.id, $event)"
+          />
+          <span class="flex-1 text-base truncate select-none">{{
+            resolveTaskLabel(item.id, item.name)
+          }}</span>
+          <NButton
+            quaternary
+            circle
+            size="small"
+            class="shrink-0"
+            @click.stop="handleConfig(item.id)"
+          >
+            <template #icon>
+              <NIcon size="20"><SettingsOutline /></NIcon>
+            </template>
+          </NButton>
+        </NEl>
+      </VueDraggable>
+    </NEl>
+  </NCard>
 </template>
 
 <script setup lang="ts">
 import { computed } from "vue"
 import { VueDraggable } from "vue-draggable-plus"
 import { useI18n } from "vue-i18n"
-import { Icon } from "@iconify/vue"
+import { ReorderThreeOutline, SettingsOutline } from "@vicons/ionicons5"
 import { useInterfaceStore } from "@/stores"
 import type { TaskListItem } from "@/types/taskConfigModel"
 import type { Task } from "@/types/interfaceModel"
@@ -143,7 +155,7 @@ function isTaskSelected(taskId: string): boolean {
   return selectedTasks.includes(taskId)
 }
 
-function handleToggle(taskId: string, checked: boolean) {
+function handleSelectedChange(taskId: string, checked: boolean) {
   if (checked) {
     emit("update:selected-tasks", [...selectedTasks, taskId])
     return
@@ -156,12 +168,6 @@ function handleToggle(taskId: string, checked: boolean) {
 
 function handleConfig(taskId: string) {
   emit("config", taskId)
-}
-
-function getChecked(event: Event): boolean {
-  const target = event.target
-  if (target instanceof HTMLInputElement) return target.checked
-  return false
 }
 
 function hasDocumentContent(task: Task): boolean {
@@ -181,10 +187,10 @@ function taskHasContent(task: Task | null): boolean {
 
 function handleRowClick(taskId: string) {
   if (isTaskSelected(taskId)) {
-    handleToggle(taskId, false)
+    handleSelectedChange(taskId, false)
     return
   }
-  handleToggle(taskId, true)
+  handleSelectedChange(taskId, true)
   const task = interfaceStore.getTaskByEntry(taskId)
   if (taskHasContent(task)) {
     emit("config", taskId)

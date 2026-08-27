@@ -317,10 +317,7 @@
       "customDescription": "You are using a custom task snapshot and can continue editing it manually."
     },
     "health": {
-      "paused": "Paused",
-      "label": "Health",
-      "running": "Running:",
-      "total": "Total:"
+      "paused": "Paused"
     },
     "connection": {
       "connected": "Connected",

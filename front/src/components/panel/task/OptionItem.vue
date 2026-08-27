@@ -1,52 +1,38 @@
 <template>
   <template v-if="option">
     <div
-      class="flex items-center justify-between w-full gap-4 py-2 px-3 border-b border-base-300 last:border-b-0"
-      :style="{ paddingLeft: (level || 0) * 20 + 12 + 'px' }"
+      class="flex items-center justify-between w-full gap-4 py-2 px-3 border-b border-solid last:border-b-0"
+      :style="{
+        paddingLeft: (level || 0) * 20 + 12 + 'px',
+        borderBottomColor: 'var(--divider-color)',
+      }"
     >
       <div class="min-w-0 flex-1 text-sm">{{ resolvedLabel }}</div>
       <div class="flex flex-1 justify-end">
         <template v-if="option.type === 'switch'">
-          <input
-            type="checkbox"
-            class="toggle toggle-primary toggle-sm"
-            :true-value="checkedValue"
-            :false-value="uncheckedValue"
-            :checked="taskOptions[name] === checkedValue"
-            @change="handleSwitchChange($event)"
+          <NSwitch
+            size="small"
+            :value="taskOptions[name] === checkedValue"
+            @update:value="handleSwitchValueChange"
           />
         </template>
 
         <template v-else-if="option.type === 'select'">
-          <select
-            v-model="taskOptions[name]"
-            class="select select-bordered select-sm w-full max-w-xs"
-          >
-            <option v-for="opt in selectOptions" :key="opt.value" :value="opt.value">
-              {{ opt.label }}
-            </option>
-          </select>
+          <NSelect
+            v-model:value="selectValue"
+            size="small"
+            class="w-full max-w-xs"
+            :options="selectOptions"
+          />
         </template>
 
         <template v-else-if="option.type === 'scan_select'">
-          <div class="flex w-full max-w-xs items-center gap-2">
-            <select v-model="taskOptions[name]" class="select select-bordered select-sm flex-1">
-              <option v-for="opt in selectOptions" :key="opt.value" :value="opt.value">
-                {{ opt.label }}
-              </option>
-            </select>
-            <button
-              class="btn btn-ghost btn-circle btn-sm"
-              :disabled="scanSelectRefreshing"
-              @click="handleRescanScanSelect"
-            >
-              <Icon
-                icon="mdi:refresh"
-                class="text-base"
-                :class="{ 'animate-spin': scanSelectRefreshing }"
-              />
-            </button>
-          </div>
+          <OptionScanSelectControl
+            v-model:value="selectValue"
+            :options="selectOptions"
+            :refreshing="scanSelectRefreshing"
+            @rescan="handleRescanScanSelect"
+          />
         </template>
 
         <template v-else-if="option.type === 'input'">
@@ -55,19 +41,33 @@
               <span class="text-xs opacity-60">{{
                 resolveInputLabel(input.label, input.name)
               }}</span>
-              <input
-                type="text"
-                class="input input-bordered input-sm"
-                :class="{ 'input-error': isInputError(input.name, input.verify) }"
+              <NInputNumber
+                v-if="getInputControlType(input) === 'number'"
+                size="small"
+                :value="getInputNumberValue(input.name)"
+                :status="isInputError(input.name, input.verify) ? 'error' : undefined"
+                @update:value="handleInputNumberChange(input.name, $event, input)"
+              />
+              <NSwitch
+                v-else-if="getInputControlType(input) === 'bool'"
+                size="small"
+                :value="getBooleanInputValue(input.name)"
+                @update:value="handleBooleanInputChange(input.name, $event, input)"
+              />
+              <NInput
+                v-else-if="getInputControlType(input) === 'textarea'"
+                type="textarea"
+                size="small"
                 :value="getInputValue(input.name)"
-                @input="
-                  handleInputChange(
-                    input.name,
-                    getInputEventValue($event),
-                    input,
-                    $event.target instanceof HTMLInputElement ? $event.target : null,
-                  )
-                "
+                :status="isInputError(input.name, input.verify) ? 'error' : undefined"
+                @update:value="handleInputChange(input.name, $event, input)"
+              />
+              <NInput
+                v-else
+                size="small"
+                :value="getInputValue(input.name)"
+                :status="isInputError(input.name, input.verify) ? 'error' : undefined"
+                @update:value="handleInputChange(input.name, $event, input)"
               />
             </div>
           </div>
@@ -75,20 +75,14 @@
 
         <template v-else-if="option.type === 'checkbox'">
           <div class="flex flex-wrap gap-3">
-            <label
+            <NCheckbox
               v-for="checkbox in option.cases"
               :key="checkbox.name"
-              class="flex items-center gap-1 cursor-pointer"
+              :checked="checkboxValue.includes(checkbox.name)"
+              @update:checked="handleCheckboxChange(checkbox.name, $event)"
             >
-              <input
-                type="checkbox"
-                class="checkbox checkbox-primary checkbox-sm"
-                :value="checkbox.name"
-                :checked="checkboxValue.includes(checkbox.name)"
-                @change="toggleCheckbox(checkbox.name, getChecked($event))"
-              />
-              <span class="text-sm">{{ resolveCaseLabel(checkbox.label, checkbox.name) }}</span>
-            </label>
+              {{ resolveCaseLabel(checkbox.label, checkbox.name) }}
+            </NCheckbox>
           </div>
         </template>
       </div>
@@ -109,14 +103,20 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue"
 import { useI18n } from "vue-i18n"
-import { Icon } from "@iconify/vue"
 import { showGlobalMessage } from "@/services/feedback/message"
 import { useInterfaceStore } from "@/stores"
-import type { InputCase } from "@/types/interfaceModel"
+import type {
+  CheckboxOption,
+  InputCase,
+  ScanSelectOption,
+  SelectOption,
+  SwitchOption,
+} from "@/types/interfaceModel"
 import type { NullableTaskOptionValue } from "@/types/schedulerModel"
-import { makeInterfaceInputSchema } from "@/schemas/interfaceInput"
+import { makeInterfaceInputSchema } from "@/validation/interfaceInput"
 import { resolveInterfaceText } from "@/utils/interface/content"
 import { tryCatch } from "@/utils/tryCatch"
+import OptionScanSelectControl from "@/components/panel/task/OptionScanSelectControl.vue"
 
 const {
   name,
@@ -198,12 +198,7 @@ function setInputValue(inputName: string, value: string): void {
   taskOptions.value[name] = nextValue
 }
 
-function handleInputChange(
-  inputName: string,
-  value: string,
-  input: InputCase,
-  target: HTMLInputElement | null,
-): void {
+function handleInputChange(inputName: string, value: string, input: InputCase): void {
   const allowed = isInputAllowed(value, input.verify)
   const wasInvalid = inputInvalidState.value[inputName] === true
 
@@ -213,10 +208,7 @@ function handleInputChange(
     return
   }
 
-  // Invalid: do not update model; snap DOM back to previous value
-  if (target) {
-    target.value = getInputValue(inputName)
-  }
+  // Invalid: do not update model; the controlled Naive UI input retains the previous value.
   inputInvalidState.value = { ...inputInvalidState.value, [inputName]: true }
   if (!wasInvalid && input.pattern_msg) {
     const msg = resolveInterfaceText(
@@ -295,7 +287,7 @@ const checkboxValue = computed<string[]>({
   },
 })
 
-function toggleCheckbox(checkboxName: string, checked: boolean) {
+function handleCheckboxChange(checkboxName: string, checked: boolean) {
   const current = new Set(checkboxValue.value)
   if (checked) {
     current.add(checkboxName)
@@ -306,21 +298,64 @@ function toggleCheckbox(checkboxName: string, checked: boolean) {
   checkboxValue.value = Array.from(current)
 }
 
-function handleSwitchChange(event: Event) {
-  taskOptions.value[name] = getChecked(event) ? checkedValue.value : uncheckedValue.value
+function handleSwitchValueChange(value: string | number | boolean) {
+  const checked = value === true || value === 1 || value === "true" || value === "1"
+  taskOptions.value[name] = checked ? checkedValue.value : uncheckedValue.value
 }
 
-function getInputEventValue(event: Event): string {
-  const target = event.target
-  if (target instanceof HTMLInputElement) return target.value
-  return ""
+type InputControlType = "string" | "number" | "bool" | "textarea"
+
+function getInputControlType(input: InputCase): InputControlType {
+  const pipelineType: string | undefined = input.pipeline_type
+  if (pipelineType === "int" || pipelineType === "number") {
+    return "number"
+  }
+  if (pipelineType === "bool") {
+    return "bool"
+  }
+  if (pipelineType === "textarea") {
+    return "textarea"
+  }
+  return "string"
 }
 
-function getChecked(event: Event): boolean {
-  const target = event.target
-  if (target instanceof HTMLInputElement) return target.checked
-  return false
+function getInputNumberValue(inputName: string): number | null {
+  const value = getInputValue(inputName)
+  if (!value.trim()) {
+    return null
+  }
+  const numberValue = Number(value)
+  return Number.isFinite(numberValue) ? numberValue : null
 }
+
+function handleInputNumberChange(inputName: string, value: number | null, input: InputCase) {
+  handleInputChange(inputName, value == null ? "" : String(value), input)
+}
+
+function getBooleanInputValue(inputName: string): boolean {
+  return ["true", "True", "TRUE", "yes", "Yes", "Y", "y", "1", "on", "On", "ON"].includes(
+    getInputValue(inputName),
+  )
+}
+
+function handleBooleanInputChange(
+  inputName: string,
+  value: string | number | boolean,
+  input: InputCase,
+) {
+  const checked = value === true || value === 1 || value === "true" || value === "1"
+  handleInputChange(inputName, checked ? "true" : "false", input)
+}
+
+const selectValue = computed<string | null>({
+  get() {
+    const value = taskOptions.value[name]
+    return typeof value === "string" ? value : null
+  },
+  set(value) {
+    taskOptions.value[name] = value
+  },
+})
 
 const selectOptions = computed(() => {
   const currentOption = option.value
@@ -357,19 +392,19 @@ watch(
   { immediate: true },
 )
 
-function getSwitchNestedOptions(currentOption: NonNullable<typeof option.value>): string[] {
+function getSwitchNestedOptions(currentOption: SwitchOption): string[] {
   const currentValue = taskOptions.value[name]
   const activeCase = currentOption.cases.find((caseItem) => caseItem.name === currentValue)
   return activeCase?.option || []
 }
 
-function getSelectNestedOptions(currentOption: NonNullable<typeof option.value>): string[] {
+function getSelectNestedOptions(currentOption: SelectOption | ScanSelectOption): string[] {
   const currentValue = taskOptions.value[name]
   const activeCase = currentOption.cases.find((caseItem) => caseItem.name === currentValue)
   return activeCase?.option || []
 }
 
-function getCheckboxNestedOptions(currentOption: NonNullable<typeof option.value>): string[] {
+function getCheckboxNestedOptions(currentOption: CheckboxOption): string[] {
   const activeNames = new Set(
     normalizeCheckboxValue(
       taskOptions.value[name],

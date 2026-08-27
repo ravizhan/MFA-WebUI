@@ -317,10 +317,7 @@
       "customDescription": "当前为自定义任务快照，可继续手动调整。"
     },
     "health": {
-      "paused": "已暂停",
-      "label": "健康度",
-      "running": "运行中:",
-      "total": "总计:"
+      "paused": "已暂停"
     },
     "connection": {
       "connected": "已连接",

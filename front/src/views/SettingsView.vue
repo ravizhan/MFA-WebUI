@@ -2,79 +2,87 @@
   <div class="flex flex-col lg:flex-row gap-4 max-w-screen-xl mx-auto">
     <!-- Left sidebar: settings sections -->
     <div class="lg:w-64 shrink-0">
-      <!-- Mobile: horizontal scroll -->
-      <div class="flex lg:flex-col gap-1 overflow-x-auto lg:overflow-visible pb-2 lg:pb-0">
-        <button
-          v-for="section in sections"
-          :key="section.id"
-          class="flex items-center gap-2 px-3 py-2 rounded-lg text-sm whitespace-nowrap lg:whitespace-normal transition-colors"
-          :class="
-            activeSection === section.id ? 'bg-primary text-primary-content' : 'hover:bg-base-300'
-          "
-          @click="activeSection = section.id"
-        >
-          <Icon :icon="section.icon" class="text-lg" />
-          {{ section.label }}
-        </button>
+      <!-- Responsive wrappers are plain divs: naive's .n-menu/.n-tabs set their own
+           display (unlayered, beats Tailwind's layered hidden/lg:block), so the
+           breakpoint classes must live on the wrapper, not the naive component. -->
+      <div class="hidden lg:block">
+        <NMenu v-model:value="activeSection" mode="vertical" :options="menuOptions" />
+      </div>
+      <div class="lg:hidden">
+        <NTabs v-model:value="activeSection" type="bar">
+          <NTab v-for="section in sections" :key="section.id" :name="section.id">
+            {{ section.label }}
+          </NTab>
+        </NTabs>
       </div>
     </div>
 
     <!-- Right: active section content -->
     <div class="flex-1 min-w-0">
       <!-- Update -->
-      <div v-if="activeSection === 'update'" class="card bg-base-100 shadow-xl">
-        <div class="card-body">
-          <h2 class="card-title">
-            <Icon icon="mdi:update" class="text-primary text-xl" />
+      <NCard v-if="activeSection === 'update'">
+        <template #header>
+          <h2 class="flex items-center gap-2 text-lg font-semibold">
+            <NIcon size="20" style="color: var(--primary-color)">
+              <ArrowUpCircleOutline />
+            </NIcon>
             {{ t("settings.update.title") }}
           </h2>
-          <UpdateSettingsSection @show-update="handleShowUpdate" />
-        </div>
-      </div>
+        </template>
+        <UpdateSettingsSection @show-update="handleShowUpdate" />
+      </NCard>
 
       <!-- Runtime -->
-      <div v-if="activeSection === 'runtime'" class="card bg-base-100 shadow-xl">
-        <div class="card-body">
-          <h2 class="card-title">
-            <Icon icon="mdi:cog-play" class="text-primary text-xl" />
+      <NCard v-if="activeSection === 'runtime'">
+        <template #header>
+          <h2 class="flex items-center gap-2 text-lg font-semibold">
+            <NIcon size="20" style="color: var(--primary-color)">
+              <SettingsOutline />
+            </NIcon>
             {{ t("settings.runtime.title") }}
           </h2>
-          <RuntimeSettingsSection />
-        </div>
-      </div>
+        </template>
+        <RuntimeSettingsSection />
+      </NCard>
 
       <!-- UI -->
-      <div v-if="activeSection === 'ui'" class="card bg-base-100 shadow-xl">
-        <div class="card-body">
-          <h2 class="card-title">
-            <Icon icon="mdi:palette" class="text-primary text-xl" />
+      <NCard v-if="activeSection === 'ui'">
+        <template #header>
+          <h2 class="flex items-center gap-2 text-lg font-semibold">
+            <NIcon size="20" style="color: var(--primary-color)">
+              <ColorPaletteOutline />
+            </NIcon>
             {{ t("settings.ui.title") }}
           </h2>
-          <UISettingsSection />
-        </div>
-      </div>
+        </template>
+        <UISettingsSection />
+      </NCard>
 
       <!-- Notification -->
-      <div v-if="activeSection === 'notification'" class="card bg-base-100 shadow-xl">
-        <div class="card-body">
-          <h2 class="card-title">
-            <Icon icon="mdi:bell" class="text-primary text-xl" />
+      <NCard v-if="activeSection === 'notification'">
+        <template #header>
+          <h2 class="flex items-center gap-2 text-lg font-semibold">
+            <NIcon size="20" style="color: var(--primary-color)">
+              <NotificationsOutline />
+            </NIcon>
             {{ t("settings.notification.title") }}
           </h2>
-          <NotificationSettingsSection />
-        </div>
-      </div>
+        </template>
+        <NotificationSettingsSection />
+      </NCard>
 
       <!-- About -->
-      <div v-if="activeSection === 'about'" class="card bg-base-100 shadow-xl">
-        <div class="card-body">
-          <h2 class="card-title">
-            <Icon icon="mdi:information" class="text-primary text-xl" />
+      <NCard v-if="activeSection === 'about'">
+        <template #header>
+          <h2 class="flex items-center gap-2 text-lg font-semibold">
+            <NIcon size="20" style="color: var(--primary-color)">
+              <InformationCircleOutline />
+            </NIcon>
             {{ t("settings.about.title") }}
           </h2>
-          <AboutSettingsSection />
-        </div>
-      </div>
+        </template>
+        <AboutSettingsSection />
+      </NCard>
     </div>
 
     <UpdateDialog v-model:show="showUpdateDialog" :update-info="updateInfo" />
@@ -82,9 +90,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue"
+import { computed, h, ref, type Component } from "vue"
 import { useI18n } from "vue-i18n"
-import { Icon } from "@iconify/vue"
+import { NIcon } from "naive-ui"
+import type { MenuOption } from "naive-ui"
+import {
+  ArrowUpCircleOutline,
+  ColorPaletteOutline,
+  InformationCircleOutline,
+  NotificationsOutline,
+  SettingsOutline,
+} from "@vicons/ionicons5"
 import UpdateDialog from "@/components/settings/dialogs/UpdateDialog.vue"
 import AboutSettingsSection from "@/components/settings/sections/AboutSettingsSection.vue"
 import NotificationSettingsSection from "@/components/settings/sections/NotificationSettingsSection.vue"
@@ -93,18 +109,34 @@ import UISettingsSection from "@/components/settings/sections/UISettingsSection.
 import UpdateSettingsSection from "@/components/settings/sections/UpdateSettingsSection.vue"
 import type { UpdateInfo } from "@/services/api"
 
+type SettingsSectionKey = "update" | "runtime" | "ui" | "notification" | "about"
+
+interface SettingsSection {
+  id: SettingsSectionKey
+  label: string
+  icon: Component
+}
+
 const { t } = useI18n()
-const activeSection = ref("update")
+const activeSection = ref<SettingsSectionKey>("update")
 const showUpdateDialog = ref(false)
 const updateInfo = ref<UpdateInfo | null>(null)
 
-const sections = [
-  { id: "update", label: t("settings.anchor.update"), icon: "mdi:update" },
-  { id: "runtime", label: t("settings.anchor.runtime"), icon: "mdi:cog-play" },
-  { id: "ui", label: t("settings.anchor.ui"), icon: "mdi:palette" },
-  { id: "notification", label: t("settings.anchor.notification"), icon: "mdi:bell" },
-  { id: "about", label: t("settings.anchor.about"), icon: "mdi:information" },
-]
+const sections = computed<SettingsSection[]>(() => [
+  { id: "update", label: t("settings.anchor.update"), icon: ArrowUpCircleOutline },
+  { id: "runtime", label: t("settings.anchor.runtime"), icon: SettingsOutline },
+  { id: "ui", label: t("settings.anchor.ui"), icon: ColorPaletteOutline },
+  { id: "notification", label: t("settings.anchor.notification"), icon: NotificationsOutline },
+  { id: "about", label: t("settings.anchor.about"), icon: InformationCircleOutline },
+])
+
+const menuOptions = computed<MenuOption[]>(() =>
+  sections.value.map((section) => ({
+    key: section.id,
+    label: section.label,
+    icon: () => h(NIcon, { size: 18 }, { default: () => h(section.icon) }),
+  })),
+)
 
 function handleShowUpdate(info: UpdateInfo) {
   updateInfo.value = info

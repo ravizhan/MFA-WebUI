@@ -1,89 +1,122 @@
 <template>
   <div class="space-y-4">
     <div class="overflow-x-auto">
-      <table class="table table-sm">
-        <tbody>
-          <tr>
-            <td class="font-medium text-base">{{ t("settings.about.version") }}</td>
-            <td class="text-base">{{ settings.about.version || t("common.unknown") }}</td>
-          </tr>
-          <tr>
-            <td class="font-medium text-base">{{ t("settings.about.author") }}</td>
-            <td class="text-base">
-              <a
-                v-if="settings.about.author"
-                :href="`https://github.com/${settings.about.author}`"
-                target="_blank"
-                class="link link-primary flex items-center gap-1"
-              >
-                <Icon icon="mdi:github" class="text-lg" />
-                {{ settings.about.author }}
-              </a>
-              <span v-else>{{ t("common.unknown") }}</span>
-            </td>
-          </tr>
-          <tr>
-            <td class="font-medium text-base">{{ t("settings.about.license") }}</td>
-            <td class="text-base">{{ settings.about.license || "MIT" }}</td>
-          </tr>
-          <tr>
-            <td class="font-medium text-base">{{ t("settings.about.homepage") }}</td>
-            <td class="text-base">
-              <a
-                :href="settings.about.github || 'https://github.com/ravizhan/MWU'"
-                target="_blank"
-                class="link link-primary flex items-center gap-1"
-              >
-                <Icon icon="mdi:github" class="text-lg" />
-                {{ settings.about.github || "https://github.com/ravizhan/MWU" }}
-              </a>
-            </td>
-          </tr>
-          <tr>
-            <td class="font-medium text-base">{{ t("settings.about.issue") }}</td>
-            <td class="text-base">
-              <a
-                :href="settings.about.issueUrl || 'https://github.com/ravizhan/MWU/issues'"
-                target="_blank"
-                class="link link-primary flex items-center gap-1"
-              >
-                <Icon icon="mdi:bug" class="text-lg" />
-                {{ t("settings.about.githubIssues") }}
-              </a>
-            </td>
-          </tr>
-          <tr v-if="settings.about.contact">
-            <td class="font-medium text-base">{{ t("settings.about.contact") }}</td>
-            <td class="text-base">{{ settings.about.contact }}</td>
-          </tr>
-          <tr>
-            <td class="font-medium text-base">{{ t("settings.about.description") }}</td>
-            <td class="text-base">
-              {{ settings.about.description || t("settings.about.defaultDescription") }}
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <NDataTable
+        :columns="columns"
+        :data="rows"
+        size="small"
+        :bordered="false"
+        :single-line="false"
+      />
     </div>
 
-    <div class="divider" />
+    <NDivider />
 
-    <button class="btn btn-warning btn-sm" @click="handleResetSettings">
+    <NButton type="warning" size="small" @click="handleResetSettings">
       {{ t("settings.about.reset") }}
-    </button>
+    </NButton>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue"
+import { computed, h, type Component } from "vue"
 import { useI18n } from "vue-i18n"
-import { Icon } from "@iconify/vue"
+import { NButton, NIcon } from "naive-ui"
+import type { DataTableColumns } from "naive-ui"
+import { BugOutline, LogoGithub } from "@vicons/ionicons5"
 import { showGlobalMessage } from "@/services/feedback/message"
 import { useSettingsStore } from "@/stores"
+
+interface AboutRow {
+  label: string
+  value: string
+  href?: string
+  icon?: Component
+}
 
 const { t } = useI18n()
 const settingsStore = useSettingsStore()
 const settings = computed(() => settingsStore.settings)
+
+const rows = computed<AboutRow[]>(() => {
+  const about = settings.value.about
+  const result: AboutRow[] = [
+    {
+      label: t("settings.about.version"),
+      value: about.version || t("common.unknown"),
+    },
+    {
+      label: t("settings.about.author"),
+      value: about.author || t("common.unknown"),
+      href: about.author ? `https://github.com/${about.author}` : undefined,
+      icon: LogoGithub,
+    },
+    {
+      label: t("settings.about.license"),
+      value: about.license || "MIT",
+    },
+    {
+      label: t("settings.about.homepage"),
+      value: about.github || "https://github.com/ravizhan/MWU",
+      href: about.github || "https://github.com/ravizhan/MWU",
+      icon: LogoGithub,
+    },
+    {
+      label: t("settings.about.issue"),
+      value: t("settings.about.githubIssues"),
+      href: about.issueUrl || "https://github.com/ravizhan/MWU/issues",
+      icon: BugOutline,
+    },
+  ]
+
+  if (about.contact) {
+    result.push({
+      label: t("settings.about.contact"),
+      value: about.contact,
+    })
+  }
+
+  result.push({
+    label: t("settings.about.description"),
+    value: about.description || t("settings.about.defaultDescription"),
+  })
+
+  return result
+})
+
+const columns = computed<DataTableColumns<AboutRow>>(() => [
+  {
+    key: "label",
+    title: "",
+    width: 140,
+    render: (row) => h("span", { class: "font-medium" }, row.label),
+  },
+  {
+    key: "value",
+    title: "",
+    render: (row) => {
+      if (!row.href) {
+        return row.value
+      }
+
+      return h(
+        NButton,
+        {
+          text: true,
+          type: "primary",
+          tag: "a",
+          href: row.href,
+          target: "_blank",
+          rel: "noopener noreferrer",
+        },
+        {
+          icon: () => h(NIcon, { size: 18 }, { default: () => h(row.icon ?? LogoGithub) }),
+          default: () => row.value,
+        },
+      )
+    },
+  },
+])
 
 function handleResetSettings() {
   if (confirm(t("settings.about.resetConfirm"))) {
