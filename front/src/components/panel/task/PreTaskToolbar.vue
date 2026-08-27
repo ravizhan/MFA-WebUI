@@ -11,7 +11,6 @@
 </template>
 
 <script setup lang="ts">
-import { NButton, NIcon } from "naive-ui"
 import { AddOutline } from "@vicons/ionicons5"
 
 const emit = defineEmits<{

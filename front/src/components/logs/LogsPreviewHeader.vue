@@ -36,7 +36,6 @@
 
 <script setup lang="ts">
 import { useI18n } from "vue-i18n"
-import { NButton, NIcon, NSelect } from "naive-ui"
 import { DesktopOutline, PauseCircleOutline, PlayCircleOutline } from "@vicons/ionicons5"
 
 const { connected, fps, fpsOptions, streaming } = defineProps<{

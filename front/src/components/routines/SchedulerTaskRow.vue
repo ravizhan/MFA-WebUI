@@ -59,7 +59,6 @@
 
 <script setup lang="ts">
 import { useI18n } from "vue-i18n"
-import { NButton, NCard, NIcon, NSwitch } from "naive-ui"
 import { CreateOutline, MoonOutline, TrashOutline } from "@vicons/ionicons5"
 import { formatDateTime, formatTrigger } from "@/utils/scheduler/display"
 import type { ScheduledTask, TriggerConfig } from "@/types/schedulerModel"

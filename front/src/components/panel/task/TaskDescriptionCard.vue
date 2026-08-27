@@ -12,7 +12,6 @@ import { marked } from "marked"
 import { useIndexStore, useInterfaceStore } from "@/stores"
 import type { Task } from "@/types/interfaceModel"
 import { resolveInterfaceDocumentContent } from "@/utils/interface/content"
-import { NCard } from "naive-ui"
 
 const { t } = useI18n()
 const interfaceStore = useInterfaceStore()

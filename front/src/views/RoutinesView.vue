@@ -42,7 +42,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from "vue"
 import { useI18n } from "vue-i18n"
-import { NButton, NCard, NIcon, NTabPane, NTabs } from "naive-ui"
 import { AddOutline, TimeOutline } from "@vicons/ionicons5"
 import SchedulerTaskDialog from "@/components/routines/dialogs/SchedulerTaskDialog.vue"
 import SchedulerTaskList from "@/components/routines/SchedulerTaskList.vue"

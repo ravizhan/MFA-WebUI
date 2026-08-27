@@ -8,6 +8,5 @@
 </template>
 
 <script setup lang="ts">
-import { NIcon } from "naive-ui"
 import { PlayOutline } from "@vicons/ionicons5"
 </script>

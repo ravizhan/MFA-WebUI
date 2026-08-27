@@ -40,7 +40,6 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n"
 import type { Component } from "vue"
-import { NIcon, NTag } from "naive-ui"
 import {
   AppsOutline,
   ArrowUpCircleOutline,

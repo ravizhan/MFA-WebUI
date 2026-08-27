@@ -28,7 +28,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue"
 import { useI18n } from "vue-i18n"
-import { NCard, NEl, NIcon, NTag } from "naive-ui"
 import { FileTrayOutline, SettingsOutline } from "@vicons/ionicons5"
 import { useInterfaceStore } from "@/stores"
 import type { TaskOptionsByTask } from "@/types/schedulerModel"

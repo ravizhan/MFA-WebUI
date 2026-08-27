@@ -68,7 +68,6 @@
 <script setup lang="ts">
 import { computed } from "vue"
 import { useI18n } from "vue-i18n"
-import { NButton, NEl, NIcon, NProgress } from "naive-ui"
 import { AddCircleOutline, TimeOutline } from "@vicons/ionicons5"
 import { useSchedulerStore } from "@/stores"
 import { formatDateTime, formatTrigger } from "@/utils/scheduler/display"

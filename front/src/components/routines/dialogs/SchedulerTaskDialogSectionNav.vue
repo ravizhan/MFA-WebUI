@@ -1,24 +1,31 @@
 <template>
-  <nav
-    class="border-[var(--divider-color)] flex shrink-0 gap-1 overflow-x-auto border-b p-2 md:w-44 md:flex-col md:overflow-y-auto md:overflow-x-hidden md:border-r md:border-b-0 md:p-3"
-    :aria-label="t('settings.scheduler.dialog.sections.nav')"
-  >
-    <NTabs v-model:value="activeSection" type="line" size="small" placement="left" class="w-full">
-      <NTabPane v-for="section in sections" :key="section.id" :name="section.id">
-        <template #tab>
-          <span class="flex items-center gap-2 whitespace-nowrap text-sm">
-            <NIcon size="16" class="shrink-0"><component :is="section.icon" /></NIcon>
+  <nav :aria-label="t('settings.scheduler.dialog.sections.nav')">
+    <!-- Responsive wrappers are plain divs: naive's .n-menu/.n-tabs set their own
+         display (unlayered, beats Tailwind's layered hidden/md:block), so the
+         breakpoint classes must live on the wrapper, not the naive component. -->
+    <div
+      class="hidden h-full w-52 shrink-0 overflow-y-auto border-r border-(--divider-color) py-2 md:block"
+    >
+      <NMenu v-model:value="activeSection" :options="menuOptions" :indent="18" />
+    </div>
+    <div class="shrink-0 border-b border-(--divider-color) px-2 md:hidden">
+      <NTabs v-model:value="activeSection" type="bar" size="medium" :bar-width="0">
+        <NTab v-for="section in sections" :key="section.id" :name="section.id">
+          <span class="flex items-center gap-1.5">
+            <NIcon size="15"><component :is="section.icon" /></NIcon>
             <span>{{ section.label }}</span>
           </span>
-        </template>
-      </NTabPane>
-    </NTabs>
+        </NTab>
+      </NTabs>
+    </div>
   </nav>
 </template>
 
 <script setup lang="ts">
+import { computed, h } from "vue"
 import { useI18n } from "vue-i18n"
-import { NIcon, NTabPane, NTabs } from "naive-ui"
+import { NIcon } from "naive-ui"
+import type { MenuOption } from "naive-ui"
 import type { Component } from "vue"
 
 type DialogSection = "basic" | "schedule" | "environment" | "content"
@@ -35,4 +42,12 @@ const { sections } = defineProps<{
 
 const activeSection = defineModel<DialogSection>("activeSection", { required: true })
 const { t } = useI18n()
+
+const menuOptions = computed<MenuOption[]>(() =>
+  sections.map((section) => ({
+    key: section.id,
+    label: section.label,
+    icon: () => h(NIcon, { size: 18 }, { default: () => h(section.icon) }),
+  })),
+)
 </script>

@@ -51,7 +51,6 @@
 import { storeToRefs } from "pinia"
 import { computed, nextTick, onMounted, onUnmounted, ref, useTemplateRef, watch } from "vue"
 import { useI18n } from "vue-i18n"
-import { NCard } from "naive-ui"
 import { useDeviceConnectionStore, useIndexStore } from "@/stores"
 import LogsLogHeader from "@/components/logs/LogsLogHeader.vue"
 import LogsLogPanel from "@/components/logs/LogsLogPanel.vue"

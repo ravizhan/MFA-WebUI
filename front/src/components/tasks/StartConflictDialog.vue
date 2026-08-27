@@ -29,7 +29,6 @@
 import { computed } from "vue"
 import { useI18n } from "vue-i18n"
 import { useRouter } from "vue-router"
-import { NButton, NModal, NSpace } from "naive-ui"
 import { useDeviceConnectionStore } from "@/stores/device/deviceConnection"
 
 const { t } = useI18n()

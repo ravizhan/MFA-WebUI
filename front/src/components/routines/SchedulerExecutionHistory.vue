@@ -16,7 +16,6 @@
 
 <script setup lang="ts">
 import { useI18n } from "vue-i18n"
-import { NEmpty, NIcon } from "naive-ui"
 import { FileTrayOutline } from "@vicons/ionicons5"
 import type { TaskExecution } from "@/types/schedulerModel"
 import SchedulerExecutionRow from "./SchedulerExecutionRow.vue"

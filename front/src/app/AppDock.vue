@@ -28,7 +28,6 @@
 
 <script setup lang="ts">
 import type { Component } from "vue"
-import { NButton, NCard, NIcon } from "naive-ui"
 
 export interface DockItem {
   key: string

@@ -2,7 +2,7 @@
   <NCard
     :bordered="false"
     size="small"
-    class="cursor-pointer transition-shadow hover:shadow-md"
+    class="cursor-pointer"
     content-style="padding: 12px"
     @click="emit('apply', preset.name)"
   >
@@ -18,7 +18,6 @@
 
 <script setup lang="ts">
 import { useI18n } from "vue-i18n"
-import { NCard, NTag } from "naive-ui"
 
 interface RecipeCardPreset {
   name: string

@@ -12,7 +12,7 @@
 </template>
 
 <script setup lang="ts">
-import { NButton, NIcon, NSelect, type SelectOption } from "naive-ui"
+import type { SelectOption } from "naive-ui"
 import { RefreshOutline } from "@vicons/ionicons5"
 
 defineProps<{

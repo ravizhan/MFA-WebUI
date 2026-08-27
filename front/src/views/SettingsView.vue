@@ -92,7 +92,7 @@
 <script setup lang="ts">
 import { computed, h, ref, type Component } from "vue"
 import { useI18n } from "vue-i18n"
-import { NCard, NIcon, NMenu, NTab, NTabs } from "naive-ui"
+import { NIcon } from "naive-ui"
 import type { MenuOption } from "naive-ui"
 import {
   ArrowUpCircleOutline,

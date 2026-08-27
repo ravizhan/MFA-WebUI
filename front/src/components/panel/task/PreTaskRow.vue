@@ -4,9 +4,7 @@
     class="pre-task-row flex items-center gap-2 p-2 rounded-lg border border-solid"
     :style="{ borderColor: 'var(--divider-color)', background: 'var(--card-color)' }"
   >
-    <div class="pre-task-drag-handle cursor-grab" style="color: var(--text-color-3)">
-      <NIcon size="18"><ReorderThreeOutline /></NIcon>
-    </div>
+    <NIcon size="20" class="pre-task-drag-handle cursor-grab"><ReorderThreeOutline /></NIcon>
     <NInput
       v-model:value="item.command"
       size="small"
@@ -31,7 +29,6 @@
 </template>
 
 <script setup lang="ts">
-import { NButton, NEl, NIcon, NInput, NInputNumber, NSwitch } from "naive-ui"
 import { ReorderThreeOutline, TrashOutline } from "@vicons/ionicons5"
 import type { PreTaskCommand } from "@/types/taskConfigModel"
 

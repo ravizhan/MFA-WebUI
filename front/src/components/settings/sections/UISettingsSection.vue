@@ -29,7 +29,6 @@
 <script setup lang="ts">
 import { computed } from "vue"
 import { useI18n } from "vue-i18n"
-import { NSelect } from "naive-ui"
 import { darkModeSchema, localeSchema } from "@/validation/settings"
 import { useSettingsStore } from "@/stores"
 import type { SettingsModel } from "@/types/settingsModel"

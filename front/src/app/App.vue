@@ -41,7 +41,7 @@
 import { computed, h, onMounted, ref, watchEffect } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { useI18n } from "vue-i18n"
-import { NConfigProvider, NDialogProvider, NIcon, NMessageProvider } from "naive-ui"
+import { NIcon } from "naive-ui"
 import type { MenuOption } from "naive-ui"
 import {
   DocumentTextOutline,

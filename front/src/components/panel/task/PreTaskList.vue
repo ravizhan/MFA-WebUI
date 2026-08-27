@@ -14,6 +14,8 @@
             class="space-y-1.5"
             :animation="150"
             handle=".pre-task-drag-handle"
+            :delay="120"
+            :delay-on-touch-only="true"
             ghost-class="ghost"
           >
             <PreTaskRow
@@ -42,7 +44,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue"
 import { VueDraggable } from "vue-draggable-plus"
-import { NCard, NCollapse, NCollapseItem, NEl, NIcon } from "naive-ui"
 import { FileTrayOutline } from "@vicons/ionicons5"
 import type { PreTaskCommand } from "@/types/taskConfigModel"
 import PreTaskHeader from "@/components/panel/task/PreTaskHeader.vue"

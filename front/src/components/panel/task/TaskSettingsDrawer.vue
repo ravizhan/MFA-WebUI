@@ -33,7 +33,6 @@
 <script setup lang="ts">
 import { computed } from "vue"
 import { useI18n } from "vue-i18n"
-import { NButton, NDrawer, NDrawerContent, NIcon } from "naive-ui"
 import { CloseOutline } from "@vicons/ionicons5"
 import TaskDescriptionCard from "@/components/panel/task/TaskDescriptionCard.vue"
 import TaskOptionPanel from "@/components/panel/task/TaskOptionPanel.vue"

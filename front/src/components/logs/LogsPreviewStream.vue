@@ -30,7 +30,6 @@
 
 <script setup lang="ts">
 import { useI18n } from "vue-i18n"
-import { NEl, NIcon } from "naive-ui"
 import { LinkOutline, VideocamOffOutline } from "@vicons/ionicons5"
 import { useTemplateRef } from "vue"
 

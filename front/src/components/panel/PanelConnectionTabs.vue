@@ -98,7 +98,6 @@
 <script setup lang="ts">
 import { ref } from "vue"
 import { useI18n } from "vue-i18n"
-import { NCard, NInput, NSelect, NTabPane, NTabs } from "naive-ui"
 
 const {
   selectedController,

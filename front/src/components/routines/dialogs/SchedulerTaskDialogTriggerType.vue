@@ -21,7 +21,6 @@
 
 <script setup lang="ts">
 import { useI18n } from "vue-i18n"
-import { NIcon, NRadioButton, NRadioGroup } from "naive-ui"
 import { FlashOutline } from "@vicons/ionicons5"
 import type { Component } from "vue"
 import type { TriggerType } from "@/types/schedulerModel"

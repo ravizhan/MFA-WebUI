@@ -4,29 +4,28 @@
     <NCard
       :bordered="false"
       content-style="display: flex; flex-direction: column; padding-bottom: 0"
+      header-style="padding-bottom: 0.5rem"
     >
       <template #header>
-        <h2 class="text-base mb-3 shrink-0 flex items-center gap-2">
+        <h2 class="text-base shrink-0 flex items-center gap-2">
           <NIcon size="24">
             <ListOutline />
           </NIcon>
           {{ t("panel.taskList") }}
         </h2>
       </template>
-      <PreTaskList v-model="configStore.preTasks" class="mb-2" />
-      <NCard size="small" content-style="padding: 0">
-        <TaskSelectList
-          class="mt-3 task-list-scroll"
-          :tasks="configStore.taskList"
-          :selected-tasks="selectedTaskIds"
-          :controller-name="deviceStore.selectedControllerName"
-          :resource-name="deviceStore.resource"
-          :hide-incompatible="true"
-          @update:tasks="handleTasksUpdate"
-          @update:selected-tasks="handleSelectedTasksUpdate"
-          @config="handleConfigTask"
-        />
-      </NCard>
+      <PreTaskList ref="preTaskList" v-model="configStore.preTasks" class="mb-3" />
+      <TaskSelectList
+        :tasks="configStore.taskList"
+        :selected-tasks="selectedTaskIds"
+        :controller-name="deviceStore.selectedControllerName"
+        :resource-name="deviceStore.resource"
+        :hide-incompatible="true"
+        :max-height="taskListMaxHeight"
+        @update:tasks="handleTasksUpdate"
+        @update:selected-tasks="handleSelectedTasksUpdate"
+        @config="handleConfigTask"
+      />
       <div class="flex justify-center gap-2 pt-4 shrink-0">
         <NButton
           type="primary"
@@ -75,10 +74,9 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted } from "vue"
+import { computed, onMounted, onUnmounted, ref, useTemplateRef, watch } from "vue"
 import { useI18n } from "vue-i18n"
 import { useRouter } from "vue-router"
-import { NButton, NCard, NIcon } from "naive-ui"
 import { ListOutline, PlayOutline, StopOutline } from "@vicons/ionicons5"
 import PanelTaskColumn from "@/components/panel/PanelTaskColumn.vue"
 import TaskSettingsDrawer from "@/components/panel/task/TaskSettingsDrawer.vue"
@@ -96,6 +94,54 @@ const indexStore = useIndexStore()
 const configStore = useTaskConfigStore()
 const deviceStore = useDeviceConnectionStore()
 const { isMobile } = useViewport()
+
+/* Left column height is capped; expanding PreTaskList shrinks TaskSelectList's
+   max-height by the same amount, collapsing restores it. Desktop only. */
+const COLUMN_MAX_VH = 0.72
+const preTaskList = useTemplateRef("preTaskList")
+const preTaskHeight = ref(0)
+const viewportHeight = ref(0)
+let resizeObserver: ResizeObserver | null = null
+
+const taskListMaxHeight = computed(() => {
+  if (isMobile.value || viewportHeight.value === 0) {
+    return ""
+  }
+  const columnCap = viewportHeight.value * COLUMN_MAX_VH
+  // Whatever the pre-task card currently occupies (collapsed or expanded) is
+  // subtracted from the column budget; clamp to a usable minimum.
+  const available = columnCap - preTaskHeight.value
+  return `${Math.round(Math.max(160, available))}px`
+})
+
+function measurePreTaskHeight() {
+  const el = preTaskList.value?.$el
+  preTaskHeight.value = el?.offsetHeight ?? 0
+}
+
+watch(isMobile, measurePreTaskHeight)
+
+function handleWindowResize() {
+  viewportHeight.value = window.innerHeight
+  measurePreTaskHeight()
+}
+
+onMounted(() => {
+  viewportHeight.value = window.innerHeight
+  window.addEventListener("resize", handleWindowResize)
+  const el = preTaskList.value?.$el
+  if (el) {
+    resizeObserver = new ResizeObserver(measurePreTaskHeight)
+    resizeObserver.observe(el)
+  }
+  measurePreTaskHeight()
+})
+
+onUnmounted(() => {
+  window.removeEventListener("resize", handleWindowResize)
+  resizeObserver?.disconnect()
+  resizeObserver = null
+})
 
 const selectedTaskIds = computed(() =>
   configStore.taskList.filter((task) => task.checked).map((task) => task.id),
@@ -141,25 +187,12 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.task-list-scroll {
-  max-height: calc(100vh - 22rem);
-  overflow-y: auto;
-}
 .task-settings-card {
   display: none;
 }
 @media (min-width: 1024px) {
-  .task-list-scroll {
-    max-height: calc(100vh - 24rem);
-  }
   .task-settings-card {
     display: block;
-  }
-}
-@media (max-width: 1023px) {
-  .task-list-scroll {
-    max-height: none;
-    overflow-y: visible;
   }
 }
 </style>

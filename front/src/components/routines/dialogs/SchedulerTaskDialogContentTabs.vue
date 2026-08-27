@@ -56,7 +56,6 @@
 
 <script setup lang="ts">
 import { useI18n } from "vue-i18n"
-import { NIcon, NTabPane, NTabs } from "naive-ui"
 import { ListOutline, OptionsOutline, TerminalOutline } from "@vicons/ionicons5"
 import TaskSelectList from "@/components/panel/task/TaskSelectList.vue"
 import TaskOptionPanel from "@/components/panel/task/TaskOptionPanel.vue"

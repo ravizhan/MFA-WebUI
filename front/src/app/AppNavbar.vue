@@ -10,7 +10,13 @@
   >
     <span class="flex-1 min-w-0 truncate text-xl font-bold tracking-wide">{{ name }}</span>
     <div class="hidden lg:flex flex-none">
-      <NMenu mode="horizontal" :value="menuValue" :options="menuOptions" @update:value="onSelect" />
+      <NMenu
+        mode="horizontal"
+        :value="menuValue"
+        :options="menuOptions"
+        class="navbar-menu"
+        @update:value="onSelect"
+      />
     </div>
     <div class="flex-1 flex justify-end gap-2">
       <!-- Dark mode toggle -->
@@ -27,7 +33,6 @@
 </template>
 
 <script setup lang="ts">
-import { NButton, NEl, NIcon, NMenu } from "naive-ui"
 import type { MenuOption } from "naive-ui"
 import { MoonOutline, SunnyOutline } from "@vicons/ionicons5"
 
@@ -47,3 +52,31 @@ function onSelect(key: string) {
   emit("select", key)
 }
 </script>
+
+<style scoped>
+/* Horizontal NMenu marks hover/selected with a bottom border and text color.
+   MWU wants each item to read as a button: pill background on hover, no border. */
+.navbar-menu :deep(.n-menu-item-content) {
+  border-radius: var(--n-border-radius);
+  margin: 8px 4px;
+  transition: background-color 0.2s ease;
+}
+
+.navbar-menu :deep(.n-menu-item-content:hover),
+.navbar-menu :deep(.n-menu-item-content.n-menu-item-content--selected:hover) {
+  background-color: var(--n-item-color-hover);
+}
+
+.navbar-menu :deep(.n-menu-item-content.n-menu-item-content--selected),
+.navbar-menu :deep(.n-menu-item-content.n-menu-item-content--child-active) {
+  background-color: var(--n-item-color-active);
+}
+
+.navbar-menu :deep(.n-menu-item-content),
+.navbar-menu :deep(.n-menu-item-content.n-menu-item-content--selected),
+.navbar-menu :deep(.n-menu-item-content.n-menu-item-content--child-active),
+.navbar-menu :deep(.n-menu-item-content:hover),
+.navbar-menu :deep(.n-menu-item-content.n-menu-item-content--selected:hover) {
+  border-bottom: none;
+}
+</style>

@@ -74,7 +74,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onUnmounted } from "vue"
 import { useI18n } from "vue-i18n"
-import { NAlert, NButton, NCard, NIcon, NModal, NProgress, NSpace } from "naive-ui"
 import { ArrowUpCircleOutline } from "@vicons/ionicons5"
 import { marked } from "marked"
 import { performUpdateApi, getUpdateStatusApi, type UpdateInfo } from "@/services/api"

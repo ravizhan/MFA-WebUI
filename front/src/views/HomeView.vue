@@ -141,7 +141,6 @@
 import { computed, onMounted, onUnmounted } from "vue"
 import { useI18n } from "vue-i18n"
 import { useRouter } from "vue-router"
-import { NCard, NIcon } from "naive-ui"
 import {
   BookOutline,
   FolderOpenOutline,

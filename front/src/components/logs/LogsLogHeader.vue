@@ -1,7 +1,7 @@
 <template>
   <div class="flex items-center justify-between shrink-0">
     <h2 class="text-base font-semibold flex items-center gap-2">
-      <NIcon size="20" style="color: var(--primary-color)">
+      <NIcon size="20">
         <DocumentTextOutline />
       </NIcon>
       {{ t("panel.log") }}
@@ -53,7 +53,6 @@
 
 <script setup lang="ts">
 import { useI18n } from "vue-i18n"
-import { NButton, NIcon } from "naive-ui"
 import {
   ChevronDownOutline,
   ChevronUpOutline,

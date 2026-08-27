@@ -7,15 +7,11 @@
     :style="dialogBoxStyle"
     content-style="padding: 0"
   >
-    <div
-      class="flex h-[min(92dvh,540px)] w-full max-w-4xl flex-col sm:h-[min(90dvh,540px)] sm:max-h-none"
-    >
+    <div class="flex h-[min(92dvh,540px)] w-full flex-col sm:h-[min(90dvh,540px)] sm:max-h-none">
       <!-- Header -->
-      <header
-        class="border-[var(--divider-color)] flex shrink-0 items-center justify-between gap-3 border-b px-4 py-3 sm:px-5"
-      >
+      <header class="flex shrink-0 items-center justify-between gap-3 px-4 py-3 sm:px-5">
         <div class="flex min-w-0 items-center gap-2">
-          <NIcon size="20" class="shrink-0 text-[var(--primary-color)]">
+          <NIcon size="20" class="shrink-0 text-(--primary-color)">
             <CalendarOutline />
           </NIcon>
           <h3 class="truncate text-base font-semibold sm:text-lg">
@@ -341,9 +337,7 @@
       </div>
 
       <!-- Footer -->
-      <footer
-        class="border-[var(--divider-color)] flex shrink-0 items-center justify-end border-t px-4 py-3 sm:px-5"
-      >
+      <footer class="flex shrink-0 items-center justify-end px-4 py-3 sm:px-5">
         <NSpace justify="end">
           <NButton quaternary @click="handleCancel">
             {{ t("common.cancel") }}
@@ -360,7 +354,6 @@
 <script setup lang="ts">
 import { ref, computed, nextTick, watch } from "vue"
 import { useI18n } from "vue-i18n"
-import { NButton, NIcon, NInput, NInputNumber, NModal, NSelect, NSpace, NSwitch } from "naive-ui"
 import {
   CalendarNumberOutline,
   CalendarOutline,

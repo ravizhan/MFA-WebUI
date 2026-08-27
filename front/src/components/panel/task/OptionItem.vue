@@ -103,7 +103,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue"
 import { useI18n } from "vue-i18n"
-import { NCheckbox, NInput, NInputNumber, NSelect, NSwitch } from "naive-ui"
 import { showGlobalMessage } from "@/services/feedback/message"
 import { useInterfaceStore } from "@/stores"
 import type {

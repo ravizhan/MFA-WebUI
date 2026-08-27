@@ -14,7 +14,6 @@
 
 <script setup lang="ts">
 import { useI18n } from "vue-i18n"
-import { NEl, NIcon } from "naive-ui"
 import { DocumentOutline } from "@vicons/ionicons5"
 import { useTemplateRef } from "vue"
 

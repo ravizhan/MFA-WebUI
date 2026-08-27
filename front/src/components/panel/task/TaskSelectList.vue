@@ -1,53 +1,60 @@
 <template>
-  <NEl
-    tag="div"
-    class="rounded-lg overflow-hidden"
-    :class="{ 'overflow-y-auto': maxHeight }"
-    :style="maxHeight ? { maxHeight } : undefined"
-  >
-    <VueDraggable v-model="taskListData" :animation="150" ghost-class="ghost">
-      <NEl
-        tag="div"
-        v-for="item in taskListData"
-        :key="item.id"
-        class="task-row flex items-center gap-3 px-3 py-2.5 border-b border-solid last:border-b-0 cursor-pointer transition-colors"
-        :style="{ borderColor: 'var(--divider-color)', background: 'var(--card-color)' }"
-        @click="handleRowClick(item.id)"
+  <NCard size="small" content-style="padding: 0">
+    <NEl
+      tag="div"
+      class="rounded-lg overflow-hidden"
+      :class="{ 'overflow-y-auto': maxHeight }"
+      :style="maxHeight ? { maxHeight } : undefined"
+    >
+      <VueDraggable
+        v-model="taskListData"
+        :animation="150"
+        :delay="120"
+        :delay-on-touch-only="true"
+        ghost-class="ghost"
       >
-        <NIcon size="20" class="cursor-grab active:cursor-grabbing shrink-0">
-          <ReorderThreeOutline />
-        </NIcon>
-        <NCheckbox
-          class="shrink-0"
-          :checked="isTaskSelected(item.id)"
-          size="large"
-          @click.stop
-          @update:checked="handleSelectedChange(item.id, $event)"
-        />
-        <span class="flex-1 text-base truncate select-none">{{
-          resolveTaskLabel(item.id, item.name)
-        }}</span>
-        <NButton
-          quaternary
-          circle
-          size="small"
-          class="shrink-0"
-          @click.stop="handleConfig(item.id)"
+        <NEl
+          tag="div"
+          v-for="item in taskListData"
+          :key="item.id"
+          class="task-row flex items-center gap-3 px-3 py-2.5 border-b border-solid last:border-b-0 cursor-pointer transition-colors"
+          :style="{ borderColor: 'var(--divider-color)', background: 'var(--card-color)' }"
+          @click="handleRowClick(item.id)"
         >
-          <template #icon>
-            <NIcon size="20"><SettingsOutline /></NIcon>
-          </template>
-        </NButton>
-      </NEl>
-    </VueDraggable>
-  </NEl>
+          <NIcon size="20" class="cursor-grab active:cursor-grabbing shrink-0">
+            <ReorderThreeOutline />
+          </NIcon>
+          <NCheckbox
+            class="shrink-0"
+            :checked="isTaskSelected(item.id)"
+            size="large"
+            @click.stop
+            @update:checked="handleSelectedChange(item.id, $event)"
+          />
+          <span class="flex-1 text-base truncate select-none">{{
+            resolveTaskLabel(item.id, item.name)
+          }}</span>
+          <NButton
+            quaternary
+            circle
+            size="small"
+            class="shrink-0"
+            @click.stop="handleConfig(item.id)"
+          >
+            <template #icon>
+              <NIcon size="20"><SettingsOutline /></NIcon>
+            </template>
+          </NButton>
+        </NEl>
+      </VueDraggable>
+    </NEl>
+  </NCard>
 </template>
 
 <script setup lang="ts">
 import { computed } from "vue"
 import { VueDraggable } from "vue-draggable-plus"
 import { useI18n } from "vue-i18n"
-import { NButton, NCheckbox, NEl, NIcon } from "naive-ui"
 import { ReorderThreeOutline, SettingsOutline } from "@vicons/ionicons5"
 import { useInterfaceStore } from "@/stores"
 import type { TaskListItem } from "@/types/taskConfigModel"
