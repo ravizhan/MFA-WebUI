@@ -12,13 +12,8 @@
 </template>
 
 <script setup lang="ts">
-import { NButton, NIcon, NSelect } from "naive-ui"
+import { NButton, NIcon, NSelect, type SelectOption } from "naive-ui"
 import { RefreshOutline } from "@vicons/ionicons5"
-
-interface SelectOption {
-  label: string
-  value: string
-}
 
 defineProps<{
   options: SelectOption[]

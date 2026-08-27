@@ -77,21 +77,17 @@ const settings = computed(() => settingsStore.settings)
 
 type EditableCategory = Exclude<keyof SettingsModel, "about">
 type MaybeNullForNumbers<T> = T extends number ? T | null : T
-type EditableSettingValue<
-  K extends EditableCategory,
-  P extends keyof SettingsModel[K],
-> = MaybeNullForNumbers<SettingsModel[K][P]>
-
 type RuntimeNumberKey = "timeout" | "reminderInterval" | "maxRetryCount"
 
 async function handleSettingChange<K extends EditableCategory, P extends keyof SettingsModel[K]>(
   category: K,
   key: P,
-  value: EditableSettingValue<K, P>,
+  value: MaybeNullForNumbers<SettingsModel[K][P]> | undefined,
 ) {
-  if (value === null) return
+  if (value === null || value === undefined) return
   if (typeof value === "number" && Number.isNaN(value)) return
-  await settingsStore.updateSetting(category, key, value)
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+  await settingsStore.updateSetting(category, key, value as SettingsModel[K][P])
 }
 
 async function handleNumberChange(

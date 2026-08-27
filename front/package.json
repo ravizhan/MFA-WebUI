@@ -59,6 +59,6 @@
     "unplugin-auto-import": "catalog:",
     "vite": "catalog:",
     "vitest": "catalog:",
-    "vue-tsc": "^3.3.11"
+    "vue-tsc": "catalog:"
   }
 }

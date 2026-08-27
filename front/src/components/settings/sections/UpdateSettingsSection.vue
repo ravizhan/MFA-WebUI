@@ -58,7 +58,7 @@
           :placeholder="t('settings.update.mirrorchyanCdkPlaceholder')"
           @update:value="handleSettingChange('update', 'mirrorchyanCdk', $event)"
         />
-        <NButton type="secondary" tag="a" href="https://mirrorchyan.com" target="_blank">
+        <NButton secondary tag="a" href="https://mirrorchyan.com" target="_blank">
           {{ t("settings.update.mirrorchyanCdkHint") }}
         </NButton>
       </div>
@@ -99,18 +99,14 @@ const updateChannelOptions = computed(() => [
 
 type EditableCategory = Exclude<keyof SettingsModel, "about">
 type MaybeNullForNumbers<T> = T extends number ? T | null : T
-type EditableSettingValue<
-  K extends EditableCategory,
-  P extends keyof SettingsModel[K],
-> = MaybeNullForNumbers<SettingsModel[K][P]>
-
 async function handleSettingChange<K extends EditableCategory, P extends keyof SettingsModel[K]>(
   category: K,
   key: P,
-  value: EditableSettingValue<K, P>,
+  value: MaybeNullForNumbers<SettingsModel[K][P]> | undefined,
 ) {
-  if (value === null) return
-  await settingsStore.updateSetting(category, key, value)
+  if (value === null || value === undefined) return
+  // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
+  await settingsStore.updateSetting(category, key, value as SettingsModel[K][P])
 }
 
 function handleUpdateChannelChange(value: string | number | null) {

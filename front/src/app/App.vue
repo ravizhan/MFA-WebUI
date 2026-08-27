@@ -124,16 +124,12 @@ const updateInfo = ref<UpdateInfo | null>(null)
 
 function ensureMarkdownStylesheet(href: string) {
   const id = "github-markdown-theme"
-  let el = document.getElementById(id)
-  if (!(el instanceof HTMLLinkElement)) {
-    el = document.createElement("link")
-    el.id = id
-    el.rel = "stylesheet"
-    document.head.appendChild(el)
-  }
-  if (el.href !== href) {
-    el.href = href
-  }
+  const existing = document.getElementById(id)
+  const link = existing instanceof HTMLLinkElement ? existing : document.createElement("link")
+  if (link.id !== id) link.id = id
+  if (link.rel !== "stylesheet") link.rel = "stylesheet"
+  if (!link.parentNode) document.head.appendChild(link)
+  if (link.href !== href) link.href = href
 }
 
 const checkForUpdatesOnLoad = async () => {

@@ -106,7 +106,13 @@ import { useI18n } from "vue-i18n"
 import { NCheckbox, NInput, NInputNumber, NSelect, NSwitch } from "naive-ui"
 import { showGlobalMessage } from "@/services/feedback/message"
 import { useInterfaceStore } from "@/stores"
-import type { InputCase } from "@/types/interfaceModel"
+import type {
+  CheckboxOption,
+  InputCase,
+  ScanSelectOption,
+  SelectOption,
+  SwitchOption,
+} from "@/types/interfaceModel"
 import type { NullableTaskOptionValue } from "@/types/schedulerModel"
 import { makeInterfaceInputSchema } from "@/validation/interfaceInput"
 import { resolveInterfaceText } from "@/utils/interface/content"
@@ -387,19 +393,19 @@ watch(
   { immediate: true },
 )
 
-function getSwitchNestedOptions(currentOption: NonNullable<typeof option.value>): string[] {
+function getSwitchNestedOptions(currentOption: SwitchOption): string[] {
   const currentValue = taskOptions.value[name]
   const activeCase = currentOption.cases.find((caseItem) => caseItem.name === currentValue)
   return activeCase?.option || []
 }
 
-function getSelectNestedOptions(currentOption: NonNullable<typeof option.value>): string[] {
+function getSelectNestedOptions(currentOption: SelectOption | ScanSelectOption): string[] {
   const currentValue = taskOptions.value[name]
   const activeCase = currentOption.cases.find((caseItem) => caseItem.name === currentValue)
   return activeCase?.option || []
 }
 
-function getCheckboxNestedOptions(currentOption: NonNullable<typeof option.value>): string[] {
+function getCheckboxNestedOptions(currentOption: CheckboxOption): string[] {
   const activeNames = new Set(
     normalizeCheckboxValue(
       taskOptions.value[name],
