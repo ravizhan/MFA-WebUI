@@ -5,7 +5,7 @@
     :locale="locale"
     :date-locale="dateLocale"
   >
-    <NMessageProvider placement="top-right">
+    <NMessageProvider placement="top">
       <NDialogProvider>
         <FeedbackBridge />
         <NEl

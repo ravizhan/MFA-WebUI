@@ -9,7 +9,12 @@
         0 4px 6px -4px rgb(0 0 0 / 0.1);
     "
   >
-    <span class="flex-1 min-w-0 truncate text-xl font-bold tracking-wide">{{ name }}</span>
+    <span
+      class="flex-1 min-w-0 truncate text-xl font-bold tracking-wide"
+      style="color: var(--text-color-1)"
+    >
+      {{ name }}
+    </span>
     <div class="hidden lg:flex flex-none">
       <NMenu
         mode="horizontal"
