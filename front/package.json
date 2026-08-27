@@ -19,8 +19,6 @@
   },
   "dependencies": {
     "@vicons/ionicons5": "catalog:",
-    "@vicons/material": "catalog:",
-    "@vicons/tabler": "catalog:",
     "cron-converter": "catalog:",
     "dompurify": "catalog:",
     "github-markdown-css": "catalog:",

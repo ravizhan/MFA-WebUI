@@ -135,10 +135,11 @@ const dialogTitle = computed(() => {
 })
 
 const renderedMarkdown = computed(() => {
-  if (!updateInfo?.release_notes) {
+  const notes = updateInfo?.release_notes
+  if (!notes) {
     return "<p>" + t("panel.empty") + "</p>"
   }
-  const raw = marked.parse(updateInfo.release_notes)
+  const raw = marked.parse(notes)
   return typeof raw === "string" ? DOMPurify.sanitize(raw) : ""
 })
 

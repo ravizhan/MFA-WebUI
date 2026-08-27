@@ -24,6 +24,17 @@ export default defineConfig({
   ],
   build: {
     outDir: "../page",
+    rollupOptions: {
+      output: {
+        manualChunks(id: string) {
+          if (id.includes("node_modules")) {
+            if (id.includes("naive-ui")) return "naive-ui"
+            if (/[\\/](vue|vue-router|pinia|vue-i18n|@vue)[\\/]/.test(id)) return "vendor-vue"
+            if (id.includes("zod") || id.includes("cron-converter")) return "vendor-utils"
+          }
+        },
+      },
+    },
   },
   server: {
     proxy: {
