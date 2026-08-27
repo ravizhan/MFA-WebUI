@@ -8,7 +8,7 @@
           </NIcon>
           {{ t("settings.scheduler.title") }}
         </h2>
-        <NButton type="primary" size="small" @click="openCreateTaskDialog">
+        <NButton type="primary" @click="openCreateTaskDialog">
           <template #icon>
             <NIcon size="16"><AddOutline /></NIcon>
           </template>

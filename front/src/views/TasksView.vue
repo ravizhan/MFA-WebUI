@@ -2,6 +2,7 @@
   <div class="grid grid-cols-1 md:grid-cols-2 gap-4 items-start max-w-7xl mx-auto">
     <!-- Left: Task list with start/stop -->
     <NCard
+      ref="leftCard"
       :bordered="false"
       content-style="display: flex; flex-direction: column; padding-bottom: 0"
       header-style="padding-bottom: 0.5rem"
@@ -95,11 +96,17 @@ const configStore = useTaskConfigStore()
 const deviceStore = useDeviceConnectionStore()
 const { isMobile } = useViewport()
 
-/* Left column height is capped; expanding PreTaskList shrinks TaskSelectList's
-   max-height by the same amount, collapsing restores it. Desktop only. */
-const COLUMN_MAX_VH = 0.72
+/* Left column must fit under the sticky navbar without page overflow. The
+   task list is the only flexible region, so its max-height = viewport minus
+   navbar, main vertical padding, the card's fixed chrome (header/buttons/
+   reset/padding) and the PreTaskList's current height. Expanding PreTaskList
+   shrinks the list by the same amount; collapsing restores it. Desktop only. */
+const leftCard = useTemplateRef("leftCard")
 const preTaskList = useTemplateRef("preTaskList")
 const preTaskHeight = ref(0)
+const chromeHeight = ref(0)
+const topOffset = ref(0)
+const bottomReserve = ref(0)
 const viewportHeight = ref(0)
 let resizeObserver: ResizeObserver | null = null
 
@@ -107,23 +114,41 @@ const taskListMaxHeight = computed(() => {
   if (isMobile.value || viewportHeight.value === 0) {
     return ""
   }
-  const columnCap = viewportHeight.value * COLUMN_MAX_VH
-  // Whatever the pre-task card currently occupies (collapsed or expanded) is
-  // subtracted from the column budget; clamp to a usable minimum.
-  const available = columnCap - preTaskHeight.value
+  const available =
+    viewportHeight.value -
+    topOffset.value -
+    bottomReserve.value -
+    chromeHeight.value -
+    preTaskHeight.value
   return `${Math.round(Math.max(160, available))}px`
 })
 
-function measurePreTaskHeight() {
-  const el = preTaskList.value?.$el
-  preTaskHeight.value = el?.offsetHeight ?? 0
+function measureHeights() {
+  const cardEl: HTMLElement | undefined = leftCard.value?.$el
+  const preTaskEl: HTMLElement | undefined = preTaskList.value?.$el
+  preTaskHeight.value = preTaskEl?.offsetHeight ?? 0
+  if (cardEl) {
+    // The scroll container is the single overflow-y-auto child (TaskSelectList).
+    const listEl = cardEl.querySelector<HTMLElement>(".overflow-y-auto")
+    // Card height = preTask + listScroll + chrome, so chrome is exact.
+    chromeHeight.value = cardEl.offsetHeight - preTaskHeight.value - (listEl?.offsetHeight ?? 0)
+    // Space the card top occupies from the viewport top (navbar + wrapper
+    // top padding), and the bottom padding to preserve below the grid.
+    topOffset.value = cardEl.getBoundingClientRect().top
+  }
+  bottomReserve.value = bottomPaddingOf("main") + bottomPaddingOf("main > div")
 }
 
-watch(isMobile, measurePreTaskHeight)
+function bottomPaddingOf(selector: string): number {
+  const el = document.querySelector(selector)
+  return el ? parseFloat(getComputedStyle(el).paddingBottom) : 0
+}
+
+watch(isMobile, measureHeights)
 
 function handleWindowResize() {
   viewportHeight.value = window.innerHeight
-  measurePreTaskHeight()
+  measureHeights()
 }
 
 onMounted(() => {
@@ -131,10 +156,10 @@ onMounted(() => {
   window.addEventListener("resize", handleWindowResize)
   const el = preTaskList.value?.$el
   if (el) {
-    resizeObserver = new ResizeObserver(measurePreTaskHeight)
+    resizeObserver = new ResizeObserver(measureHeights)
     resizeObserver.observe(el)
   }
-  measurePreTaskHeight()
+  measureHeights()
 })
 
 onUnmounted(() => {
@@ -193,6 +218,10 @@ onUnmounted(() => {
 @media (min-width: 1024px) {
   .task-settings-card {
     display: block;
+    /* Vertically center within the grid row. The left card is capped to the
+       viewport, so the row height tracks the visible area and the settings
+       card stays centered regardless of its own height. */
+    align-self: center;
   }
 }
 </style>

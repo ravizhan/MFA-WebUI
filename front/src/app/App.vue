@@ -8,7 +8,11 @@
     <NMessageProvider placement="top-right">
       <NDialogProvider>
         <FeedbackBridge />
-        <div class="min-h-screen transition-colors duration-300 overflow-x-hidden">
+        <NEl
+          tag="div"
+          class="min-h-screen transition-colors duration-300 overflow-x-hidden"
+          style="background-color: var(--body-color)"
+        >
           <!-- Navbar -->
           <AppNavbar
             :name="name"
@@ -31,7 +35,7 @@
 
           <!-- Update dialog -->
           <UpdateDialog v-model:show="showUpdateDialog" :update-info="updateInfo" />
-        </div>
+        </NEl>
       </NDialogProvider>
     </NMessageProvider>
   </NConfigProvider>

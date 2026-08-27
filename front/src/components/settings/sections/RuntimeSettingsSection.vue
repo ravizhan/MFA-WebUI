@@ -41,6 +41,7 @@
       <NSwitch
         :value="settings.runtime.autoRetry"
         :aria-label="t('settings.runtime.autoRetry')"
+        style="justify-content: normal"
         @update:value="handleSettingChange('runtime', 'autoRetry', $event)"
       />
     </div>

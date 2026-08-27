@@ -3,6 +3,7 @@
     tag="div"
     class="h-16 px-4 sticky top-0 z-40 flex items-center"
     style="
+      background-color: var(--body-color);
       box-shadow:
         0 10px 15px -3px rgb(0 0 0 / 0.1),
         0 4px 6px -4px rgb(0 0 0 / 0.1);
@@ -58,7 +59,7 @@ function onSelect(key: string) {
    MWU wants each item to read as a button: pill background on hover, no border. */
 .navbar-menu :deep(.n-menu-item-content) {
   border-radius: var(--n-border-radius);
-  margin: 8px 4px;
+  margin: 0 4px;
   transition: background-color 0.2s ease;
 }
 

@@ -31,29 +31,6 @@
       </div>
     </div>
 
-    <!-- Health score -->
-    <NEl tag="div" class="mt-4 p-3 rounded-lg" style="background: var(--card-color)">
-      <div class="flex items-center justify-between mb-2">
-        <span class="text-sm font-medium">
-          {{ t("nav.routines") }}{{ t("panel.health.label") }}
-        </span>
-        <span class="text-sm font-bold" :style="{ color: healthColor }">
-          {{ healthScoreText }}
-        </span>
-      </div>
-      <NProgress
-        class="w-full"
-        type="line"
-        :percentage="healthScore"
-        :status="healthStatus"
-        :show-indicator="false"
-      />
-      <div class="flex justify-between text-xs opacity-60 mt-1">
-        <span>{{ t("panel.health.running") }} {{ schedulerStore.enabledTasks.length }}</span>
-        <span>{{ t("panel.health.total") }} {{ schedulerStore.tasks.length }}</span>
-      </div>
-    </NEl>
-
     <RouterLink :to="{ name: 'routines' }">
       <NButton secondary type="primary" size="small" block>
         <template #icon>
@@ -66,7 +43,6 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from "vue"
 import { useI18n } from "vue-i18n"
 import { AddCircleOutline, TimeOutline } from "@vicons/ionicons5"
 import { useSchedulerStore } from "@/stores"
@@ -75,26 +51,6 @@ import type { TriggerConfig } from "@/types/schedulerModel"
 
 const { t, locale } = useI18n()
 const schedulerStore = useSchedulerStore()
-
-const healthScore = computed(() => {
-  if (schedulerStore.tasks.length === 0) return 100
-  const enabled = schedulerStore.enabledTasks.length
-  return Math.round((enabled / schedulerStore.tasks.length) * 100)
-})
-
-const healthStatus = computed<"success" | "warning" | "error">(() => {
-  if (healthScore.value >= 80) return "success"
-  if (healthScore.value >= 50) return "warning"
-  return "error"
-})
-
-const healthColor = computed(() => {
-  if (healthStatus.value === "success") return "var(--success-color)"
-  if (healthStatus.value === "warning") return "var(--warning-color)"
-  return "var(--error-color)"
-})
-
-const healthScoreText = computed(() => `${healthScore.value}%`)
 
 function formatTriggerText(triggerConfig: TriggerConfig): string {
   return formatTrigger(t, locale.value, triggerConfig.type, triggerConfig)

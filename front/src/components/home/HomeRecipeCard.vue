@@ -2,7 +2,7 @@
   <NCard
     :bordered="false"
     size="small"
-    class="cursor-pointer"
+    class="cursor-pointer recipe-card"
     content-style="padding: 12px"
     @click="emit('apply', preset.name)"
   >
@@ -32,3 +32,13 @@ const emit = defineEmits<{
   (e: "apply", name: string): void
 }>()
 </script>
+
+<style scoped>
+/* Match the navbar menu pill: single background-color change on hover. */
+.recipe-card {
+  transition: background-color 0.2s ease;
+}
+.recipe-card:hover {
+  background-color: var(--hover-color);
+}
+</style>

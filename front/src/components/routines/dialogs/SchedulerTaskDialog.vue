@@ -105,7 +105,7 @@
             v-if="activeSection === 'schedule' && triggerType === 'cron'"
             class="flex flex-wrap gap-2"
           >
-            <span class="self-center text-xs text-[var(--text-color-3)]">
+            <span class="self-center text-xs text-(--text-color-3)">
               {{ t("settings.scheduler.dialog.quickSelect") }}
             </span>
             <NButton size="tiny" secondary @click="setCronPreset('daily')">
@@ -127,14 +127,10 @@
             <label class="flex items-center gap-1.5 text-sm font-medium">
               <NIcon size="16" class="opacity-70"><MoonOutline /></NIcon>
               {{ t("settings.scheduler.dialog.runWhenClosed") }}
+              <NSwitch v-model:value="wakeupEnabled" :disabled="!isCronNativeEligible" />
             </label>
-            <div class="flex flex-wrap items-center gap-3">
-              <NSwitch
-                v-model:value="wakeupEnabled"
-                size="small"
-                :disabled="!isCronNativeEligible"
-              />
-              <span v-if="!isCronNativeEligible" class="text-xs text-[var(--warning-color)]">
+            <div class="flex flex-wrap items-center">
+              <span v-if="!isCronNativeEligible" class="text-xs text-(--warning-color)">
                 {{ t("settings.scheduler.dialog.runWhenClosedIneligible") }}
               </span>
             </div>

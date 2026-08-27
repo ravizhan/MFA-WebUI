@@ -1,11 +1,6 @@
 <template>
   <nav :aria-label="t('settings.scheduler.dialog.sections.nav')">
-    <!-- Responsive wrappers are plain divs: naive's .n-menu/.n-tabs set their own
-         display (unlayered, beats Tailwind's layered hidden/md:block), so the
-         breakpoint classes must live on the wrapper, not the naive component. -->
-    <div
-      class="hidden h-full w-52 shrink-0 overflow-y-auto border-r border-(--divider-color) py-2 md:block"
-    >
+    <div class="hidden h-full w-52 shrink-0 overflow-y-auto py-2 md:block">
       <NMenu v-model:value="activeSection" :options="menuOptions" :indent="18" />
     </div>
     <div class="shrink-0 border-b border-(--divider-color) px-2 md:hidden">
