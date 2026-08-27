@@ -29,7 +29,6 @@
 <script setup lang="ts">
 import { computed } from "vue"
 import { useI18n } from "vue-i18n"
-import { loadLocale } from "@/app/i18n"
 import { darkModeSchema, localeSchema } from "@/validation/settings"
 import { useSettingsStore } from "@/stores"
 import type { SettingsModel } from "@/types/settingsModel"
@@ -65,9 +64,7 @@ function handleLocaleChange(val: string | number | null) {
   if (!parseResult.success) return
   const target = parseResult.data
   localStorage.setItem("locale", target)
-  void loadLocale(target).then(() => {
-    locale.value = target
-  })
+  locale.value = target
 }
 
 function handleDarkModeChange(val: string | number | null) {
