@@ -86,3 +86,6 @@ jobs:
 
       - name: Run Vitest
         run: pnpm test:run
+
+      - name: Run Type-Check
+        run: pnpm type-check
