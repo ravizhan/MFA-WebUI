@@ -112,19 +112,18 @@ def main():
 """
 
     data = {
-        "model": "deepseek-ai/DeepSeek-V4-Flash",
+        "model": "deepseek-v4-flash",
         "stream": True,
         "messages": [
             {"role": "system", "content": prompt},
             {"role": "user", "content": f"以下是对比补丁内容：\n\n{patch}"},
         ],
-        "temperature": 0.2,
     }
 
     try:
         with httpx.stream(
             "POST",
-            "https://api.siliconflow.cn/v1/chat/completions",
+            "https://api.deepseek.com/v1/chat/completions",
             headers={"Authorization": f"Bearer {api_key}"},
             json=data,
             timeout=180,
