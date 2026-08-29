@@ -102,7 +102,7 @@ try:
 except Exception as e:
     print(e)
     input("interface.json加载异常，请修正后重新启动程序，按任意键退出...")
-    exit(1)
+    sys.exit(1)
 
 interface_lock = threading.Lock()
 
@@ -238,7 +238,7 @@ async def lifespan(app: FastAPI):
                     f"请前往定时任务面板重新启用唤醒。错误: {error}"
                 )
             else:
-                logger.error(f"降级任务 {task_id} 失败")
+                app_state.send_log(f"降级任务 {task_id} 失败")
     app_state.send_log(
         f"系统级调度收敛完成: 注册 {len(report.registered)} 个, "
         f"注销 {len(report.unregistered)} 个, 失败 {len(report.failed)} 个"

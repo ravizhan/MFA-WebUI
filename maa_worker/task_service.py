@@ -320,16 +320,15 @@ class TaskService:
         state.pre_tasks = pre_tasks or []
         try:
             self.worker.events.emit_task_started(task_list)
-            if pre_tasks:
-                if not self._run_pre_tasks(pre_tasks):
-                    if not state.last_error:
-                        state.last_error = "前置程序执行失败"
-                    if state.last_status not in ("failed", "stopped"):
-                        state.last_status = "failed"
-                    self.worker.events.emit_task_failed(
-                        task_list, state.last_error or "前置程序执行失败"
-                    )
-                    return
+            if pre_tasks and not self._run_pre_tasks(pre_tasks):
+                if not state.last_error:
+                    state.last_error = "前置程序执行失败"
+                if state.last_status not in ("failed", "stopped"):
+                    state.last_status = "failed"
+                self.worker.events.emit_task_failed(
+                    task_list, state.last_error or "前置程序执行失败"
+                )
+                return
             for task in task_list:
                 if state.stop_flag:
                     self.worker.tasker.post_stop().wait()

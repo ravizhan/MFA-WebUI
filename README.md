@@ -368,6 +368,7 @@ MWU/
 ```python
 # maa_worker/task_service.py
 
+
 def run_process(self, task_list, options):
     try:
         state = self.worker.task_state
@@ -470,7 +471,7 @@ class MyCustomRecognition(CustomRecognition):
         # 返回识别结果
         return CustomRecognition.AnalyzeResult(
             box=(x, y, w, h),  # 识别框坐标
-            detail="识别详情"
+            detail="识别详情",
         )
 
 

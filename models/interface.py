@@ -318,9 +318,8 @@ class Option(BaseModel):
 
     @model_validator(mode="after")
     def check_type_fields(self):
-        if self.type == "select":
-            if not self.cases:
-                raise ValueError("当 type 为 select 时，cases 不能为空")
+        if self.type == "select" and not self.cases:
+            raise ValueError("当 type 为 select 时，cases 不能为空")
         if self.type == "switch":
             if not self.cases:
                 raise ValueError("当 type 为 switch 时，cases 不能为空")
@@ -335,9 +334,8 @@ class Option(BaseModel):
                 raise ValueError(
                     "当 type 为 checkbox 时，default_case 必须为字符串数组"
                 )
-        if self.type == "input":
-            if not self.inputs:
-                raise ValueError("当 type 为 input 时，inputs 不能为空")
+        if self.type == "input" and not self.inputs:
+            raise ValueError("当 type 为 input 时，inputs 不能为空")
         if self.type == "scan_select":
             if not self.scan_dir:
                 raise ValueError("当 type 为 scan_select 时，scan_dir 不能为空")
@@ -347,11 +345,14 @@ class Option(BaseModel):
                 raise ValueError(
                     "当 type 为 scan_select 时，pipeline_override 不能为空"
                 )
-        if self.type in {"select", "switch", "scan_select"}:
-            if self.default_case is not None and not isinstance(self.default_case, str):
-                raise ValueError(
-                    "当 type 为 select、switch 或 scan_select 时，default_case 必须为字符串"
-                )
+        if (
+            self.type in {"select", "switch", "scan_select"}
+            and self.default_case is not None
+            and not isinstance(self.default_case, str)
+        ):
+            raise ValueError(
+                "当 type 为 select、switch 或 scan_select 时，default_case 必须为字符串"
+            )
         return self
 
 

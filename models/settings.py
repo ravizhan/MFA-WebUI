@@ -36,7 +36,7 @@ def _parse_github_repo(url: str) -> tuple[str, str] | None:
         return f"https://github.com/{owner}/{repo}", owner
 
     lower_url = url.lower()
-    if lower_url.startswith("github.com/") or lower_url.startswith("www.github.com/"):
+    if lower_url.startswith(("github.com/", "www.github.com/")):
         url = f"https://{url}"
 
     parsed = urlparse(url)
