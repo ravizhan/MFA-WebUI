@@ -10,16 +10,12 @@ dependencies = [
     "fastapi>=0.141.1",
     "httpx>=0.28.1",
     "maafw>=5.12.3",
-    "nuitka[all]>=4.2",
     "numpy>=2.3.5",
     "pillow>=12.3.0",
     "plyer>=2.1.0",
     "pydantic-extra-types[cron]>=2.11.1",
     "sqlalchemy>=2.0.52",
     "uvicorn>=0.52.4",
-    "websockets>=17.1",
-    "ruff>=0.16.5",
-    "ty>=0.0.75",
     "json5>=0.15.0",
 ]
 
@@ -27,6 +23,11 @@ dependencies = [
 dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
+    "ruff>=0.16.5",
+    "ty>=0.0.75",
+]
+build = [
+    "nuitka[all]>=4.2",
 ]
 
 [tool.pytest.ini_options]
