@@ -3,10 +3,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import httpx
-from PIL import Image
 from maa.resource import Resource
 from maa.tasker import Tasker
 from maa.toolkit import Toolkit
+from PIL import Image
 
 from app_state import WorkerContext
 from maa_worker.agent_service import AgentService

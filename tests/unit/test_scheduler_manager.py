@@ -15,9 +15,8 @@ from pydantic import ValidationError
 
 from app_state import AppState
 from models.scheduler import CronTriggerConfig, ScheduledTaskCreate, ScheduledTaskUpdate
-from services.system_scheduler import ConvergeReport
-
 from scheduler_manager import SchedulerManager  # noqa: E402
+from services.system_scheduler import ConvergeReport
 
 # 契约守卫：scheduler_manager.py 完成重写前（旧版无参构造函数/initialize 无 paused
 # 参数）不运行本文件，避免 TypeError 污染其余测试结果。

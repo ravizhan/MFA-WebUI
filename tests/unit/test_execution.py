@@ -18,9 +18,9 @@ from maa_worker.execution import (
     finish_execution,
     init_db,
     list_executions,
+    stop_active,
     submit_manual,
     submit_scheduled,
-    stop_active,
 )
 from models.scheduler import (
     CronTriggerConfig,

@@ -20,8 +20,8 @@ from models.interface import (
     Resource,
     Task,
     Win32Controller,
-    validate_regex,
     _pipeline_override_contains_attach_option,
+    validate_regex,
 )
 
 

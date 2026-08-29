@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -7,8 +5,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from models.interface import InterfaceModel, Option, Preset, PresetOptionValue
 from models.scheduler import (
     PreTaskCommand,
-    TaskOptionValue,
     TaskOptionsByTask,
+    TaskOptionValue,
     _generate_pre_task_id,
 )
 

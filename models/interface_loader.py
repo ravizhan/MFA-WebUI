@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import copy
 import re
 from pathlib import Path
@@ -7,7 +5,6 @@ from typing import Any
 
 import json_utils as json
 from models.interface import InterfaceModel, Option, OptionCase
-
 
 IMPORTABLE_KEYS = {"task", "option", "preset", "import"}
 

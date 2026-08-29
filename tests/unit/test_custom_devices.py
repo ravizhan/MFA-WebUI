@@ -1,7 +1,5 @@
 """Tests for custom device persistence and scan+custom merge in DeviceService."""
 
-from __future__ import annotations
-
 import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -13,13 +11,13 @@ from unittest.mock import patch
 import pytest
 from pydantic import ValidationError
 
+from app_state import WorkerContext
 from maa_worker.device_service import (
     DeviceService,
     custom_record_to_device,
 )
-from models.device_address import canonicalize_custom_device_address
-from app_state import WorkerContext
 from models.api import CustomDeviceCreate
+from models.device_address import canonicalize_custom_device_address
 
 
 def _controller(name: str, type_: str) -> SimpleNamespace:

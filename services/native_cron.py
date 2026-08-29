@@ -7,7 +7,6 @@
 from dataclasses import dataclass
 
 from pydantic import TypeAdapter
-from pydantic_extra_types.cron import CronStr
 
 from models.scheduler import PortableCronStr
 

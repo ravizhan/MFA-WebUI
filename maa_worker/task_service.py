@@ -6,7 +6,7 @@ import time
 import traceback
 from typing import TYPE_CHECKING
 
-from models.scheduler import PreTaskCommand, TaskOptionValue, TaskOptionsByTask
+from models.scheduler import PreTaskCommand, TaskOptionsByTask, TaskOptionValue
 
 if TYPE_CHECKING:
     from maa_utils import MaaWorker

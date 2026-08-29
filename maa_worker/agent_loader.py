@@ -10,7 +10,7 @@ import traceback
 import types
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
     from maa_utils import MaaWorker

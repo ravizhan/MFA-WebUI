@@ -1,10 +1,7 @@
-from __future__ import annotations
-
 import json as _stdlib_json
 from typing import Any
 
 import json5
-
 
 JSONDecodeError = ValueError
 
