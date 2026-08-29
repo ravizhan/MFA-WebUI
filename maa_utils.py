@@ -13,6 +13,7 @@ from maa_worker.agent_service import AgentService
 from maa_worker.device_service import DeviceService
 from maa_worker.event_service import EventService
 from maa_worker.pipeline_override import PipelineOverrideService
+from maa_worker.pretask_service import PretaskService
 from maa_worker.sink_service import SinkHandler, SinkService
 from maa_worker.task_service import TaskService
 from models.interface import InterfaceModel
@@ -50,6 +51,7 @@ class MaaWorker:
         self.device = DeviceService(self)
         self.pipeline = PipelineOverrideService(self)
         self.agents = AgentService(self)
+        self.pretasks = PretaskService(self)
         self.tasks = TaskService(self)
 
         self._sink_handler = SinkHandler(self)

@@ -323,6 +323,11 @@
       "connected": "已连接",
       "disconnected": "未连接"
     },
+    "piPretask": {
+      "title": "预定义预任务",
+      "incompatible": "与当前控制器/资源包不匹配，本次不会执行",
+      "userSection": "自定义命令"
+    },
     "preview-fps": {
       "fps15": "15 FPS",
       "fps30": "30 FPS",
@@ -338,6 +343,9 @@
       "timeout": "超时（秒）",
       "enabled": "启用",
       "empty": "暂无前置任务",
+      "warnTitle": "高级功能警告",
+      "warnContent": "前置任务会在每次运行前执行任意 Shell 命令，配置不当可能导致运行失败或安全风险。请确认了解其作用后再使用。",
+      "dontRemind": "不再提示",
       "errors": {
         "timeout": "超时时间必须在 1-3600 秒之间",
         "commandRequired": "请输入命令"

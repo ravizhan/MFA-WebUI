@@ -3,7 +3,7 @@ import {
   getInterface,
   rescanScanSelectOption as requestRescanScanSelectOption,
 } from "@/services/api"
-import type { InterfaceModel, Option, Preset, Task } from "@/types/interfaceModel"
+import type { InterfaceModel, Option, Preset, Pretask, Task } from "@/types/interfaceModel"
 import type { TaskListItem } from "@/types/taskConfigModel"
 
 export const useInterfaceStore = defineStore("interface", {
@@ -20,6 +20,7 @@ export const useInterfaceStore = defineStore("interface", {
       }))
     },
     getPresetList: (state): Preset[] => state.interface?.preset || [],
+    getPretasks: (state): Pretask[] => state.interface?.pretask || [],
   },
   actions: {
     async setInterface() {
@@ -67,6 +68,22 @@ export const useInterfaceStore = defineStore("interface", {
       resourceName?: string | null,
     ): boolean {
       return this.isTaskCompatible(this.getTaskByEntry(entry), controllerName, resourceName)
+    },
+
+    isPretaskCompatible(
+      pretask: Pretask,
+      controllerName?: string | null,
+      resourceName?: string | null,
+    ): boolean {
+      if (
+        controllerName &&
+        pretask.controller?.length &&
+        !pretask.controller.includes(controllerName)
+      ) {
+        return false
+      }
+
+      return !(resourceName && pretask.resource?.length && !pretask.resource.includes(resourceName))
     },
 
     getTaskByName(name: string): Task | null {

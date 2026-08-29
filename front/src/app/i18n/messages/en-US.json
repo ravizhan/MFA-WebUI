@@ -323,6 +323,11 @@
       "connected": "Connected",
       "disconnected": "Disconnected"
     },
+    "piPretask": {
+      "title": "Pre-defined pre-tasks",
+      "incompatible": "Not applicable to current controller/resource; skipped this run",
+      "userSection": "Custom commands"
+    },
     "preview-fps": {
       "fps15": "15 FPS",
       "fps30": "30 FPS",
@@ -338,6 +343,9 @@
       "timeout": "Timeout (seconds)",
       "enabled": "Enabled",
       "empty": "No pre-task",
+      "warnTitle": "Advanced feature warning",
+      "warnContent": "Pre-tasks run arbitrary shell commands before each run. Misconfiguration may cause failures or security risks. Only continue if you understand what this does.",
+      "dontRemind": "Don't remind me again",
       "errors": {
         "timeout": "Timeout must be between 1 and 3600 seconds",
         "commandRequired": "Please enter a command"

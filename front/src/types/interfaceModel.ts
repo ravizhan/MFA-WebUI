@@ -115,6 +115,18 @@ export interface Task {
   option?: string[]
 }
 
+export interface Pretask {
+  resource?: string[]
+  controller?: string[]
+  exec: string
+  args?: string[]
+  name?: string
+  label?: string
+  description?: string
+  icon?: string
+  option?: string[]
+}
+
 export interface Group {
   name: string
   label?: string
@@ -223,6 +235,7 @@ export interface InterfaceModel {
   group?: Group[]
   agent?: Agent | Agent[]
   task?: Task[]
+  pretask?: Pretask[]
   option?: Record<string, Option>
   global_option?: string[]
   import?: string[]

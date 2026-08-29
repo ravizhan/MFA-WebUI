@@ -22,6 +22,7 @@ from maa_worker.execution import (
     submit_manual,
     submit_scheduled,
 )
+from maa_worker.pretask_service import PretaskError, PretaskStopped
 from models.scheduler import (
     CronTriggerConfig,
     ManualStartPayload,
@@ -82,6 +83,7 @@ class _FakeInterface:
     def __init__(self, entries: list[str]):
         self.task = [SimpleNamespace(entry=e, option=[]) for e in entries]
         self.option = {}
+        self.pretask = []
 
 
 class _FakeTaskService:
@@ -105,6 +107,44 @@ class _FakeTaskService:
         return False
 
 
+class _FakeSuccessfulTaskService(_FakeTaskService):
+    def start(self, task_list, options, task_name=None, pre_tasks=None):
+        self.called = True
+        if self._task_state is not None:
+            self._task_state.running = True
+            self._task_state.last_status = "success"
+            self._task_state.running = False
+        return True
+
+
+class _FakePretaskService:
+    def __init__(
+        self,
+        task_state: "_FakeTaskState | None" = None,
+        ordering: list[str] | None = None,
+    ):
+        self.calls: list[tuple[str, str, dict, list]] = []
+        self.stop_flags: list[bool] = []
+        self.error: PretaskError | None = None
+        self.set_stop_flag_on_error = False
+        self._task_state = task_state
+        self._ordering = ordering
+
+    def run_all(self, controller_name, resource_name, task_options, user_pre_tasks):
+        self.calls.append(
+            (controller_name, resource_name, task_options, user_pre_tasks)
+        )
+        self.stop_flags.append(
+            self._task_state.stop_flag if self._task_state is not None else False
+        )
+        if self._ordering is not None:
+            self._ordering.append("pretask")
+        if self.error is not None:
+            if self.set_stop_flag_on_error and self._task_state is not None:
+                self._task_state.stop_flag = True
+            raise self.error
+
+
 class _FakeDeviceState:
     connected = False
     configuration_locked = False
@@ -115,9 +155,12 @@ class _FakeDeviceState:
 class _FakeDevice:
     """模拟慢速设备连接（connect 阻塞至 release 事件，供停止测试在准备阶段取消）。"""
 
-    def __init__(self):
+    def __init__(self, *, ordering: list[str] | None = None, block: bool = True):
         self.release = threading.Event()
+        if not block:
+            self.release.set()
         self.connect_called = False
+        self._ordering = ordering
 
     def build_device_model_from_config(self, controller_name, device_type, address):
         return SimpleNamespace(
@@ -128,6 +171,8 @@ class _FakeDevice:
 
     def connect(self, model):
         self.connect_called = True
+        if self._ordering is not None:
+            self._ordering.append("connect")
         self.release.wait(timeout=5)
         return True
 
@@ -136,9 +181,11 @@ class _FakeDevice:
 
 
 class _FakeTaskState:
-    running = False
-    last_status = "idle"
-    last_error = None
+    def __init__(self):
+        self.stop_flag = False
+        self.running = False
+        self.last_status = "idle"
+        self.last_error = None
 
 
 class _FakeWorker:
@@ -148,13 +195,19 @@ class _FakeWorker:
         start_result: bool,
         ready: bool = False,
         block_connect: bool = False,
+        ordering: list[str] | None = None,
     ):
         self.events = _FakeEvents()
         self.interface = _FakeInterface(["Startup"])
         self.task_state = _FakeTaskState()
+        self.pretasks = _FakePretaskService(self.task_state, ordering)
         self.tasks = _FakeTaskService(start_result, task_state=self.task_state)
         self.device_state = _FakeDeviceState()
-        self.device = _FakeDevice() if block_connect else None
+        self.device = (
+            _FakeDevice(ordering=ordering, block=block_connect)
+            if block_connect or ordering is not None
+            else None
+        )
         if ready:
             self.device_state.connected = True
             self.device_state.configuration_locked = True
@@ -476,6 +529,93 @@ class TestSubmitScheduled:
         assert admission.skip_status == "skipped_update_in_progress"
         row = list_executions(state.scheduler_db_path)[0]
         assert row.status == "skipped_update_in_progress"
+
+
+# ---------------------------------------------------------------------------
+# PI pretask admission
+# ---------------------------------------------------------------------------
+
+
+class TestPretaskAdmission:
+    async def test_pretask_failure_records_failed_and_terminal_event(
+        self, state: AppState
+    ):
+        worker = _FakeWorker(start_result=True, ready=True)
+        worker.pretasks.error = PretaskError("pretask failed")
+        state.worker = worker
+
+        admission = await submit_manual(state, make_payload())
+        assert admission.accepted is True
+        await _await_active_task(state)
+
+        assert worker.pretasks.calls == [("AdbController", "main", {}, [])]
+        assert worker.tasks.called is False
+        row = list_executions(state.scheduler_db_path)[0]
+        assert row.id == admission.run_id
+        assert row.status == "failed"
+        assert row.error_message == "pretask failed"
+        assert worker.events.failed_events == [(["Startup"], "pretask failed")]
+
+    async def test_pretask_stopped_records_stopped_and_terminal_event(
+        self, state: AppState
+    ):
+        worker = _FakeWorker(start_result=True, ready=True)
+        worker.pretasks.error = PretaskStopped("pretask stopped")
+        # A real stop request sets stop_flag while the pretask is running; this
+        # makes the fake raise through the same classification path.
+        worker.pretasks.set_stop_flag_on_error = True
+        state.worker = worker
+
+        admission = await submit_manual(state, make_payload())
+        assert admission.accepted is True
+        await _await_active_task(state)
+
+        row = list_executions(state.scheduler_db_path)[0]
+        assert row.id == admission.run_id
+        assert row.status == "stopped"
+        assert row.error_message == "任务已终止"
+        assert worker.events.failed_events == [(["Startup"], "任务已终止")]
+
+    async def test_stale_stop_flag_is_reset_before_pretask(self, state: AppState):
+        worker = _FakeWorker(start_result=True, ready=True)
+        worker.task_state.stop_flag = True
+        worker.tasks = _FakeSuccessfulTaskService(
+            result=True, task_state=worker.task_state
+        )
+        state.worker = worker
+
+        admission = await submit_manual(state, make_payload())
+        assert admission.accepted is True
+        await _await_active_task(state)
+
+        assert worker.pretasks.stop_flags == [False]
+        row = list_executions(state.scheduler_db_path)[0]
+        assert row.id == admission.run_id
+        assert row.status == "success"
+
+    async def test_pretask_runs_before_device_connection(
+        self, state: AppState, monkeypatch
+    ):
+        settings = SimpleNamespace(
+            runtime=SimpleNamespace(maxRetryCount=1, retryInterval=0)
+        )
+        monkeypatch.setattr("maa_worker.execution.load_settings", lambda: settings)
+        ordering: list[str] = []
+        worker = _FakeWorker(start_result=True, ordering=ordering)
+        worker.tasks = _FakeSuccessfulTaskService(
+            result=True, task_state=worker.task_state
+        )
+        state.worker = worker
+
+        admission = await submit_manual(state, make_payload())
+        assert admission.accepted is True
+        await _await_active_task(state)
+
+        assert worker.pretasks.calls == [("AdbController", "main", {}, [])]
+        assert ordering == ["pretask", "connect"]
+        row = list_executions(state.scheduler_db_path)[0]
+        assert row.id == admission.run_id
+        assert row.status == "success"
 
 
 # ---------------------------------------------------------------------------

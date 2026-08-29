@@ -16,6 +16,7 @@ from pathlib import Path
 
 from app_state import ActiveRun, AppState
 from maa_worker.event_service import load_settings
+from maa_worker.pretask_service import PretaskError, PretaskStopped
 from models.scheduler import (
     ExecutionOrigin,
     ExecutionStatus,
@@ -413,8 +414,8 @@ async def stop_active(state: AppState) -> bool:
     if state.worker is not None:
         # tasks.stop() 内部轮询（time.sleep(0.5)），脱离事件循环执行
         await asyncio.to_thread(state.worker.tasks.stop)
-    # 任务尚未启动（设备连接/准备阶段）：tasks.stop() 是 no-op（running 仍 False），
-    # 直接取消后台协程以触发 finally 清槽，否则停止被 ack 但任务随后照常启动。
+    # 任务线程尚未启动时直接取消后台协程，避免前置/设备准备结束后继续启动任务。
+    # tasks.stop() 已置 stop_flag 并终止正在运行的前置进程。
     if active.started is False:
         task = state.active_execution_task
         if task is not None and not task.done():
@@ -430,7 +431,7 @@ async def _complete_run(
     *,
     task_list: list[str] | None = None,
 ) -> None:
-    """后台执行协程：设备准备 → 任务运行 → 落库收尾 → 清槽"""
+    """后台执行协程：前置任务 → 设备准备 → 任务运行 → 落库收尾 → 清槽"""
     worker = state.worker
     status: ExecutionStatus = "failed"
     error: str | None = None
@@ -444,7 +445,26 @@ async def _complete_run(
         if payload is None or not payload.device or not payload.resource_name:
             raise RuntimeError("设备或资源配置缺失")
 
-        # 2. 复用已匹配连接；不匹配先解锁
+        # 2. PI pretask + 用户命令统一在 Controller 创建/连接前执行。
+        # 已锁定且可复用的 Controller 无法重新满足“创建前”，此处仍保证在任务启动前执行。
+        worker.task_state.stop_flag = False
+        effective_controller = payload.controller_name or payload.device.controller_name
+        try:
+            await asyncio.to_thread(
+                worker.pretasks.run_all,
+                effective_controller,
+                payload.resource_name,
+                payload.task_options or {},
+                payload.preTasks or [],
+            )
+        except PretaskStopped:
+            raise
+        except PretaskError as exc:
+            if worker.task_state.stop_flag:
+                raise PretaskStopped(str(exc)) from exc
+            raise RuntimeError(str(exc)) from exc
+
+        # 3. 复用已匹配连接；不匹配先解锁
         device_state = worker.device_state
         need_connect = not (
             device_state.connected
@@ -455,7 +475,7 @@ async def _complete_run(
         if need_connect and device_state.configuration_locked:
             await asyncio.to_thread(worker.device.reset_connection_state)
 
-        # 3. 按设置重试 connect + set_resource
+        # 4. 按设置重试 connect + set_resource
         if need_connect:
             settings = load_settings()
             max_retry = settings.runtime.maxRetryCount
@@ -486,7 +506,7 @@ async def _complete_run(
                 await asyncio.to_thread(worker.device.reset_connection_state)
                 raise RuntimeError(f"设备连接失败: {last_err}")
 
-        # 4. 规范化载荷并启动
+        # 5. 规范化载荷并启动
         normalized_task_list, normalized_task_options, normalized_pre_tasks = (
             normalize_task_execution_payload(
                 payload.task_list,
@@ -510,7 +530,7 @@ async def _complete_run(
         if state.active_run is not None and state.active_run.run_id == run_id:
             state.active_run.started = True
 
-        # 5. 轮询等待结束（stop_flag 由 worker 内部轮询处理中途停止）
+        # 6. 轮询等待结束（stop_flag 由 worker 内部轮询处理中途停止）
         while worker.task_state.running:
             await asyncio.sleep(1)
 
@@ -525,6 +545,18 @@ async def _complete_run(
             status = "failed"
             error = last_error or "任务执行失败"
 
+    except PretaskStopped:
+        status = "stopped"
+        error = "任务已终止"
+        if worker is not None:
+            worker.events.send_log(error)
+            if not task_started:
+                try:
+                    await asyncio.to_thread(
+                        worker.events.emit_task_failed, event_task_list, error
+                    )
+                except Exception as emit_err:
+                    logger.error(f"发送任务停止事件失败: {emit_err}")
     except Exception as e:
         status = "failed"
         error = str(e)

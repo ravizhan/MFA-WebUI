@@ -6,7 +6,7 @@ from typing import Any
 import json_utils as json
 from models.interface import InterfaceModel, Option, OptionCase
 
-IMPORTABLE_KEYS = {"task", "option", "preset", "import"}
+IMPORTABLE_KEYS = {"task", "option", "preset", "pretask", "import"}
 
 # pathlib.Path is OS-aware: on POSIX it does not recognize Windows drive
 # letters (e.g. "C:/windows" parses as a relative path). Detect them
@@ -55,7 +55,7 @@ def _validate_importable_fragment(data: dict[str, Any], source_path: Path) -> No
     invalid_keys = sorted(set(data) - IMPORTABLE_KEYS)
     if invalid_keys:
         raise InterfaceLoadError(
-            f"导入文件只允许包含 task、option、preset、import 字段: {source_path}，"
+            f"导入文件只允许包含 task、option、preset、pretask、import 字段: {source_path}，"
             f"发现非法字段 {', '.join(invalid_keys)}"
         )
 
@@ -142,6 +142,19 @@ def _seed_root_sections(
     _register_tasks(root_data.get("task"), source_path, state)
     _register_options(root_data.get("option"), source_path, state)
     _register_presets(root_data.get("preset"), source_path, state)
+    pretasks = root_data.get("pretask")
+    if pretasks is not None and not isinstance(pretasks, list):
+        root_data["pretask"] = [pretasks]
+
+
+def _merge_pretasks(target: dict[str, Any], fragment: dict[str, Any]) -> None:
+    pretasks = fragment.get("pretask")
+    if pretasks is None:
+        return
+    if not isinstance(pretasks, list):
+        pretasks = [pretasks]
+    target.setdefault("pretask", [])
+    target["pretask"].extend(copy.deepcopy(pretasks))
 
 
 def _merge_fragment_sections(
@@ -167,6 +180,7 @@ def _merge_fragment_sections(
     if presets:
         target.setdefault("preset", [])
         target["preset"].extend(copy.deepcopy(presets))
+    _merge_pretasks(target, fragment)
 
 
 def _normalize_root_relative_path(raw_path: str, *, field_name: str) -> str:
@@ -487,6 +501,76 @@ def _validate_task_context_constraints(interface_model: InterfaceModel) -> None:
                 )
 
 
+def _validate_pretasks(interface_model: InterfaceModel) -> None:
+    raw_pretasks = interface_model.pretask
+    if raw_pretasks is None:
+        pretasks = []
+    elif isinstance(raw_pretasks, list):
+        pretasks = raw_pretasks
+    else:
+        pretasks = [raw_pretasks]
+
+    resource_names = {resource.name for resource in interface_model.resource}
+    controller_names = {controller.name for controller in interface_model.controller}
+    option_map = interface_model.option or {}
+    tasks = interface_model.task or []
+    reachable_options_by_resource: dict[str, set[str]] = {}
+
+    for index, pretask in enumerate(pretasks):
+        pretask_ref = f"pretask[{index}]"
+        if not pretask.exec.strip():
+            raise InterfaceLoadError(f"{pretask_ref}.exec 必须是非空字符串")
+
+        invalid_resources = sorted(
+            {
+                resource_name
+                for resource_name in pretask.resource or []
+                if resource_name not in resource_names
+            }
+        )
+        if invalid_resources:
+            raise InterfaceLoadError(
+                f"{pretask_ref} 引用了不存在的 resource: {', '.join(invalid_resources)}"
+            )
+
+        invalid_controllers = sorted(
+            {
+                controller_name
+                for controller_name in pretask.controller or []
+                if controller_name not in controller_names
+            }
+        )
+        if invalid_controllers:
+            raise InterfaceLoadError(
+                f"{pretask_ref} 引用了不存在的 controller: {', '.join(invalid_controllers)}"
+            )
+
+        for option_name in pretask.option or []:
+            if option_name not in option_map:
+                raise InterfaceLoadError(
+                    f"{pretask_ref}.option 引用了不存在的选项: {option_name}"
+                )
+
+            for resource_name in pretask.resource or []:
+                reachable_options = reachable_options_by_resource.get(resource_name)
+                if reachable_options is None:
+                    reachable_options = set()
+                    for task in tasks:
+                        if task.resource and resource_name not in task.resource:
+                            continue
+                        _collect_reachable_option_names(
+                            task.option or [], option_map, reachable_options
+                        )
+                    reachable_options_by_resource[resource_name] = reachable_options
+
+                if option_name not in reachable_options:
+                    raise InterfaceLoadError(
+                        f"{pretask_ref}.option[{option_name}] 无法从资源包 {resource_name} 的任何任务到达"
+                    )
+
+    interface_model.pretask = pretasks
+
+
 def _merge_imports_into_target(
     target: dict[str, Any],
     import_paths: list[str],
@@ -538,6 +622,7 @@ def load_interface_model(base_dir: str | Path) -> InterfaceModel:
     try:
         interface_model = InterfaceModel.model_validate(merged_data)
         _validate_task_context_constraints(interface_model)
+        _validate_pretasks(interface_model)
         _validate_presets(interface_model)
         return interface_model
     except Exception as exc:
