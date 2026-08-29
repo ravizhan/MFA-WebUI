@@ -11,9 +11,8 @@ import logging
 import sqlite3
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 from app_state import ActiveRun, AppState
 from maa_worker.event_service import load_settings
@@ -37,9 +36,9 @@ class Admission:
     """执行准入结果"""
 
     accepted: bool
-    run_id: Optional[str] = None
-    conflict: Optional[StartConflict] = None
-    skip_status: Optional[str] = None
+    run_id: str | None = None
+    conflict: StartConflict | None = None
+    skip_status: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -83,14 +82,14 @@ def init_db(path: Path) -> None:
 
 
 def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
-def _to_iso(dt: Optional[datetime]) -> Optional[str]:
+def _to_iso(dt: datetime | None) -> str | None:
     if dt is None:
         return None
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=UTC)
     return dt.isoformat()
 
 
@@ -146,7 +145,7 @@ def finish_execution(
     path: Path,
     run_id: str,
     status: ExecutionStatus,
-    error: Optional[str] = None,
+    error: str | None = None,
 ) -> None:
     """收尾执行记录"""
     with sqlite3.connect(path) as db:
@@ -218,12 +217,12 @@ def _conflict_from_active(state: AppState) -> StartConflict:
 
 async def _record_skip(
     state: AppState,
-    task_id: Optional[str],
+    task_id: str | None,
     task_name: str,
     origin: ExecutionOrigin,
     status: ExecutionStatus,
-    occurrence_id: Optional[str] = None,
-    error: Optional[str] = None,
+    occurrence_id: str | None = None,
+    error: str | None = None,
 ) -> Admission:
     """落库一条跳过/失败记录并返回拒绝准入"""
     run_id = str(uuid.uuid4())
@@ -434,7 +433,7 @@ async def _complete_run(
     """后台执行协程：设备准备 → 任务运行 → 落库收尾 → 清槽"""
     worker = state.worker
     status: ExecutionStatus = "failed"
-    error: Optional[str] = None
+    error: str | None = None
     task_started = False
     event_task_list = payload.task_list if payload is not None else (task_list or [])
     try:
@@ -467,7 +466,7 @@ async def _complete_run(
                 payload.device.device_address,
             )
             connected = False
-            last_err: Optional[Exception] = None
+            last_err: Exception | None = None
             for attempt in range(1, max_retry + 1):
                 try:
                     if not await asyncio.to_thread(worker.device.connect, device_model):
@@ -478,7 +477,7 @@ async def _complete_run(
                         raise RuntimeError("set_resource() 返回 False")
                     connected = True
                     break
-                except Exception as e:  # noqa: PERF203
+                except Exception as e:
                     last_err = e
                     if attempt < max_retry:
                         worker.events.send_log(f"连接失败，第 {attempt} 次重试...: {e}")

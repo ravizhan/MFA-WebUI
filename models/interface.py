@@ -1,5 +1,5 @@
 import re
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -10,9 +10,9 @@ from pydantic import (
     model_validator,
 )
 
-DocumentContent = Union[str, List[str]]
-PipelineOverride = Dict[str, Any]
-PresetOptionValue = Union[str, List[str], Dict[str, str]]
+DocumentContent = str | list[str]
+PipelineOverride = dict[str, Any]
+PresetOptionValue = str | list[str] | dict[str, str]
 
 
 def validate_regex(v: Any, info: ValidationInfo) -> Any:
@@ -48,9 +48,9 @@ class AdbController(BaseModel):
 
 
 class Win32Controller(BaseModel):
-    class_regex: Optional[re.Pattern] = None
-    window_regex: Optional[re.Pattern] = None
-    mouse: Optional[
+    class_regex: re.Pattern | None = None
+    window_regex: re.Pattern | None = None
+    mouse: (
         Literal[
             "Seize",
             "SendMessage",
@@ -61,8 +61,9 @@ class Win32Controller(BaseModel):
             "SendMessageWithWindowPos",
             "PostMessageWithWindowPos",
         ]
-    ] = None
-    keyboard: Optional[
+        | None
+    ) = None
+    keyboard: (
         Literal[
             "Seize",
             "SendMessage",
@@ -73,8 +74,9 @@ class Win32Controller(BaseModel):
             "SendMessageWithWindowPos",
             "PostMessageWithWindowPos",
         ]
-    ] = None
-    screencap: Optional[
+        | None
+    ) = None
+    screencap: (
         Literal[
             "GDI",
             "FramePool",
@@ -85,7 +87,8 @@ class Win32Controller(BaseModel):
             "Foreground",
             "Background",
         ]
-    ] = None
+        | None
+    ) = None
 
     @field_validator("class_regex", "window_regex", mode="before")
     @classmethod
@@ -140,15 +143,15 @@ class Win32Controller(BaseModel):
 class PlayCoverController(BaseModel):
     """PlayCover 控制器配置（仅 macOS）"""
 
-    uuid: Optional[str] = None
+    uuid: str | None = None
 
 
 class MacOSController(BaseModel):
     """MacOS 控制器配置"""
 
-    title_regex: Optional[re.Pattern] = None
-    input: Optional[Literal["GlobalEvent", "PostToPid"]] = None
-    screencap: Optional[Literal["ScreenCaptureKit"]] = None
+    title_regex: re.Pattern | None = None
+    input: Literal["GlobalEvent", "PostToPid"] | None = None
+    screencap: Literal["ScreenCaptureKit"] | None = None
 
     @field_validator("title_regex", mode="before")
     @classmethod
@@ -159,10 +162,10 @@ class MacOSController(BaseModel):
 class GamepadController(BaseModel):
     """虚拟游戏手柄控制器配置（仅 Windows）"""
 
-    class_regex: Optional[re.Pattern] = None
-    window_regex: Optional[re.Pattern] = None
-    gamepad_type: Optional[Literal["Xbox360", "DualShock4", "DS4"]] = "Xbox360"
-    screencap: Optional[
+    class_regex: re.Pattern | None = None
+    window_regex: re.Pattern | None = None
+    gamepad_type: Literal["Xbox360", "DualShock4", "DS4"] | None = "Xbox360"
+    screencap: (
         Literal[
             "GDI",
             "FramePool",
@@ -171,7 +174,8 @@ class GamepadController(BaseModel):
             "PrintWindow",
             "ScreenDC",
         ]
-    ] = None
+        | None
+    ) = None
 
     @field_validator("class_regex", "window_regex", mode="before")
     @classmethod
@@ -204,21 +208,21 @@ class GamepadController(BaseModel):
 
 class Controller(BaseModel):
     name: str
-    label: Optional[str] = None
-    description: Optional[str] = None
-    icon: Optional[str] = None
+    label: str | None = None
+    description: str | None = None
+    icon: str | None = None
     type: Literal["Adb", "Win32", "MacOS", "PlayCover", "Gamepad"]
-    display_short_side: Optional[int] = 720
-    display_long_side: Optional[int] = None
-    display_raw: Optional[bool] = False
-    permission_required: Optional[bool] = False
-    attach_resource_path: Optional[List[str]] = None
-    option: Optional[List[str]] = None
-    adb: Optional[AdbController] = None
-    win32: Optional[Win32Controller] = None
-    macos: Optional[MacOSController] = None
-    playcover: Optional[PlayCoverController] = None
-    gamepad: Optional[GamepadController] = None
+    display_short_side: int | None = 720
+    display_long_side: int | None = None
+    display_raw: bool | None = False
+    permission_required: bool | None = False
+    attach_resource_path: list[str] | None = None
+    option: list[str] | None = None
+    adb: AdbController | None = None
+    win32: Win32Controller | None = None
+    macos: MacOSController | None = None
+    playcover: PlayCoverController | None = None
+    gamepad: GamepadController | None = None
 
     @model_validator(mode="after")
     def check_display_fields_mutual_exclusive(self):
@@ -239,78 +243,78 @@ class Controller(BaseModel):
 
 class Resource(BaseModel):
     name: str
-    label: Optional[str] = None
-    description: Optional[str] = None
-    icon: Optional[str] = None
-    path: List[str]
-    controller: Optional[List[str]] = None
-    option: Optional[List[str]] = None
-    hash: Optional[str] = None
+    label: str | None = None
+    description: str | None = None
+    icon: str | None = None
+    path: list[str]
+    controller: list[str] | None = None
+    option: list[str] | None = None
+    hash: str | None = None
 
 
 class Agent(BaseModel):
     child_exec: str
-    child_args: Optional[List[str]] = None
-    identifier: Optional[str] = None
-    embedded: Optional[bool] = True
+    child_args: list[str] | None = None
+    identifier: str | None = None
+    embedded: bool | None = True
 
 
 class Task(BaseModel):
     name: str
-    label: Optional[str] = None
+    label: str | None = None
     entry: str
-    default_check: Optional[bool] = False
-    description: Optional[str] = None
-    doc: Optional[DocumentContent] = None
-    desc: Optional[DocumentContent] = None
-    icon: Optional[str] = None
-    group: Optional[List[str]] = None
-    resource: Optional[List[str]] = None
-    controller: Optional[List[str]] = None
-    pipeline_override: Optional[PipelineOverride] = None
-    option: Optional[List[str]] = None
+    default_check: bool | None = False
+    description: str | None = None
+    doc: DocumentContent | None = None
+    desc: DocumentContent | None = None
+    icon: str | None = None
+    group: list[str] | None = None
+    resource: list[str] | None = None
+    controller: list[str] | None = None
+    pipeline_override: PipelineOverride | None = None
+    option: list[str] | None = None
 
 
 class Group(BaseModel):
     name: str
-    label: Optional[str] = None
-    description: Optional[str] = None
-    icon: Optional[str] = None
-    default_expand: Optional[bool] = True
+    label: str | None = None
+    description: str | None = None
+    icon: str | None = None
+    default_expand: bool | None = True
 
 
 class OptionCase(BaseModel):
     name: str
-    label: Optional[str] = None
-    description: Optional[str] = None
-    icon: Optional[str] = None
-    option: Optional[List[str]] = None
-    pipeline_override: Optional[PipelineOverride] = None
+    label: str | None = None
+    description: str | None = None
+    icon: str | None = None
+    option: list[str] | None = None
+    pipeline_override: PipelineOverride | None = None
 
 
 class InputCase(BaseModel):
     name: str
-    label: Optional[str] = None
-    description: Optional[str] = None
-    default: Optional[str] = None
-    pipeline_type: Optional[Literal["string", "int", "bool"]] = None
-    verify: Optional[str] = None
-    pattern_msg: Optional[str] = None
+    label: str | None = None
+    description: str | None = None
+    default: str | None = None
+    pipeline_type: Literal["string", "int", "bool"] | None = None
+    verify: str | None = None
+    pattern_msg: str | None = None
 
 
 class Option(BaseModel):
     type: Literal["select", "input", "checkbox", "switch", "scan_select"] = "select"
-    label: Optional[str] = None
-    description: Optional[str] = None
-    icon: Optional[str] = None
-    controller: Optional[List[str]] = None
-    resource: Optional[List[str]] = None
-    cases: Optional[List[OptionCase]] = None
-    inputs: Optional[List[InputCase]] = None
-    scan_dir: Optional[str] = None
-    scan_filter: Optional[str] = None
-    pipeline_override: Optional[PipelineOverride] = None
-    default_case: Optional[Union[str, List[str]]] = None
+    label: str | None = None
+    description: str | None = None
+    icon: str | None = None
+    controller: list[str] | None = None
+    resource: list[str] | None = None
+    cases: list[OptionCase] | None = None
+    inputs: list[InputCase] | None = None
+    scan_dir: str | None = None
+    scan_filter: str | None = None
+    pipeline_override: PipelineOverride | None = None
+    default_case: str | list[str] | None = None
 
     @model_validator(mode="after")
     def check_type_fields(self):
@@ -353,44 +357,44 @@ class Option(BaseModel):
 
 class PresetTask(BaseModel):
     name: str
-    enabled: Optional[bool] = True
-    option: Optional[Dict[str, PresetOptionValue]] = None
+    enabled: bool | None = True
+    option: dict[str, PresetOptionValue] | None = None
 
 
 class Preset(BaseModel):
     name: str
-    label: Optional[str] = None
-    description: Optional[str] = None
-    icon: Optional[str] = None
-    task: Optional[List[PresetTask]] = None
+    label: str | None = None
+    description: str | None = None
+    icon: str | None = None
+    task: list[PresetTask] | None = None
 
 
 class InterfaceModel(BaseModel):
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
     interface_version: Literal[2]
-    languages: Optional[Dict[str, str]] = None
+    languages: dict[str, str] | None = None
     name: str
-    label: Optional[str] = None
-    title: Optional[str] = None
-    icon: Optional[str] = None
-    mirrorchyan_rid: Optional[str] = None
-    mirrorchyan_multiplatform: Optional[bool] = None
-    github: Optional[str] = None
-    version: Optional[str] = None
-    contact: Optional[str] = None
-    license: Optional[str] = None
-    welcome: Optional[str] = None
-    description: Optional[str] = None
-    controller: List[Controller]
-    resource: List[Resource]
-    group: Optional[List[Group]] = None
-    agent: Optional[Union[Agent, List[Agent]]] = None
-    task: Optional[List[Task]] = None
-    option: Optional[Dict[str, Option]] = None
-    global_option: Optional[List[str]] = None
-    import_: Optional[List[str]] = Field(None, alias="import")
-    preset: Optional[List[Preset]] = None
+    label: str | None = None
+    title: str | None = None
+    icon: str | None = None
+    mirrorchyan_rid: str | None = None
+    mirrorchyan_multiplatform: bool | None = None
+    github: str | None = None
+    version: str | None = None
+    contact: str | None = None
+    license: str | None = None
+    welcome: str | None = None
+    description: str | None = None
+    controller: list[Controller]
+    resource: list[Resource]
+    group: list[Group] | None = None
+    agent: Agent | list[Agent] | None = None
+    task: list[Task] | None = None
+    option: dict[str, Option] | None = None
+    global_option: list[str] | None = None
+    import_: list[str] | None = Field(None, alias="import")
+    preset: list[Preset] | None = None
 
     @model_validator(mode="after")
     def set_variable_if_none(self):

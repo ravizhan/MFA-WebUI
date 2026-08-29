@@ -8,15 +8,14 @@ import subprocess
 import sys
 import traceback
 import types
+from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from maa_utils import MaaWorker
 
-
-from maa.resource import Resource
 from maa.agent_client import AgentClient
 
 # Sink 基类名称映射 — 用于 AST 隐式继承检测
@@ -311,13 +310,13 @@ def _black_magic_agent_server_stub():
 
     stub_agent_server_module = types.ModuleType("maa.agent.agent_server")
     stub_agent_server_module.__package__ = "maa.agent"
-    setattr(stub_agent_server_module, "AgentServer", _BlackMagicAgentServer)
+    stub_agent_server_module.AgentServer = _BlackMagicAgentServer
 
-    setattr(stub_agent_module, "agent_server", stub_agent_server_module)
+    stub_agent_module.agent_server = stub_agent_server_module
 
     sys.modules["maa.agent"] = stub_agent_module
     sys.modules["maa.agent.agent_server"] = stub_agent_server_module
-    setattr(maa_module, "agent", stub_agent_module)
+    maa_module.agent = stub_agent_module
 
     try:
         yield
@@ -329,7 +328,7 @@ def _black_magic_agent_server_stub():
                 sys.modules[name] = saved
 
         if had_agent_attr:
-            setattr(maa_module, "agent", saved_agent_attr)
+            maa_module.agent = saved_agent_attr
         else:
             delattr(maa_module, "agent")
 
@@ -405,7 +404,7 @@ def run_black_magic(agent_config: Any, maa_worker: "MaaWorker"):
         def exec_module(self, module):
             record = self.mapping[module.__name__]
             file_path = record["path"]
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(file_path, encoding="utf-8") as f:
                 source = f.read()
 
             module.__file__ = file_path
@@ -431,7 +430,7 @@ def run_black_magic(agent_config: Any, maa_worker: "MaaWorker"):
     for module_name, info in module_map.items():
         file_path = info.get("path")
         try:
-            with open(file_path, "r", encoding="utf-8") as f:
+            with open(file_path, encoding="utf-8") as f:
                 source = f.read()
             lines = source.splitlines(True)
 

@@ -51,7 +51,7 @@ class AgentService:
         if not mapping:
             return None
 
-        normalized_key = key[1:] if key.startswith("$") else key
+        normalized_key = key.removeprefix("$")
         if not normalized_key:
             return None
 
@@ -107,7 +107,7 @@ class AgentService:
     def build_pi_env(self) -> dict[str, str]:
         controller_payload = self._get_selected_controller_payload()
         resource_payload = self._get_selected_resource_payload()
-        with open("version", "r", encoding="utf-8") as f:
+        with open("version", encoding="utf-8") as f:
             client_version = f.read().strip()
         return {
             "PI_INTERFACE_VERSION": PI_INTERFACE_VERSION,

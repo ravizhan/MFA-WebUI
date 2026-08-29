@@ -8,7 +8,7 @@ import asyncio
 import logging
 import uuid
 from pathlib import Path
-from typing import Any, List, Literal, Optional
+from typing import Any, Literal
 
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 
 # APS 持久化回调的运行期状态（initialize 时经 _bind_callback_runtime 注入）。
 # APScheduler 的 jobstore 只持久化模块级函数引用，无法携带实例，故用模块全局。
-_CALLBACK_STATE: Optional[AppState] = None
+_CALLBACK_STATE: AppState | None = None
 
 _TriggerConfigAdapter = TypeAdapter(TriggerConfig)
 
@@ -171,7 +171,7 @@ class SchedulerManager:
         self._state = state
         self._db_path = db_path
         self._system_scheduler = system_scheduler
-        self.scheduler: Optional[AsyncIOScheduler] = None
+        self.scheduler: AsyncIOScheduler | None = None
 
     @staticmethod
     def _desired_wakeup(wakeup_enabled: bool, enabled: bool) -> bool:
@@ -179,7 +179,7 @@ class SchedulerManager:
         return bool(wakeup_enabled) and bool(enabled)
 
     async def _check_wakeup_minute_conflict(
-        self, candidate: ScheduledTask, exclude_task_id: Optional[str] = None
+        self, candidate: ScheduledTask, exclude_task_id: str | None = None
     ) -> None:
         """校验候选任务的系统级唤醒不会与既有任务同分钟触发。
 
@@ -433,7 +433,7 @@ class SchedulerManager:
         logger.info(f"创建定时任务: {task.name} ({task_id})")
         return task
 
-    async def get_task(self, task_id: str) -> Optional[ScheduledTask]:
+    async def get_task(self, task_id: str) -> ScheduledTask | None:
         """获取定时任务"""
         if not self.scheduler:
             return None
@@ -459,11 +459,11 @@ class SchedulerManager:
             logger.warning(f"任务 {task_id} 载荷解码失败，跳过: {e}")
             return None
 
-    async def get_all_tasks(self) -> List[ScheduledTask]:
+    async def get_all_tasks(self) -> list[ScheduledTask]:
         """获取所有定时任务"""
         if not self.scheduler:
             return []
-        tasks: List[ScheduledTask] = []
+        tasks: list[ScheduledTask] = []
         jobs = self.scheduler.get_jobs()
 
         for job in jobs:
@@ -489,7 +489,7 @@ class SchedulerManager:
 
     async def update_task(
         self, task_id: str, task_update: ScheduledTaskUpdate
-    ) -> Optional[ScheduledTask]:
+    ) -> ScheduledTask | None:
         """更新定时任务"""
         if not self.scheduler:
             if self._state.worker:
@@ -835,7 +835,7 @@ class SchedulerManager:
                 self._state.worker.events.send_log(f"恢复任务失败: {e}")
             return False
 
-    async def get_executions(self, limit: int = 50) -> List[TaskExecution]:
+    async def get_executions(self, limit: int = 50) -> list[TaskExecution]:
         """获取执行历史"""
         from maa_worker import execution  # 延迟导入避免循环依赖
 

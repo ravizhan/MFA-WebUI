@@ -2,8 +2,6 @@
 Focus 事件处理器 — 按 display_channels 将 FocusDisplayEvent 分发到对应通道。
 """
 
-from __future__ import annotations
-
 from typing import TYPE_CHECKING
 
 from maa_worker.focus_protocol import (

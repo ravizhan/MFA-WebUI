@@ -6,7 +6,7 @@ worker 保持 None：后台执行协程以「Worker 未就绪」快速失败，�
 import asyncio
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -211,7 +211,7 @@ class TestSqlitePersistence:
         init_db(db_path)  # 不抛错
 
     def test_add_and_list_round_trip_with_new_fields(self, state: AppState):
-        started_at = datetime(2026, 8, 16, 0, 0, 0, tzinfo=timezone.utc)
+        started_at = datetime(2026, 8, 16, 0, 0, 0, tzinfo=UTC)
         execution = TaskExecution(
             id="run-1",
             task_id="task-1",
@@ -243,9 +243,9 @@ class TestSqlitePersistence:
     def test_list_executions_ordered_newest_first(self, state: AppState):
         for index, started in enumerate(
             [
-                datetime(2026, 8, 16, 0, 0, 0, tzinfo=timezone.utc),
-                datetime(2026, 8, 17, 0, 0, 0, tzinfo=timezone.utc),
-                datetime(2026, 8, 18, 0, 0, 0, tzinfo=timezone.utc),
+                datetime(2026, 8, 16, 0, 0, 0, tzinfo=UTC),
+                datetime(2026, 8, 17, 0, 0, 0, tzinfo=UTC),
+                datetime(2026, 8, 18, 0, 0, 0, tzinfo=UTC),
             ]
         ):
             add_execution(
@@ -274,7 +274,7 @@ class TestSqlitePersistence:
                 task_id="task-1",
                 task_name="定时任务",
                 origin="in_app",
-                started_at=datetime(2026, 8, 16, 0, 0, 0, tzinfo=timezone.utc),
+                started_at=datetime(2026, 8, 16, 0, 0, 0, tzinfo=UTC),
                 status="running",
             ),
         )

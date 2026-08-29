@@ -1,7 +1,7 @@
 """Tests for models/scheduler.py — Pydantic model validation contracts."""
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -118,8 +118,8 @@ class TestIntervalTriggerConfig:
         with pytest.raises(ValidationError, match="end_date"):
             IntervalTriggerConfig(
                 hours=1,
-                start_date=datetime(2026, 6, 1, tzinfo=timezone.utc),
-                end_date=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                start_date=datetime(2026, 6, 1, tzinfo=UTC),
+                end_date=datetime(2026, 1, 1, tzinfo=UTC),
             )
 
     def test_valid_interval(self):

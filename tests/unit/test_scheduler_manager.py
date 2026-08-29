@@ -15,7 +15,7 @@ from pydantic import ValidationError
 
 from app_state import AppState
 from models.scheduler import CronTriggerConfig, ScheduledTaskCreate, ScheduledTaskUpdate
-from scheduler_manager import SchedulerManager  # noqa: E402
+from scheduler_manager import SchedulerManager
 from services.system_scheduler import ConvergeReport
 
 # 契约守卫：scheduler_manager.py 完成重写前（旧版无参构造函数/initialize 无 paused
@@ -200,8 +200,8 @@ class TestScheduledJobFired:
     async def test_wakeup_skips_in_app_dispatch_when_native_supported(
         self, manager_env, monkeypatch
     ):
+        from maa_worker import execution
         from scheduler_manager import scheduled_job_fired
-        import maa_worker.execution as execution
 
         mgr, state, system_scheduler = manager_env
         system_scheduler.supports_native = True
@@ -217,8 +217,8 @@ class TestScheduledJobFired:
     async def test_wakeup_falls_back_to_in_app_when_native_unsupported(
         self, manager_env, monkeypatch
     ):
+        from maa_worker import execution
         from scheduler_manager import scheduled_job_fired
-        import maa_worker.execution as execution
 
         mgr, state, system_scheduler = manager_env
         system_scheduler.supports_native = False

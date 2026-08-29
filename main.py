@@ -22,8 +22,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 import json_utils as json
+import settings_io
 from app_state import AppState, LogBroadcaster, normalize_event
 from maa_utils import MaaWorker
+from maa_worker import execution
 from models.api import CustomDeviceCreate, DeviceModel
 from models.interface_loader import (
     InterfaceLoadError,
@@ -42,15 +44,13 @@ from models.task_config import (
     normalize_task_config,
 )
 from scheduler_manager import SchedulerManager
+from services.system_scheduler import SystemScheduler
 from services.update_service import (
     check_github_update,
     check_mirrorchyan_update,
     download_file,
     get_platform_info,
 )
-from services.system_scheduler import SystemScheduler
-import settings_io
-from maa_worker import execution
 
 
 def _resolve_app_root_dir() -> Path:
@@ -898,7 +898,7 @@ async def stream_logs(request: Request):
                 try:
                     data = await asyncio.wait_for(q.get(), timeout=1.0)
                     yield f"data: {json.dumps(data.model_dump(), ensure_ascii=False)}\n\n"
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     continue
         except asyncio.CancelledError:
             pass

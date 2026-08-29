@@ -6,6 +6,7 @@
 
 import subprocess
 import sys
+
 import requirements
 
 
@@ -29,7 +30,7 @@ def main():
 
     packages = []
     try:
-        with open("requirements.txt", "r") as f:
+        with open("requirements.txt") as f:
             for req in requirements.parse(f):
                 if req.name:
                     packages.append(req.name)

@@ -5,9 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from models.interface import InterfaceModel, Option, OptionCase
+from models.interface import InterfaceModel
 from models.interface_loader import (
     InterfaceLoadError,
+    _expand_scan_select_options,
+    _MergeState,
     _normalize_import_list,
     _normalize_root_relative_path,
     _read_json_dict,
@@ -15,15 +17,12 @@ from models.interface_loader import (
     _register_presets,
     _register_tasks,
     _resolve_import_path,
-    _MergeState,
-    _validate_importable_fragment,
     _scan_scan_select_cases,
-    _expand_scan_select_options,
+    _validate_importable_fragment,
     load_interface_model,
-    resolve_interface_relative_path,
     rescan_scan_select_option,
+    resolve_interface_relative_path,
 )
-
 
 # ---------------------------------------------------------------------------
 # _normalize_root_relative_path — path safety

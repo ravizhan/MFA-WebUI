@@ -1,5 +1,5 @@
 import re
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
@@ -83,7 +83,7 @@ class Notification(BaseModel):
 
 
 class UI(BaseModel):
-    darkMode: Optional[bool | str] = "auto"
+    darkMode: bool | str | None = "auto"
 
 
 class Runtime(BaseModel):
@@ -131,15 +131,15 @@ class CustomDevice(BaseModel):
 
 class Panel(BaseModel):
     lastResource: str = ""
-    lastConnectedDevice: Optional[PanelLastConnectedDevice] = None
-    recentDevices: Optional[list[PanelLastConnectedDevice]] = None
+    lastConnectedDevice: PanelLastConnectedDevice | None = None
+    recentDevices: list[PanelLastConnectedDevice] | None = None
     customDevices: list[CustomDevice] = []
 
     @field_validator("recentDevices")
     @classmethod
     def truncate_recent_devices(
-        cls, v: Optional[list[PanelLastConnectedDevice]]
-    ) -> Optional[list[PanelLastConnectedDevice]]:
+        cls, v: list[PanelLastConnectedDevice] | None
+    ) -> list[PanelLastConnectedDevice] | None:
         if v is not None and len(v) > 5:
             return v[:5]
         return v

@@ -1,9 +1,10 @@
+import datetime
 import json
-import httpx
 import os
 import sys
 import uuid
-import datetime
+
+import httpx
 
 
 def get_latest_version(repo):

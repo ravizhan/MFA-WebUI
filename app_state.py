@@ -121,15 +121,21 @@ def normalize_event(payload: RealtimeEvent | dict[str, Any] | str) -> RealtimeEv
 
 
 class AppState:
+    worker: "MaaWorker | None"
+    broadcaster: LogBroadcaster | None
+    scheduler_manager: "SchedulerManager | None"
+    settings: SettingsModel | None
+    system_scheduler: "SystemScheduler | None"
+
     def __init__(self):
         self.message_conn = SimpleQueue()
-        self.worker: "MaaWorker | None" = None
+        self.worker = None
         self.is_shutting_down = False
         self.history_message: deque[RealtimeEvent] = deque(maxlen=_HISTORY_MAXLEN)
         self.current_status = None
-        self.broadcaster: LogBroadcaster | None = None
-        self.scheduler_manager: "SchedulerManager | None" = None
-        self.settings: SettingsModel | None = None
+        self.broadcaster = None
+        self.scheduler_manager = None
+        self.settings = None
         self.subprocess_pipe: subprocess.Popen | None = None
         self.update_status: dict | None = None
         self.update_info: dict | None = None
@@ -145,7 +151,7 @@ class AppState:
         # 系统级调度状态
         self.pending_scheduled_task_id: str | None = None
         self.native_token: str | None = None
-        self.system_scheduler: "SystemScheduler | None" = None
+        self.system_scheduler = None
         self.scheduler_db_path = Path("config") / "scheduler.sqlite"
 
     def send_event(self, event: RealtimeEvent):
