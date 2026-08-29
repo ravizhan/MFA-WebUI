@@ -1,13 +1,11 @@
-"""Tests for json_utils.py — a thin wrapper around pyjson5 and stdlib json.
+"""Tests for json_utils.py — a thin wrapper around json5 and stdlib json.
 
-Only verifies wrapper delegation: load/loads → pyjson5, dump/dumps → stdlib json
-(with formatting kwargs), and the JSONDecodeError alias. pyjson5's own codec
+Only verifies wrapper delegation: load/loads → json5, dump/dumps → stdlib json
+(with formatting kwargs), and the JSONDecodeError alias. json5's own codec
 is already rigorously tested upstream.
 """
 
 import io
-
-import pyjson5
 
 import json_utils as json
 
@@ -15,12 +13,12 @@ import json_utils as json
 class TestJSONDecodeErrorAlias:
     """MWU exports a single name for decode errors regardless of backend."""
 
-    def test_alias_is_pyjson5_exception(self):
-        assert json.JSONDecodeError is pyjson5.Json5DecoderException
+    def test_alias_is_value_error(self):
+        assert json.JSONDecodeError is ValueError
 
 
 class TestLoadLoads:
-    """load/loads delegate to pyjson5."""
+    """load/loads delegate to json5."""
 
     def test_loads_returns_parsed_value(self):
         assert json.loads('{"a": 1}') == {"a": 1}
@@ -29,11 +27,14 @@ class TestLoadLoads:
         fp = io.StringIO('{"a": 1}')
         assert json.load(fp) == {"a": 1}
 
+    def test_loads_json5_syntax(self):
+        assert json.loads("{a: 1, /* comment */ b: 'x',}") == {"a": 1, "b": "x"}
+
 
 class TestDumpDumps:
     """dump/dumps delegate to stdlib json, forwarding formatting kwargs.
 
-    This is the key wrapper choice: pyjson5.dump ignores formatting kwargs,
+    This is the key wrapper choice: json5.dump ignores formatting kwargs,
     so MWU routes dump/dumps through stdlib json instead.
     """
 

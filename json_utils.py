@@ -3,18 +3,18 @@ from __future__ import annotations
 import json as _stdlib_json
 from typing import Any
 
-import pyjson5
+import json5
 
 
-JSONDecodeError = pyjson5.Json5DecoderException
+JSONDecodeError = ValueError
 
 
 def load(fp: Any, **kwargs: Any) -> Any:
-    return pyjson5.load(fp, **kwargs)
+    return json5.load(fp, **kwargs)
 
 
 def loads(s: str, **kwargs: Any) -> Any:
-    return pyjson5.loads(s, **kwargs)
+    return json5.loads(s, **kwargs)
 
 
 def dump(
@@ -25,7 +25,7 @@ def dump(
     ensure_ascii: bool = True,
     **kwargs: Any,
 ) -> None:
-    # pyjson5.dump ignores formatting kwargs; stdlib JSON output remains valid JSON5.
+    # json5.dump ignores formatting kwargs; stdlib JSON output remains valid JSON5.
     _stdlib_json.dump(
         obj,
         fp,
@@ -42,7 +42,7 @@ def dumps(
     ensure_ascii: bool = True,
     **kwargs: Any,
 ) -> str:
-    # pyjson5.dumps ignores formatting kwargs; stdlib JSON output remains valid JSON5.
+    # json5.dumps ignores formatting kwargs; stdlib JSON output remains valid JSON5.
     return _stdlib_json.dumps(
         obj,
         indent=indent,

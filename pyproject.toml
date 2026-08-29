@@ -19,8 +19,8 @@ dependencies = [
     "uvicorn>=0.52.4",
     "websockets>=17.1",
     "ruff>=0.16.5",
-    "pyjson5>=2.0.1",
     "ty>=0.0.75",
+    "json5>=0.15.0",
 ]
 
 [dependency-groups]
