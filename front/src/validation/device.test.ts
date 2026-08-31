@@ -111,6 +111,21 @@ describe("customDeviceAddressSchema", () => {
       customDeviceAddressSchema.safeParse({ type: "Gamepad", address: "12345|2" }).success,
     ).toBe(false)
   })
+
+  it("accepts and trims a WlRoots socket path", () => {
+    expect(
+      customDeviceAddressSchema.parse({
+        type: "WlRoots",
+        address: " /run/user/1000/wayland-1 ",
+      }),
+    ).toEqual({ type: "WlRoots", address: "/run/user/1000/wayland-1" })
+  })
+
+  it("rejects an empty WlRoots socket path", () => {
+    expect(customDeviceAddressSchema.safeParse({ type: "WlRoots", address: "   " }).success).toBe(
+      false,
+    )
+  })
 })
 
 describe("runtimeDeviceAddressSchema", () => {
@@ -134,6 +149,13 @@ describe("runtimeDeviceAddressSchema", () => {
     expect(
       runtimeDeviceAddressSchema.safeParse({ type: "PlayCover", address: "emulator-5554" }).success,
     ).toBe(false)
+  })
+
+  it("accepts a scanned WlRoots socket path", () => {
+    expect(runtimeDeviceAddressSchema.parse({ type: "WlRoots", address: " wayland-1 " })).toEqual({
+      type: "WlRoots",
+      address: "wayland-1",
+    })
   })
 })
 

@@ -997,6 +997,20 @@ function buildStoredLastConnectedDevice(
       uuid: "",
     }
   }
+  if (deviceInfo.type === "WlRoots") {
+    return {
+      type: "WlRoots",
+      controller_name: controllerName,
+      fingerprint: buildDeviceFingerprint(deviceInfo),
+      adb_path: "",
+      address: deviceInfo.address,
+      class_name: "",
+      window_name: deviceInfo.name || "",
+      hWnd: 0,
+      gamepad_type: 0,
+      uuid: "",
+    }
+  }
   return {
     type: "PlayCover",
     controller_name: controllerName,

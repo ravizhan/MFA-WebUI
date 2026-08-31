@@ -52,6 +52,10 @@ export interface PlayCoverController {
   uuid?: string
 }
 
+export interface WlRootsController {
+  use_win32_vk_code?: boolean
+}
+
 export type GamepadType = "Xbox360" | "DualShock4" | "DS4"
 
 export interface GamepadController {
@@ -61,7 +65,7 @@ export interface GamepadController {
   screencap?: GamepadScreencap
 }
 
-export type ControllerType = "Adb" | "Win32" | "MacOS" | "PlayCover" | "Gamepad"
+export type ControllerType = "Adb" | "Win32" | "MacOS" | "PlayCover" | "WlRoots" | "Gamepad"
 
 export interface Controller {
   name: string
@@ -73,6 +77,7 @@ export interface Controller {
   win32?: Win32Controller
   macos?: MacOSController
   playcover?: PlayCoverController
+  wlroots?: WlRootsController
   gamepad?: GamepadController
   display_short_side?: number
   display_long_side?: number

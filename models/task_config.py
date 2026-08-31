@@ -175,6 +175,27 @@ def normalize_task_options_by_task(
     return normalized
 
 
+def normalize_global_option_values(
+    raw_global_options: dict[str, Any] | None,
+    interface_model: InterfaceModel,
+) -> dict[str, TaskOptionValue]:
+    all_options = interface_model.option or {}
+    option_map = {
+        option_name: all_options[option_name]
+        for option_name in (interface_model.global_option or [])
+        if option_name in all_options
+    }
+    defaults, value_types = _build_option_defaults(option_map)
+    case_name_sets = _build_option_case_name_sets(option_map)
+    return _normalize_options_for_task(
+        raw_global_options,
+        option_map,
+        defaults,
+        value_types,
+        case_name_sets,
+    )
+
+
 def normalize_task_execution_payload(
     raw_task_list: Any,
     raw_task_options: Any,
@@ -564,6 +585,10 @@ def _normalize_options_for_task(
             for field in fields or []:
                 field_value = option_value.get(field.name)
                 if isinstance(field_value, str):
+                    if option.type == "hotkey" and not _hotkey_value_supported(
+                        field_value
+                    ):
+                        continue
                     normalized_input[field.name] = field_value
 
             normalized_options[option_key] = normalized_input
@@ -612,6 +637,8 @@ def _apply_preset_option_value(
         for field in fields or []:
             field_value = value.get(field.name)
             if isinstance(field_value, str):
+                if option.type == "hotkey" and not _hotkey_value_supported(field_value):
+                    continue
                 normalized_input[field.name] = field_value
 
         target_options[option_name] = normalized_input
@@ -626,3 +653,11 @@ def _apply_preset_option_value(
 
     if isinstance(value, str):
         target_options[option_name] = value
+
+
+def _hotkey_value_supported(value: str) -> bool:
+    parts = [part.strip() for part in value.split("+") if part.strip()]
+    unsupported_keys = {"META", "SUPER", "WIN", "CMD", "COMMAND"}
+    return len(parts) <= 3 and not any(
+        part.upper() in unsupported_keys for part in parts
+    )

@@ -274,7 +274,9 @@
     }
   },
   "option": {
-    "hotkeyCapturing": "请按下快捷键…"
+    "hotkeyCapturing": "请按下快捷键…",
+    "hotkeyMetaUnsupported": "不支持 Meta、Command 或 Win 组合键",
+    "hotkeyTooManyModifiers": "快捷键最多支持两个修饰键"
   },
   "panel": {
     "device": "设备连接",

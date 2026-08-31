@@ -240,6 +240,39 @@ def test_option_values_aggregate_task_entry_values_and_honor_declared_defaults(
     )
 
 
+def test_option_values_prefer_task_then_global_then_default():
+    options = {
+        "mode": Option(
+            type="select",
+            cases=[OptionCase(name="default"), OptionCase(name="task")],
+            default_case="default",
+        ),
+        "tags": Option(
+            type="checkbox",
+            cases=[OptionCase(name="default"), OptionCase(name="global")],
+            default_case=["default"],
+        ),
+        "fallback": Option(
+            type="select",
+            cases=[OptionCase(name="default")],
+            default_case="default",
+        ),
+    }
+    service = PretaskService(_make_worker(options=options))
+
+    values = service._resolve_option_values(
+        Pretask(exec="pi-tool", option=["mode", "tags", "fallback"]),
+        {"task": {"mode": "task"}},
+        {"mode": "global-mode", "tags": ["global"]},
+    )
+
+    assert values == {
+        "mode": "task",
+        "tags": ["global"],
+        "fallback": "default",
+    }
+
+
 def test_pretask_runs_from_interface_base_dir(monkeypatch):
     """相对路径的 pretask 程序应相对应用根目录解析，而非进程 cwd。"""
     worker = _make_worker(pretasks=[Pretask(exec="pi-tool")])

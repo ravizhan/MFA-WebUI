@@ -10,6 +10,7 @@ from maa.controller import (
     GamepadController,
     PlayCoverController,
     Win32Controller,
+    WlRootsController,
 )
 from maa.toolkit import Toolkit
 
@@ -38,6 +39,10 @@ def is_controller_supported(controller) -> tuple[bool, str]:
             if sys.platform != "darwin":
                 return False, "platform_not_supported"
             return True, ""
+        case "WlRoots":
+            if not sys.platform.startswith("linux"):
+                return False, "platform_not_supported"
+            return True, ""
         case "Gamepad":
             if sys.platform != "win32":
                 return False, "platform_not_supported"
@@ -56,7 +61,7 @@ def _record_identity(
 
 def _scan_device_address(device: dict[str, Any]) -> str | None:
     device_type = device.get("type")
-    if device_type in ("Adb", "PlayCover"):
+    if device_type in ("Adb", "PlayCover", "WlRoots"):
         return try_canonicalize_runtime_device_address(
             device_type, str(device.get("address", ""))
         )
@@ -140,6 +145,7 @@ class DeviceService:
                     "Win32",
                     "Gamepad",
                     "PlayCover",
+                    "WlRoots",
                 ):
                     continue
                 address = try_canonicalize_runtime_device_address(
@@ -320,7 +326,7 @@ class DeviceService:
                 }
             )
 
-        controller_order = ["Adb", "Win32", "Gamepad", "PlayCover"]
+        controller_order = ["Adb", "Win32", "Gamepad", "PlayCover", "WlRoots"]
         return sorted(
             capabilities,
             key=lambda item: (
@@ -335,6 +341,7 @@ class DeviceService:
         devices: list[dict[str, Any]] = []
         win32_seen: set[int] = set()
         gamepad_seen: set[int] = set()
+        wlroots_seen: set[str] = set()
 
         supported, _ = is_controller_supported(controller)
         if not supported:
@@ -387,6 +394,19 @@ class DeviceService:
                     )
             case "PlayCover":
                 return devices
+            case "WlRoots":
+                for device in Toolkit.find_desktop_windows():
+                    socket_path = device.class_name.strip()
+                    if not socket_path or socket_path in wlroots_seen:
+                        continue
+                    wlroots_seen.add(socket_path)
+                    devices.append(
+                        {
+                            "type": "WlRoots",
+                            "name": device.window_name,
+                            "address": socket_path,
+                        }
+                    )
             case "Gamepad":
                 assert controller.gamepad is not None
                 for device in Toolkit.find_desktop_windows():
@@ -496,12 +516,13 @@ class DeviceService:
 
         Args:
             controller_name: 控制器名称（来自 interface.json 的 controller name）
-            device_type: 设备类型 ("Adb", "Win32", "Gamepad", "PlayCover")
+            device_type: 设备类型 ("Adb", "Win32", "Gamepad", "PlayCover", "WlRoots")
             device_address: 设备地址（格式因类型而异）
                 - Adb: IP:PORT 地址，如 "127.0.0.1:5555"
                 - Win32: hWnd 的字符串形式，如 "123456"
                 - Gamepad: "hWnd|gamepad_type" 格式，如 "123456|1"
                 - PlayCover: IP:PORT 地址，如 "127.0.0.1:1717"
+                - WlRoots: Wayland socket 路径
 
         Returns:
             构造好的 DeviceModel 实例
@@ -561,6 +582,13 @@ class DeviceService:
                 address=device_address,
                 uuid="",
             )
+        elif device_type == "WlRoots":
+            return DeviceModel(
+                type="WlRoots",
+                controller_name=controller_name,
+                name=device_address,
+                address=device_address,
+            )
         else:
             raise ValueError(f"不支持的设备类型: {device_type}")
 
@@ -619,6 +647,16 @@ class DeviceService:
                 controller = PlayCoverController(
                     address=device_config.address or "127.0.0.1:1717",
                     uuid=device_config.uuid,
+                )
+                status = controller.post_connection().wait().succeeded
+            case "WlRoots":
+                use_win32_vk_code = bool(
+                    selected_controller.wlroots
+                    and selected_controller.wlroots.use_win32_vk_code
+                )
+                controller = WlRootsController(
+                    wlr_socket_path=device_config.address,
+                    use_win32_vk_code=use_win32_vk_code,
                 )
                 status = controller.post_connection().wait().succeeded
 

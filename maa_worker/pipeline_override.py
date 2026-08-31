@@ -308,6 +308,13 @@ class PipelineOverrideService:
             controller_type = (
                 controller_definitions[0].type if controller_definitions else None
             )
+            if (
+                controller_definitions
+                and controller_type == "WlRoots"
+                and controller_definitions[0].wlroots
+                and controller_definitions[0].wlroots.use_win32_vk_code
+            ):
+                controller_type = "Win32"
             return self._deep_merge(
                 merged,
                 self._build_hotkey_override(
@@ -399,6 +406,7 @@ class PipelineOverrideService:
         self,
         task_name: str,
         options: dict[str, TaskOptionValue],
+        global_options: dict[str, TaskOptionValue] | None = None,
     ) -> PipelineOverride:
         task_definition = self._get_current_task_definition(task_name)
         if task_definition is None:
@@ -412,8 +420,15 @@ class PipelineOverrideService:
                 controller_option_names.extend(controller.option)
 
         merged = copy.deepcopy(task_definition.pipeline_override) or {}
+        merged = self._deep_merge(
+            merged,
+            self._build_option_group_override(
+                self.worker.interface.global_option or [],
+                global_options or {},
+                controller_names,
+            ),
+        )
         option_groups = [
-            self.worker.interface.global_option or [],
             resource_definition.option
             if resource_definition and resource_definition.option
             else [],

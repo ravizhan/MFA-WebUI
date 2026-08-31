@@ -12,7 +12,13 @@ import {
   getStoredDeviceIdentity,
   storedDeviceMatchesController,
 } from "@/utils/panel/device"
-import type { AdbDevice, GamepadDevice, PlayCoverDevice, Win32Device } from "@/services/api"
+import type {
+  AdbDevice,
+  GamepadDevice,
+  PlayCoverDevice,
+  Win32Device,
+  WlRootsDevice,
+} from "@/services/api"
 import type { PanelLastConnectedDevice } from "@/types/settingsModel"
 
 const adbDevice: AdbDevice = {
@@ -48,6 +54,12 @@ const playCoverDevice: PlayCoverDevice = {
   name: "playcover-device",
   address: "127.0.0.1:1717",
   uuid: "uuid-001",
+}
+
+const wlRootsDevice: WlRootsDevice = {
+  type: "WlRoots",
+  name: "Wayland compositor",
+  address: "/run/user/1000/wayland-1",
 }
 
 describe("isAdbDevice", () => {
@@ -119,6 +131,10 @@ describe("getDeviceIdentity", () => {
 
   it("returns address for PlayCover device", () => {
     expect(getDeviceIdentity(playCoverDevice)).toBe("127.0.0.1:1717")
+  })
+
+  it("returns socket path for WlRoots device", () => {
+    expect(getDeviceIdentity(wlRootsDevice)).toBe("/run/user/1000/wayland-1")
   })
 })
 
@@ -260,6 +276,10 @@ describe("buildDeviceFingerprint", () => {
   it("handles PlayCover device without uuid", () => {
     const device: PlayCoverDevice = { type: "PlayCover", address: "127.0.0.1:1717" }
     expect(buildDeviceFingerprint(device)).toBe("playcover|127.0.0.1:1717|")
+  })
+
+  it("builds wlroots|socket-path for WlRoots device", () => {
+    expect(buildDeviceFingerprint(wlRootsDevice)).toBe("wlroots|/run/user/1000/wayland-1")
   })
 })
 

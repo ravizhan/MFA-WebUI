@@ -55,6 +55,26 @@ const defaultSettings: SettingsModel = {
 
 const DARK_MODE_KEY = "darkMode"
 
+let saveQueue: Promise<void> = Promise.resolve()
+
+function enqueueSettingsSave(save: () => Promise<boolean>): Promise<boolean> {
+  const result = saveQueue.then(save)
+  saveQueue = result.then(
+    () => undefined,
+    () => undefined,
+  )
+  return result
+}
+
+function applySettingsPatch<K extends keyof SettingsModel, P extends keyof SettingsModel[K]>(
+  settings: SettingsModel,
+  category: K,
+  key: P,
+  value: SettingsModel[K][P],
+) {
+  settings[category][key] = value
+}
+
 function getCachedDarkMode(): "auto" | boolean {
   if (typeof window === "undefined" || typeof localStorage === "undefined") return "auto"
   const cached = localStorage.getItem(DARK_MODE_KEY)
@@ -76,7 +96,9 @@ export const useSettingsStore = defineStore("settings", {
     }
     return {
       settings,
+      persistedSettings: deepClone(settings),
       loading: false,
+      pendingSaveCount: 0,
       initialized: false,
       systemPrefersDark:
         typeof window !== "undefined" && window.matchMedia
@@ -131,6 +153,7 @@ export const useSettingsStore = defineStore("settings", {
           },
           globalOptionValues: { ...data.globalOptionValues },
         }
+        this.persistedSettings = deepClone(this.settings)
         // 确保本地缓存与服务器设置同步
         localStorage.setItem(DARK_MODE_KEY, String(this.settings.ui.darkMode))
       }
@@ -139,20 +162,55 @@ export const useSettingsStore = defineStore("settings", {
     },
 
     async saveSettings(newSettings?: SettingsModel) {
+      const payload = deepClone(newSettings || this.settings)
+      this.pendingSaveCount += 1
       this.loading = true
-      const payload = newSettings || this.settings
-      const [success, err] = await tryCatch(() => updateSettings(payload))
+      const [success, err] = await tryCatch(() =>
+        enqueueSettingsSave(async () => {
+          const saved = await updateSettings(payload)
+          if (saved) {
+            this.persistedSettings = deepClone(payload)
+          }
+          return saved
+        }),
+      )
+      this.pendingSaveCount -= 1
+      this.loading = this.pendingSaveCount > 0
       if (err) {
         console.error("Failed to save settings:", err)
-        this.loading = false
         return false
       }
       if (success) {
-        this.settings = deepClone(payload)
         // 保存成功后更新本地缓存
         localStorage.setItem(DARK_MODE_KEY, String(this.settings.ui.darkMode))
       }
-      this.loading = false
+      return success
+    },
+
+    async saveSettingPatch<K extends keyof SettingsModel, P extends keyof SettingsModel[K]>(
+      category: K,
+      key: P,
+      value: SettingsModel[K][P],
+    ) {
+      this.pendingSaveCount += 1
+      this.loading = true
+      const [success, err] = await tryCatch(() =>
+        enqueueSettingsSave(async () => {
+          const payload = deepClone(this.persistedSettings)
+          applySettingsPatch(payload, category, key, deepClone(value))
+          const saved = await updateSettings(payload)
+          if (saved) {
+            this.persistedSettings = payload
+          }
+          return saved
+        }),
+      )
+      this.pendingSaveCount -= 1
+      this.loading = this.pendingSaveCount > 0
+      if (err) {
+        console.error("Failed to save settings:", err)
+        return false
+      }
       return success
     },
 
@@ -161,8 +219,6 @@ export const useSettingsStore = defineStore("settings", {
       key: P,
       value: SettingsModel[K][P],
     ) {
-      const previousSettings = deepClone(this.settings)
-
       const updatedSettings = {
         ...this.settings,
         [category]: {
@@ -178,19 +234,24 @@ export const useSettingsStore = defineStore("settings", {
       }
 
       // 后台保存
-      const success = await this.saveSettings(updatedSettings)
+      const success = await this.saveSettingPatch(category, key, value)
       if (!success) {
-        // 保存失败时回滚到之前的状态
-        this.settings = previousSettings
-        if (category === "ui" && key === "darkMode") {
-          localStorage.setItem(DARK_MODE_KEY, String(previousSettings.ui.darkMode))
+        if (Object.is(this.settings[category][key], value)) {
+          applySettingsPatch(
+            this.settings,
+            category,
+            key,
+            deepClone(this.persistedSettings[category][key]),
+          )
+          if (category === "ui" && key === "darkMode") {
+            localStorage.setItem(DARK_MODE_KEY, String(this.settings.ui.darkMode))
+          }
         }
       }
       return success
     },
 
     async updateGlobalOptionValue(optionKey: string, value: TaskOptionValue) {
-      const previousSettings = deepClone(this.settings)
       this.settings = {
         ...this.settings,
         globalOptionValues: {
@@ -199,11 +260,17 @@ export const useSettingsStore = defineStore("settings", {
         },
       }
 
-      const success = await this.saveSettings()
-      if (!success) {
-        this.settings = previousSettings
+      const success = await this.saveSettingPatch("globalOptionValues", optionKey, value)
+      if (success || !Object.is(this.settings.globalOptionValues[optionKey], value)) {
+        return success
       }
-      return success
+      const persistedValue = this.persistedSettings.globalOptionValues[optionKey]
+      if (persistedValue === undefined) {
+        delete this.settings.globalOptionValues[optionKey]
+        return false
+      }
+      this.settings.globalOptionValues[optionKey] = deepClone(persistedValue)
+      return false
     },
 
     addRecentDevice(deviceConfig: PanelLastConnectedDevice) {

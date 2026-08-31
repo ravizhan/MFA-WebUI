@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest"
 
-import { buildHotkeyCombo } from "@/utils/hotkey"
+import { buildHotkeyCombo, getHotkeyCaptureIssue } from "@/utils/hotkey"
 
 describe("buildHotkeyCombo", () => {
-  it("orders Ctrl, Alt, and Shift modifiers consistently", () => {
+  it("rejects shortcuts with more than two modifiers", () => {
     const event = new KeyboardEvent("keydown", {
       key: "a",
       ctrlKey: true,
@@ -11,7 +11,38 @@ describe("buildHotkeyCombo", () => {
       shiftKey: true,
     })
 
-    expect(buildHotkeyCombo(event)).toBe("Ctrl+Alt+Shift+A")
+    expect(buildHotkeyCombo(event)).toBeNull()
+  })
+
+  it("orders two modifiers consistently", () => {
+    const event = new KeyboardEvent("keydown", {
+      key: "a",
+      ctrlKey: true,
+      altKey: true,
+    })
+
+    expect(buildHotkeyCombo(event)).toBe("Ctrl+Alt+A")
+  })
+
+  it("rejects Meta combinations", () => {
+    const event = new KeyboardEvent("keydown", {
+      key: "a",
+      metaKey: true,
+    })
+
+    expect(buildHotkeyCombo(event)).toBeNull()
+    expect(getHotkeyCaptureIssue(event)).toBe("meta_unsupported")
+  })
+
+  it("reports shortcuts with too many modifiers", () => {
+    const event = new KeyboardEvent("keydown", {
+      key: "a",
+      ctrlKey: true,
+      altKey: true,
+      shiftKey: true,
+    })
+
+    expect(getHotkeyCaptureIssue(event)).toBe("too_many_modifiers")
   })
 
   it.each(["Control", "Alt", "Shift", "Meta"])("returns null for a pure %s modifier", (key) => {

@@ -16,6 +16,7 @@ from models.interface import (
     Resource,
     SettingSection,
     Win32Controller,
+    WlRootsController,
     _pipeline_override_contains_attach_option,
     validate_regex,
 )
@@ -121,7 +122,16 @@ class TestMacOSController:
 
     def test_invalid_input_raises(self):
         with pytest.raises(ValidationError):
-            MacOSController.model_validate({"input": "InvalidInput"})
+            MacOSController.model_validate({"input": "Invalid"})
+
+
+class TestWlRootsController:
+    def test_win32_keycode_mode(self):
+        config = WlRootsController(use_win32_vk_code=True)
+        controller = Controller(name="wayland", type="WlRoots", wlroots=config)
+
+        assert controller.wlroots is not None
+        assert controller.wlroots.use_win32_vk_code is True
 
 
 # ---------------------------------------------------------------------------
@@ -390,4 +400,36 @@ class TestInterfaceModel:
             },
         }
         with pytest.raises(ValidationError, match="至少包含一次键"):
+            InterfaceModel.model_validate(data)
+
+    def test_hotkey_default_rejects_more_than_two_modifiers(self, _base_iface_data):
+        data = {
+            **_base_iface_data,
+            "option": {
+                "shortcut": {
+                    "type": "hotkey",
+                    "hotkeys": [
+                        {"name": "run", "default": "Ctrl+Alt+Shift+A"},
+                    ],
+                }
+            },
+        }
+
+        with pytest.raises(ValidationError, match="最多支持两个修饰键"):
+            InterfaceModel.model_validate(data)
+
+    def test_hotkey_default_rejects_meta(self, _base_iface_data):
+        data = {
+            **_base_iface_data,
+            "option": {
+                "shortcut": {
+                    "type": "hotkey",
+                    "hotkeys": [
+                        {"name": "run", "default": "Meta+A"},
+                    ],
+                }
+            },
+        }
+
+        with pytest.raises(ValidationError, match="不支持 Meta/Command/Win"):
             InterfaceModel.model_validate(data)

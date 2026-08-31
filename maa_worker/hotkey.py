@@ -119,8 +119,15 @@ def hotkey_value_to_codes(
     value: str, controller_type: str | None
 ) -> tuple[int, int, int]:
     primary, modifiers = split_hotkey_combo(value)
+    unsupported_keys = {"META", "SUPER", "WIN", "CMD", "COMMAND"}
+    if primary.upper() in unsupported_keys or any(
+        modifier.upper() in unsupported_keys for modifier in modifiers
+    ):
+        raise ValueError("快捷键不支持 Meta/Command/Win 键")
+    if len(modifiers) > 2:
+        raise ValueError("快捷键最多支持两个修饰键")
     key_map = HOTKEY_KEY_MAP.get(controller_type or "", HOTKEY_KEY_MAP["Win32"])
-    modifier_codes = [key_map.get(modifier.upper(), 0) for modifier in modifiers[:2]]
+    modifier_codes = [key_map.get(modifier.upper(), 0) for modifier in modifiers]
     modifier_codes.extend([0] * (2 - len(modifier_codes)))
     return (
         key_map.get(primary.upper(), 0),

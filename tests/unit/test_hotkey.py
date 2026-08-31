@@ -6,7 +6,13 @@ import pytest
 
 from maa_worker.hotkey import hotkey_value_to_codes, split_hotkey_combo
 from maa_worker.pipeline_override import PipelineOverrideService
-from models.interface import Controller, HotkeyCase, Option
+from models.interface import (
+    Controller,
+    HotkeyCase,
+    Option,
+    OptionCase,
+    WlRootsController,
+)
 
 
 class TestSplitHotkeyCombo:
@@ -41,6 +47,15 @@ class TestHotkeyValueToCodes:
         assert hotkey_value_to_codes("ALT+Unknown", "Win32") == (0, 0x12, 0)
         assert hotkey_value_to_codes("", "Win32") == (0, 0, 0)
 
+    def test_rejects_more_than_two_modifiers(self):
+        with pytest.raises(ValueError, match="最多支持两个修饰键"):
+            hotkey_value_to_codes("Ctrl+Alt+Shift+A", "Win32")
+
+    @pytest.mark.parametrize("value", ["Meta+A", "Command+A", "Win+A", "Super+A"])
+    def test_rejects_meta_aliases(self, value):
+        with pytest.raises(ValueError, match="不支持 Meta/Command/Win"):
+            hotkey_value_to_codes(value, "Win32")
+
 
 class TestPipelineOverrideHotkey:
     def test_replaces_modifier_and_primary_placeholders_with_integers(self):
@@ -72,3 +87,69 @@ class TestPipelineOverrideHotkey:
         )
 
         assert override == {"key": [0x12, 0x41]}
+
+    def test_wlroots_can_emit_win32_virtual_key_codes(self):
+        option = Option(
+            type="hotkey",
+            hotkeys=[HotkeyCase(name="FightCombo")],
+            pipeline_override={"key": "{FightCombo.primary}"},
+        )
+        worker = SimpleNamespace(
+            interface=SimpleNamespace(option={"K": option}),
+            device=SimpleNamespace(
+                get_active_controller_definitions=lambda: [
+                    Controller(
+                        name="wlr",
+                        type="WlRoots",
+                        wlroots=WlRootsController(use_win32_vk_code=True),
+                    )
+                ]
+            ),
+            device_state=SimpleNamespace(current_resource_name=None),
+        )
+
+        override = PipelineOverrideService(worker)._build_option_override(
+            "K",
+            {"K": {"FightCombo": "A"}},
+            set(),
+        )
+
+        assert override == {"key": 0x41}
+
+
+def test_saved_global_value_is_not_shadowed_by_task_default():
+    global_option = Option(
+        type="select",
+        cases=[
+            OptionCase(name="default", pipeline_override={"Node": {"mode": "default"}}),
+            OptionCase(name="saved", pipeline_override={"Node": {"mode": "saved"}}),
+        ],
+        default_case="default",
+    )
+    worker = SimpleNamespace(
+        interface=SimpleNamespace(
+            option={"GlobalMode": global_option},
+            global_option=["GlobalMode"],
+            task=[
+                SimpleNamespace(
+                    entry="Task",
+                    pipeline_override={},
+                    option=[],
+                )
+            ],
+        ),
+        device=SimpleNamespace(
+            get_active_controller_names=lambda: set(),
+            get_active_controller_definitions=lambda: [],
+            get_current_resource_definition=lambda: None,
+        ),
+        device_state=SimpleNamespace(current_resource_name=None),
+    )
+
+    override = PipelineOverrideService(worker).build_task_pipeline_override(
+        "Task",
+        {"GlobalMode": "default"},
+        {"GlobalMode": "saved"},
+    )
+
+    assert override == {"Node": {"mode": "saved"}}
