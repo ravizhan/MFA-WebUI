@@ -1,6 +1,7 @@
 import { defineStore } from "pinia"
 import { tryCatch } from "@/utils/tryCatch"
 import { getSettings, updateSettings } from "@/services/api"
+import type { TaskOptionValue } from "@/types/schedulerModel"
 import type { PanelLastConnectedDevice, SettingsModel } from "@/types/settingsModel"
 
 const defaultSettings: SettingsModel = {
@@ -49,6 +50,7 @@ const defaultSettings: SettingsModel = {
     recentDevices: [],
     customDevices: [],
   },
+  globalOptionValues: {},
 }
 
 const DARK_MODE_KEY = "darkMode"
@@ -127,6 +129,7 @@ export const useSettingsStore = defineStore("settings", {
             recentDevices: data.panel?.recentDevices ?? [],
             customDevices: data.panel?.customDevices ?? this.settings.panel.customDevices ?? [],
           },
+          globalOptionValues: { ...data.globalOptionValues },
         }
         // 确保本地缓存与服务器设置同步
         localStorage.setItem(DARK_MODE_KEY, String(this.settings.ui.darkMode))
@@ -182,6 +185,23 @@ export const useSettingsStore = defineStore("settings", {
         if (category === "ui" && key === "darkMode") {
           localStorage.setItem(DARK_MODE_KEY, String(previousSettings.ui.darkMode))
         }
+      }
+      return success
+    },
+
+    async updateGlobalOptionValue(optionKey: string, value: TaskOptionValue) {
+      const previousSettings = deepClone(this.settings)
+      this.settings = {
+        ...this.settings,
+        globalOptionValues: {
+          ...this.settings.globalOptionValues,
+          [optionKey]: value,
+        },
+      }
+
+      const success = await this.saveSettings()
+      if (!success) {
+        this.settings = previousSettings
       }
       return success
     },

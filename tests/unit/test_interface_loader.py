@@ -460,6 +460,99 @@ class TestLoadInterfaceModel:
         assert model.task is not None
         assert {t.name for t in model.task} == {"Extra"}
 
+    def test_import_global_options_are_deduped_and_settings_appended(self, tmp_path):
+        (tmp_path / "first.json5").write_text(
+            stdlib_json.dumps(
+                {
+                    "global_option": ["shared_option", "first_option"],
+                    "setting": [{"name": "first", "option": ["first_option"]}],
+                }
+            )
+        )
+        (tmp_path / "second.json5").write_text(
+            stdlib_json.dumps(
+                {
+                    "global_option": ["first_option", "second_option"],
+                    "setting": [{"name": "second", "option": ["second_option"]}],
+                }
+            )
+        )
+        _write_interface(
+            tmp_path,
+            {
+                "interface_version": 2,
+                "name": "Test",
+                "controller": [{"name": "adb", "type": "Adb"}],
+                "resource": [{"name": "main", "path": ["resource"]}],
+                "option": {
+                    option_name: {
+                        "type": "select",
+                        "cases": [{"name": "enabled"}],
+                    }
+                    for option_name in (
+                        "root_option",
+                        "shared_option",
+                        "first_option",
+                        "second_option",
+                    )
+                },
+                "global_option": ["root_option", "shared_option"],
+                "setting": [{"name": "root", "option": ["root_option"]}],
+                "import": ["first.json5", "second.json5"],
+            },
+        )
+
+        model = load_interface_model(tmp_path)
+
+        assert model.global_option == [
+            "root_option",
+            "shared_option",
+            "first_option",
+            "second_option",
+        ]
+        assert model.setting is not None
+        assert [section.name for section in model.setting] == [
+            "root",
+            "first",
+            "second",
+        ]
+
+    def test_duplicate_setting_name_is_rejected(self, tmp_path):
+        _write_interface(
+            tmp_path,
+            {
+                "interface_version": 2,
+                "name": "Test",
+                "controller": [{"name": "adb", "type": "Adb"}],
+                "resource": [{"name": "main", "path": ["resource"]}],
+                "setting": [{"name": "general"}, {"name": "general"}],
+            },
+        )
+
+        with pytest.raises(
+            InterfaceLoadError,
+            match=r"setting 中存在重复分区: general",
+        ):
+            load_interface_model(tmp_path)
+
+    def test_setting_unknown_option_is_rejected(self, tmp_path):
+        _write_interface(
+            tmp_path,
+            {
+                "interface_version": 2,
+                "name": "Test",
+                "controller": [{"name": "adb", "type": "Adb"}],
+                "resource": [{"name": "main", "path": ["resource"]}],
+                "setting": [{"name": "general", "option": ["missing"]}],
+            },
+        )
+
+        with pytest.raises(
+            InterfaceLoadError,
+            match=r"setting\[general\] 引用了不存在的选项: missing",
+        ):
+            load_interface_model(tmp_path)
+
     def test_pretask_single_object_is_normalized_to_list(self, tmp_path):
         _write_interface(
             tmp_path,
@@ -776,7 +869,7 @@ class TestLoadInterfaceModel:
             load_interface_model(tmp_path)
 
     def test_import_fragment_with_illegal_key(self, tmp_path):
-        """Import file with key outside {task,option,preset,import} is rejected."""
+        """Import file with key outside the allowed sections is rejected."""
         (tmp_path / "bad.json5").write_text("{controller: []}")
         _write_interface(
             tmp_path,
@@ -930,4 +1023,72 @@ class TestLoadInterfaceModel:
             },
         )
         with pytest.raises(InterfaceLoadError, match="引用了不存在的输入项"):
+            load_interface_model(tmp_path)
+
+    def test_preset_hotkey_invalid_type(self, tmp_path):
+        _write_interface(
+            tmp_path,
+            {
+                "interface_version": 2,
+                "name": "Test",
+                "controller": [{"name": "adb", "type": "Adb"}],
+                "resource": [{"name": "main", "path": ["resource"]}],
+                "task": [{"name": "A", "entry": "A", "option": ["hotkeys"]}],
+                "option": {
+                    "hotkeys": {
+                        "type": "hotkey",
+                        "hotkeys": [{"name": "toggle"}],
+                    }
+                },
+                "preset": [
+                    {
+                        "name": "P",
+                        "task": [{"name": "A", "option": {"hotkeys": "Alt+A"}}],
+                    }
+                ],
+            },
+        )
+
+        with pytest.raises(
+            InterfaceLoadError,
+            match=(r"preset\[P\]\.task\[A\]\.option\[hotkeys\] 必须是对象"),
+        ):
+            load_interface_model(tmp_path)
+
+    def test_preset_hotkey_unknown_field_is_rejected(self, tmp_path):
+        _write_interface(
+            tmp_path,
+            {
+                "interface_version": 2,
+                "name": "Test",
+                "controller": [{"name": "adb", "type": "Adb"}],
+                "resource": [{"name": "main", "path": ["resource"]}],
+                "task": [{"name": "A", "entry": "A", "option": ["hotkeys"]}],
+                "option": {
+                    "hotkeys": {
+                        "type": "hotkey",
+                        "hotkeys": [{"name": "toggle"}],
+                    }
+                },
+                "preset": [
+                    {
+                        "name": "P",
+                        "task": [
+                            {
+                                "name": "A",
+                                "option": {"hotkeys": {"unknown": "Alt+A"}},
+                            }
+                        ],
+                    }
+                ],
+            },
+        )
+
+        with pytest.raises(
+            InterfaceLoadError,
+            match=(
+                r"preset\[P\]\.task\[A\]\.option\[hotkeys\] "
+                r"引用了不存在的快捷键项: unknown"
+            ),
+        ):
             load_interface_model(tmp_path)

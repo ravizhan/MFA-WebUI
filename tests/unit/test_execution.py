@@ -31,6 +31,7 @@ from models.scheduler import (
     ScheduledTaskDeviceConfig,
     TaskExecution,
 )
+from models.settings import SettingsModel
 
 
 def make_payload(task_name: str = "Startup") -> ManualStartPayload:
@@ -622,6 +623,35 @@ class TestPretaskAdmission:
         assert (controller, resource) == ("AdbController", "main")
         assert list(options) == ["Startup"]
         assert [p.command for p in pre_tasks] == ["echo ok"]
+
+    async def test_global_option_values_reach_pretask_for_each_selected_task(
+        self, state: AppState
+    ):
+        worker = _FakeWorker(start_result=True, ready=True)
+        worker.tasks = _FakeSuccessfulTaskService(
+            result=True, task_state=worker.task_state
+        )
+        worker.interface.task = [
+            SimpleNamespace(entry="Startup", option=[]),
+            SimpleNamespace(entry="Second", option=[]),
+        ]
+        state.settings = SettingsModel(
+            globalOptionValues={"global_setting": "from-settings"}
+        )
+        state.worker = worker
+
+        payload = make_payload()
+        payload.task_list = ["Startup", "Second"]
+        admission = await submit_manual(state, payload)
+        assert admission.accepted is True
+        await _await_active_task(state)
+
+        assert len(worker.pretasks.calls) == 1
+        options = worker.pretasks.calls[0][2]
+        assert options == {
+            "Startup": {"global_setting": "from-settings"},
+            "Second": {"global_setting": "from-settings"},
+        }
 
     async def test_pretask_runs_before_device_connection(
         self, state: AppState, monkeypatch

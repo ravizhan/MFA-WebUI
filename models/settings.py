@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 from models.device_address import DeviceType
+from models.scheduler import TaskOptionValue
 
 
 def _normalize_str(value: Any) -> str:
@@ -200,3 +201,4 @@ class SettingsModel(BaseModel):
     runtime: Runtime = Runtime()
     about: About = About()
     panel: Panel = Panel()
+    globalOptionValues: dict[str, TaskOptionValue] = Field(default_factory=dict)

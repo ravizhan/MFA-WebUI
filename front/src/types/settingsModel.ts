@@ -1,3 +1,5 @@
+import type { TaskOptionValue } from "@/types/schedulerModel"
+
 // 更新设置
 export interface UpdateSettings {
   autoUpdate: boolean
@@ -84,4 +86,5 @@ export interface SettingsModel {
   runtime: RuntimeSettings
   about: AboutInfo
   panel: PanelSettings
+  globalOptionValues: Record<string, TaskOptionValue>
 }

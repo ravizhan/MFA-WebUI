@@ -4,6 +4,7 @@ from typing import cast
 
 from models.interface import (
     Controller,
+    HotkeyCase,
     InputCase,
     InterfaceModel,
     Option,
@@ -58,6 +59,7 @@ def _make_option(
     opt_type="select",
     cases=None,
     inputs=None,
+    hotkeys=None,
     default_case=None,
     scan_dir=None,
     scan_filter=None,
@@ -67,6 +69,7 @@ def _make_option(
         type=opt_type,
         cases=[OptionCase(name=c) if isinstance(c, str) else c for c in (cases or [])],
         inputs=inputs,
+        hotkeys=hotkeys,
         default_case=default_case,
         scan_dir=scan_dir,
         scan_filter=scan_filter,
@@ -107,6 +110,11 @@ class TestNormalizeOptionValueForStorage:
 
     def test_dict_filters_non_strings(self):
         assert _normalize_option_value_for_storage({"k": "v", 1: 2}) == {"k": "v"}
+
+    def test_hotkey_value_storage_filters_non_strings(self):
+        assert _normalize_option_value_for_storage(
+            {"attack": "Alt+A", "invalid": 1}
+        ) == {"attack": "Alt+A"}
 
     def test_invalid_type_returns_none(self):
         assert _normalize_option_value_for_storage(42) is None
@@ -297,6 +305,18 @@ class TestBuildOptionDefaults:
         defaults, _ = _build_option_defaults({"inp": opt})
         assert defaults["inp"] == {"threshold": ""}
 
+    def test_hotkey_defaults(self):
+        opt = _make_option(
+            "hotkey",
+            hotkeys=[
+                HotkeyCase(name="attack", default="Alt+A"),
+                HotkeyCase(name="defend"),
+            ],
+        )
+        defaults, types = _build_option_defaults({"combo": opt})
+        assert defaults["combo"] == {"attack": "Alt+A", "defend": ""}
+        assert types["combo"] == "object"
+
     def test_scan_select_treated_like_string(self):
         opt = _make_option(
             "scan_select",
@@ -396,6 +416,21 @@ class TestNormalizeOptionsForTask:
         assert isinstance(opt_value, dict)
         assert opt_value["host"] == "localhost"
         assert opt_value["port"] == ""
+
+    def test_hotkey_partial_update(self):
+        opt = _make_option(
+            "hotkey",
+            hotkeys=[HotkeyCase(name="attack"), HotkeyCase(name="defend")],
+        )
+        defaults, types = _build_option_defaults({"combo": opt})
+        result = _normalize_options_for_task(
+            {"combo": {"attack": "Ctrl+A", "unknown": "ignored"}},
+            {"combo": opt},
+            defaults,
+            types,
+            {},
+        )
+        assert result["combo"] == {"attack": "Ctrl+A", "defend": ""}
 
     def test_unknown_option_key_ignored(self):
         opt = _make_option("select", cases=["a"])
@@ -594,6 +629,33 @@ class TestBuildInterfacePresetSnapshot:
         assert isinstance(cfg, dict)
         assert cfg["host"] == "localhost"
         assert cfg["port"] == ""  # default preserved
+
+    def test_hotkey_option_applied(self):
+        """Preset applies a hotkey option value and preserves other defaults."""
+        opt = _make_option(
+            "hotkey",
+            hotkeys=[HotkeyCase(name="attack"), HotkeyCase(name="defend")],
+        )
+        iface = _make_interface(
+            tasks=[Task(name="T", entry="T", option=["combo"])],
+            options={"combo": opt},
+            presets=[
+                Preset(
+                    name="P",
+                    task=[
+                        PresetTask(
+                            name="T",
+                            option={"combo": {"attack": "Alt+A"}},
+                        )
+                    ],
+                )
+            ],
+        )
+        snapshot = build_interface_preset_snapshot(iface, iface.preset[0])
+        combo = snapshot.taskOptions["T"]["combo"]
+        assert isinstance(combo, dict)
+        assert combo["attack"] == "Alt+A"
+        assert combo["defend"] == ""
 
     def test_enabled_false_stays_unchecked(self):
         """Preset task with enabled=False is unchecked."""

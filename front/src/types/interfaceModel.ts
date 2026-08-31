@@ -135,6 +135,15 @@ export interface Group {
   default_expand?: boolean
 }
 
+export interface SettingSection {
+  name: string
+  label?: string
+  description?: string
+  icon?: string
+  option?: string[]
+  default_expand?: boolean
+}
+
 export interface OptionCase {
   name: string
   label?: string
@@ -154,6 +163,13 @@ export interface InputCase {
   pipeline_type?: InputPipelineType
   verify?: string
   pattern_msg?: string
+}
+
+export interface HotkeyCase {
+  name: string
+  label?: string
+  description?: string
+  default?: string
 }
 
 interface OptionBase {
@@ -176,6 +192,11 @@ export interface InputOption extends OptionBase {
   inputs: InputCase[]
 }
 
+export interface HotkeyOption extends OptionBase {
+  type: "hotkey"
+  hotkeys: HotkeyCase[]
+}
+
 export interface CheckboxOption extends OptionBase {
   type: "checkbox"
   cases: OptionCase[]
@@ -196,7 +217,13 @@ export interface ScanSelectOption extends OptionBase {
   default_case?: string
 }
 
-export type Option = SelectOption | InputOption | CheckboxOption | SwitchOption | ScanSelectOption
+export type Option =
+  | SelectOption
+  | InputOption
+  | HotkeyOption
+  | CheckboxOption
+  | SwitchOption
+  | ScanSelectOption
 
 export type PresetTaskOptionValue = string | string[] | Record<string, string>
 
@@ -238,6 +265,7 @@ export interface InterfaceModel {
   pretask?: Pretask[]
   option?: Record<string, Option>
   global_option?: string[]
+  setting?: SettingSection[]
   import?: string[]
   preset?: Preset[]
 }

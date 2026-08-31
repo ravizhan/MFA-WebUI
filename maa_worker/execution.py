@@ -7,6 +7,7 @@
 """
 
 import asyncio
+import copy
 import logging
 import sqlite3
 import uuid
@@ -456,6 +457,14 @@ async def _complete_run(
         )
         if not normalized_task_list:
             raise RuntimeError("任务列表为空")
+
+        global_values = (
+            state.settings.globalOptionValues if state.settings is not None else {}
+        ) or {}
+        for task_id in normalized_task_list:
+            per_task = normalized_task_options.setdefault(task_id, {})
+            for option_name, option_value in global_values.items():
+                per_task.setdefault(option_name, copy.deepcopy(option_value))
 
         # 3. PI pretask + 用户命令统一在 Controller 创建/连接前执行。
         # 已锁定且可复用的 Controller 无法重新满足“创建前”，此处仍保证在任务启动前执行。

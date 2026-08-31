@@ -295,6 +295,15 @@ class Group(BaseModel):
     default_expand: bool | None = True
 
 
+class SettingSection(BaseModel):
+    name: str
+    label: str | None = None
+    description: str | None = None
+    icon: str | None = None
+    option: list[str] | None = None
+    default_expand: bool | None = True
+
+
 class OptionCase(BaseModel):
     name: str
     label: str | None = None
@@ -314,8 +323,17 @@ class InputCase(BaseModel):
     pattern_msg: str | None = None
 
 
+class HotkeyCase(BaseModel):
+    name: str
+    label: str | None = None
+    description: str | None = None
+    default: str | None = None
+
+
 class Option(BaseModel):
-    type: Literal["select", "input", "checkbox", "switch", "scan_select"] = "select"
+    type: Literal["select", "input", "checkbox", "switch", "scan_select", "hotkey"] = (
+        "select"
+    )
     label: str | None = None
     description: str | None = None
     icon: str | None = None
@@ -323,6 +341,7 @@ class Option(BaseModel):
     resource: list[str] | None = None
     cases: list[OptionCase] | None = None
     inputs: list[InputCase] | None = None
+    hotkeys: list[HotkeyCase] | None = None
     scan_dir: str | None = None
     scan_filter: str | None = None
     pipeline_override: PipelineOverride | None = None
@@ -348,6 +367,8 @@ class Option(BaseModel):
                 )
         if self.type == "input" and not self.inputs:
             raise ValueError("当 type 为 input 时，inputs 不能为空")
+        if self.type == "hotkey" and not self.hotkeys:
+            raise ValueError("当 type 为 hotkey 时，hotkeys 不能为空")
         if self.type == "scan_select":
             if not self.scan_dir:
                 raise ValueError("当 type 为 scan_select 时，scan_dir 不能为空")
@@ -407,6 +428,7 @@ class InterfaceModel(BaseModel):
     pretask: Pretask | list[Pretask] | None = None
     option: dict[str, Option] | None = None
     global_option: list[str] | None = None
+    setting: list[SettingSection] | None = None
     import_: list[str] | None = Field(None, alias="import")
     preset: list[Preset] | None = None
 

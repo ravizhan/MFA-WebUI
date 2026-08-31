@@ -6,7 +6,15 @@ from typing import Any
 import json_utils as json
 from models.interface import InterfaceModel, Option, OptionCase
 
-IMPORTABLE_KEYS = {"task", "option", "preset", "pretask", "import"}
+IMPORTABLE_KEYS = {
+    "task",
+    "option",
+    "preset",
+    "pretask",
+    "import",
+    "global_option",
+    "setting",
+}
 
 # pathlib.Path is OS-aware: on POSIX it does not recognize Windows drive
 # letters (e.g. "C:/windows" parses as a relative path). Detect them
@@ -55,7 +63,8 @@ def _validate_importable_fragment(data: dict[str, Any], source_path: Path) -> No
     invalid_keys = sorted(set(data) - IMPORTABLE_KEYS)
     if invalid_keys:
         raise InterfaceLoadError(
-            f"导入文件只允许包含 task、option、preset、pretask、import 字段: {source_path}，"
+            "导入文件只允许包含 task、option、preset、pretask、import、"
+            f"global_option、setting 字段: {source_path}，"
             f"发现非法字段 {', '.join(invalid_keys)}"
         )
 
@@ -180,6 +189,19 @@ def _merge_fragment_sections(
     if presets:
         target.setdefault("preset", [])
         target["preset"].extend(copy.deepcopy(presets))
+
+    global_options = fragment.get("global_option")
+    if global_options:
+        target_global_options = target.setdefault("global_option", [])
+        for option_name in global_options:
+            if option_name not in target_global_options:
+                target_global_options.append(copy.deepcopy(option_name))
+
+    settings = fragment.get("setting")
+    if settings:
+        target.setdefault("setting", [])
+        target["setting"].extend(copy.deepcopy(settings))
+
     _merge_pretasks(target, fragment)
 
 
@@ -418,6 +440,18 @@ def _validate_preset_option_value(
             if not isinstance(input_value, str):
                 raise InterfaceLoadError(f"{location}.{input_name} 必须是字符串")
 
+    if option.type == "hotkey":
+        if not isinstance(value, dict):
+            raise InterfaceLoadError(f"{location} 必须是对象")
+        hotkey_names = {item.name for item in option.hotkeys or []}
+        for hotkey_name, hotkey_value in value.items():
+            if hotkey_name not in hotkey_names:
+                raise InterfaceLoadError(
+                    f"{location} 引用了不存在的快捷键项: {hotkey_name}"
+                )
+            if not isinstance(hotkey_value, str):
+                raise InterfaceLoadError(f"{location}.{hotkey_name} 必须是字符串")
+
 
 def _validate_presets(interface_model: InterfaceModel) -> None:
     presets = interface_model.preset or []
@@ -463,6 +497,22 @@ def _validate_presets(interface_model: InterfaceModel) -> None:
                     option_name,
                     option,
                     option_value,
+                )
+
+
+def _validate_setting_sections(interface_model: InterfaceModel) -> None:
+    option_map = interface_model.option or {}
+    seen_names: set[str] = set()
+
+    for section in interface_model.setting or []:
+        if section.name in seen_names:
+            raise InterfaceLoadError(f"setting 中存在重复分区: {section.name}")
+        seen_names.add(section.name)
+
+        for option_name in section.option or []:
+            if option_name not in option_map:
+                raise InterfaceLoadError(
+                    f"setting[{section.name}] 引用了不存在的选项: {option_name}"
                 )
 
 
@@ -624,6 +674,7 @@ def load_interface_model(base_dir: str | Path) -> InterfaceModel:
         _validate_task_context_constraints(interface_model)
         _validate_pretasks(interface_model)
         _validate_presets(interface_model)
+        _validate_setting_sections(interface_model)
         return interface_model
     except Exception as exc:
         raise InterfaceLoadError(f"校验 interface 配置失败: {exc}") from exc

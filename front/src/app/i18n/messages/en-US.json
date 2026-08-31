@@ -40,6 +40,7 @@
     "networkError": "Network error, please try again later",
     "anchor": {
       "update": "Update Settings",
+      "taskSettings": "Task Settings",
       "runtime": "Runtime Settings",
       "scheduler": "Scheduler",
       "ui": "UI Settings",
@@ -79,6 +80,9 @@
         "mirrorchyan": "MirrorChyan",
         "github": "GitHub"
       }
+    },
+    "taskSettings": {
+      "empty": "No configurable options"
     },
     "runtime": {
       "title": "Runtime Settings",
@@ -268,6 +272,9 @@
       "resetSuccess": "Settings have been reset to default",
       "githubIssues": "GitHub Issues"
     }
+  },
+  "option": {
+    "hotkeyCapturing": "Press shortcut keys..."
   },
   "panel": {
     "device": "Connect Device",
