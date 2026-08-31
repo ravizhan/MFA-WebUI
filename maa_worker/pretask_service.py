@@ -1,5 +1,4 @@
 import json
-import os
 import subprocess
 import sys
 import threading
@@ -86,10 +85,9 @@ class PretaskService:
         task_options: TaskOptionsByTask,
     ) -> dict[str, TaskOptionValue]:
         option_map = self.worker.interface.option or {}
-        resolved = task_options.get(pretask.resource[0], {}) if pretask.resource else {}
         values: dict[str, TaskOptionValue] = {}
         for option_name in pretask.option or []:
-            resolved_value = resolved.get(option_name)
+            resolved_value = self._find_option_value(task_options, option_name)
             if resolved_value is not None:
                 values[option_name] = resolved_value
                 continue
@@ -100,11 +98,34 @@ class PretaskService:
         return values
 
     @staticmethod
+    def _find_option_value(
+        task_options: TaskOptionsByTask, option_name: str
+    ) -> TaskOptionValue | None:
+        """task_options 按任务条目 ID 分组；pretask.option 所列 option 为全局声明，
+        从所有选中任务的已提交选项中查找该 option 的用户配置值。"""
+        for per_task in task_options.values():
+            if isinstance(per_task, dict) and option_name in per_task:
+                return per_task[option_name]
+        return None
+
+    @staticmethod
     def _default_option_value(option: Option) -> TaskOptionValue:
         if option.type in {"select", "switch"}:
-            return option.cases[0].name if option.cases else ""
+            case_names = [case.name for case in option.cases or []]
+            if (
+                isinstance(option.default_case, str)
+                and option.default_case in case_names
+            ):
+                return option.default_case
+            return case_names[0] if case_names else ""
         if option.type == "checkbox":
+            if isinstance(option.default_case, list):
+                return [
+                    value for value in option.default_case if isinstance(value, str)
+                ]
             return []
+        if option.type == "input":
+            return {field.name: field.default or "" for field in option.inputs or []}
         return ""
 
     def _run_one(
@@ -134,7 +155,7 @@ class PretaskService:
             process = subprocess.Popen(
                 argv_or_command,
                 shell=is_shell,
-                cwd=os.getcwd(),
+                cwd=str(self.worker.context.interface_base_dir),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,

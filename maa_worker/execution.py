@@ -445,17 +445,34 @@ async def _complete_run(
         if payload is None or not payload.device or not payload.resource_name:
             raise RuntimeError("设备或资源配置缺失")
 
-        # 2. PI pretask + 用户命令统一在 Controller 创建/连接前执行。
+        # 2. 先规范化载荷并确认存在可运行任务，避免任务为空/失效时仍执行前置命令
+        normalized_task_list, normalized_task_options, normalized_pre_tasks = (
+            normalize_task_execution_payload(
+                payload.task_list,
+                payload.task_options,
+                worker.interface,
+                payload.preTasks,
+            )
+        )
+        if not normalized_task_list:
+            raise RuntimeError("任务列表为空")
+
+        # 3. PI pretask + 用户命令统一在 Controller 创建/连接前执行。
         # 已锁定且可复用的 Controller 无法重新满足“创建前”，此处仍保证在任务启动前执行。
-        worker.task_state.stop_flag = False
+        # stop_flag 由 TaskService.start() 在任务线程启动时重置；此处不得重置，
+        # 否则 stop_active() 在准入后、本阶段前设置的停止请求会被吞掉。
         effective_controller = payload.controller_name or payload.device.controller_name
         try:
-            await asyncio.to_thread(
-                worker.pretasks.run_all,
-                effective_controller,
-                payload.resource_name,
-                payload.task_options or {},
-                payload.preTasks or [],
+            # shield 包裹：协程被取消时仍等待 pretask 线程退出后再传播取消，
+            # 避免 finally 提前清槽导致新运行与未退出的 pretask 进程并发。
+            await asyncio.shield(
+                asyncio.to_thread(
+                    worker.pretasks.run_all,
+                    effective_controller,
+                    payload.resource_name,
+                    normalized_task_options,
+                    normalized_pre_tasks,
+                )
             )
         except PretaskStopped:
             raise
@@ -464,7 +481,7 @@ async def _complete_run(
                 raise PretaskStopped(str(exc)) from exc
             raise RuntimeError(str(exc)) from exc
 
-        # 3. 复用已匹配连接；不匹配先解锁
+        # 4. 复用已匹配连接；不匹配先解锁
         device_state = worker.device_state
         need_connect = not (
             device_state.connected
@@ -475,7 +492,7 @@ async def _complete_run(
         if need_connect and device_state.configuration_locked:
             await asyncio.to_thread(worker.device.reset_connection_state)
 
-        # 4. 按设置重试 connect + set_resource
+        # 5. 按设置重试 connect + set_resource
         if need_connect:
             settings = load_settings()
             max_retry = settings.runtime.maxRetryCount
@@ -506,18 +523,7 @@ async def _complete_run(
                 await asyncio.to_thread(worker.device.reset_connection_state)
                 raise RuntimeError(f"设备连接失败: {last_err}")
 
-        # 5. 规范化载荷并启动
-        normalized_task_list, normalized_task_options, normalized_pre_tasks = (
-            normalize_task_execution_payload(
-                payload.task_list,
-                payload.task_options,
-                worker.interface,
-                payload.preTasks,
-            )
-        )
-        if not normalized_task_list:
-            raise RuntimeError("任务列表为空")
-
+        # 6. 启动任务线程
         if not worker.tasks.start(
             normalized_task_list,
             normalized_task_options,

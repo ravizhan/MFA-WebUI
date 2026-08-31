@@ -1,12 +1,13 @@
 """Unit tests for the unified PI and user pre-task execution service."""
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 import maa_worker.pretask_service as pretask_module
 from maa_worker.pretask_service import PretaskError, PretaskService
-from models.interface import Option, OptionCase, Pretask
+from models.interface import InputCase, Option, OptionCase, Pretask
 from models.scheduler import PreTaskCommand
 
 
@@ -84,6 +85,7 @@ class _PopenRecorder:
 def _make_worker(*, pretasks=(), options=None, stop_flag=False):
     return SimpleNamespace(
         interface=SimpleNamespace(pretask=list(pretasks), option=options or {}),
+        context=SimpleNamespace(interface_base_dir=Path("C:/app-root")),
         task_state=SimpleNamespace(
             stop_flag=stop_flag,
             current_pre_task_process=None,
@@ -183,17 +185,25 @@ def test_pi_argv_preserves_args_and_appends_compact_option_json(monkeypatch):
     ]
 
 
-def test_option_values_use_resource_task_values_and_select_checkbox_defaults(
+def test_option_values_aggregate_task_entry_values_and_honor_declared_defaults(
     monkeypatch,
 ):
+    """task_options 以任务条目 ID 为键；pretask 选项跨条目聚合查找用户值，
+    缺失时回退到接口声明的 default_case/inputs 默认值。"""
     options = {
         "mode": Option(
             type="select",
             cases=[OptionCase(name="first"), OptionCase(name="second")],
+            default_case="second",
         ),
         "tags": Option(
             type="checkbox",
             cases=[OptionCase(name="one"), OptionCase(name="two")],
+            default_case=["two"],
+        ),
+        "prompt": Option(
+            type="input",
+            inputs=[InputCase(name="text", default="hello"), InputCase(name="num")],
         ),
     }
     worker = _make_worker(
@@ -201,24 +211,44 @@ def test_option_values_use_resource_task_values_and_select_checkbox_defaults(
             Pretask(
                 exec="resource-values",
                 resource=["main", "fallback"],
-                option=["mode", "tags"],
+                option=["mode", "tags", "prompt"],
             ),
-            Pretask(exec="defaults", option=["mode", "tags"]),
+            Pretask(exec="defaults", option=["mode", "tags", "prompt"]),
         ],
         options=options,
     )
     recorder = _PopenRecorder([_FakeProcess(), _FakeProcess()])
     _patch_popen(monkeypatch, recorder)
 
+    # 用户值挂在任务条目 "selected-task" 下（不等于 pretask 的 resource 名），
+    # 聚合查找仍应命中；未提供的选项回退声明默认值。
     PretaskService(worker).run_all(
         "adb",
         "main",
-        {"main": {"mode": "second"}, "fallback": {"mode": "ignored"}},
+        {"selected-task": {"mode": "first"}, "fallback": {"mode": "ignored"}},
         [],
     )
 
-    assert recorder.calls[0][0][-1] == '{"mode":"second","tags":[]}'
-    assert recorder.calls[1][0][-1] == '{"mode":"first","tags":[]}'
+    assert (
+        recorder.calls[0][0][-1]
+        == '{"mode":"first","tags":["two"],"prompt":{"text":"hello","num":""}}'
+    )
+    # 第二个 pretask 无 resource，聚合查找同样命中用户值
+    assert (
+        recorder.calls[1][0][-1]
+        == '{"mode":"first","tags":["two"],"prompt":{"text":"hello","num":""}}'
+    )
+
+
+def test_pretask_runs_from_interface_base_dir(monkeypatch):
+    """相对路径的 pretask 程序应相对应用根目录解析，而非进程 cwd。"""
+    worker = _make_worker(pretasks=[Pretask(exec="pi-tool")])
+    recorder = _PopenRecorder([_FakeProcess()])
+    _patch_popen(monkeypatch, recorder)
+
+    PretaskService(worker).run_all("adb", "main", {}, [])
+
+    assert recorder.calls[0][1]["cwd"] == str(Path("C:/app-root"))
 
 
 def test_nonzero_exit_raises_pretask_error_with_output(monkeypatch):

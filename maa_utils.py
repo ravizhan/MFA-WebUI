@@ -88,6 +88,11 @@ class MaaWorker:
     def shutdown(self):
         if self.task_state.running:
             self.tasks.stop()
+        else:
+            # 前置任务阶段 running 尚未置位：兜底置停止标志并终止正在运行的前置进程，
+            # 避免关闭/更新时用户前置命令一直阻塞到超时。
+            self.task_state.stop_flag = True
+            self.pretasks.stop_current()
         self.sinks.unregister_all(
             self.resource,
             self.tasker,

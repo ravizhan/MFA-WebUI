@@ -12,7 +12,13 @@
           {{ t("settings.scheduler.dialog.tab.preTasks") }}
         </span>
       </template>
-      <PreTaskList v-model="preTasks" class="min-h-48" embedded />
+      <PreTaskList
+        v-model="preTasks"
+        class="min-h-48"
+        embedded
+        :controller-name="controllerName"
+        :resource-name="resourceName"
+      />
     </NTabPane>
     <NTabPane name="task-list">
       <template #tab>

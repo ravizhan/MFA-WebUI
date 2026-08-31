@@ -26,6 +26,7 @@ from maa_worker.pretask_service import PretaskError, PretaskStopped
 from models.scheduler import (
     CronTriggerConfig,
     ManualStartPayload,
+    PreTaskCommand,
     ScheduledTask,
     ScheduledTaskDeviceConfig,
     TaskExecution,
@@ -548,7 +549,7 @@ class TestPretaskAdmission:
         assert admission.accepted is True
         await _await_active_task(state)
 
-        assert worker.pretasks.calls == [("AdbController", "main", {}, [])]
+        assert worker.pretasks.calls == [("AdbController", "main", {"Startup": {}}, [])]
         assert worker.tasks.called is False
         row = list_executions(state.scheduler_db_path)[0]
         assert row.id == admission.run_id
@@ -576,22 +577,51 @@ class TestPretaskAdmission:
         assert row.error_message == "任务已终止"
         assert worker.events.failed_events == [(["Startup"], "任务已终止")]
 
-    async def test_stale_stop_flag_is_reset_before_pretask(self, state: AppState):
+    async def test_empty_task_list_fails_before_pretask_side_effects(
+        self, state: AppState
+    ):
+        # 载荷中的任务在接口中不存在：规范化后任务列表为空，
+        # 必须先失败，不得执行任何前置命令。
         worker = _FakeWorker(start_result=True, ready=True)
-        worker.task_state.stop_flag = True
+        state.worker = worker
+
+        payload = make_payload("RemovedTask")
+        admission = await submit_manual(state, payload)
+        assert admission.accepted is True
+        await _await_active_task(state)
+
+        assert worker.pretasks.calls == []
+        assert worker.tasks.called is False
+        row = list_executions(state.scheduler_db_path)[0]
+        assert row.id == admission.run_id
+        assert row.status == "failed"
+        assert row.error_message == "任务列表为空"
+
+    async def test_pretask_receives_normalized_options_and_pre_tasks(
+        self, state: AppState
+    ):
+        # pretask 使用规范化后的选项/前置命令（按规范化任务列表过滤、
+        # 剔除禁用与空命令）。
+        worker = _FakeWorker(start_result=True, ready=True)
         worker.tasks = _FakeSuccessfulTaskService(
             result=True, task_state=worker.task_state
         )
         state.worker = worker
 
-        admission = await submit_manual(state, make_payload())
+        payload = make_payload()
+        payload.task_options = {"Startup": {"mode": "safe"}, "Ghost": {"x": "y"}}
+        payload.preTasks = [
+            PreTaskCommand(command="echo ok"),
+            PreTaskCommand(command="disabled", enabled=False),
+        ]
+        admission = await submit_manual(state, payload)
         assert admission.accepted is True
         await _await_active_task(state)
 
-        assert worker.pretasks.stop_flags == [False]
-        row = list_executions(state.scheduler_db_path)[0]
-        assert row.id == admission.run_id
-        assert row.status == "success"
+        controller, resource, options, pre_tasks = worker.pretasks.calls[0]
+        assert (controller, resource) == ("AdbController", "main")
+        assert list(options) == ["Startup"]
+        assert [p.command for p in pre_tasks] == ["echo ok"]
 
     async def test_pretask_runs_before_device_connection(
         self, state: AppState, monkeypatch
@@ -611,7 +641,7 @@ class TestPretaskAdmission:
         assert admission.accepted is True
         await _await_active_task(state)
 
-        assert worker.pretasks.calls == [("AdbController", "main", {}, [])]
+        assert worker.pretasks.calls == [("AdbController", "main", {"Startup": {}}, [])]
         assert ordering == ["pretask", "connect"]
         row = list_executions(state.scheduler_db_path)[0]
         assert row.id == admission.run_id
