@@ -275,6 +275,18 @@ class Task(BaseModel):
     option: list[str] | None = None
 
 
+class Pretask(BaseModel):
+    resource: list[str] | None = None
+    controller: list[str] | None = None
+    exec: str
+    args: list[str] | None = None
+    name: str | None = None
+    label: str | None = None
+    description: str | None = None
+    icon: str | None = None
+    option: list[str] | None = None
+
+
 class Group(BaseModel):
     name: str
     label: str | None = None
@@ -392,6 +404,7 @@ class InterfaceModel(BaseModel):
     group: list[Group] | None = None
     agent: Agent | list[Agent] | None = None
     task: list[Task] | None = None
+    pretask: Pretask | list[Pretask] | None = None
     option: dict[str, Option] | None = None
     global_option: list[str] | None = None
     import_: list[str] | None = Field(None, alias="import")

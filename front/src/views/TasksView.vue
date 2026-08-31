@@ -15,7 +15,13 @@
           {{ t("panel.taskList") }}
         </h2>
       </template>
-      <PreTaskList ref="preTaskList" v-model="configStore.preTasks" class="mb-3" />
+      <PreTaskList
+        ref="preTaskList"
+        v-model="configStore.preTasks"
+        class="mb-3"
+        :controller-name="deviceStore.selectedControllerName"
+        :resource-name="deviceStore.resource"
+      />
       <TaskSelectList
         :tasks="configStore.taskList"
         :selected-tasks="selectedTaskIds"

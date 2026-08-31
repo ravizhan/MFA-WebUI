@@ -460,6 +460,114 @@ class TestLoadInterfaceModel:
         assert model.task is not None
         assert {t.name for t in model.task} == {"Extra"}
 
+    def test_pretask_single_object_is_normalized_to_list(self, tmp_path):
+        _write_interface(
+            tmp_path,
+            {
+                "interface_version": 2,
+                "name": "Test",
+                "controller": [{"name": "adb", "type": "Adb"}],
+                "resource": [{"name": "main", "path": ["resource"]}],
+                "pretask": {"name": "Root pretask", "exec": "prepare-root"},
+            },
+        )
+
+        model = load_interface_model(tmp_path)
+
+        assert isinstance(model.pretask, list)
+        assert [(pretask.name, pretask.exec) for pretask in model.pretask] == [
+            ("Root pretask", "prepare-root")
+        ]
+
+    def test_imported_pretasks_merge_root_first_depth_first(self, tmp_path):
+        (tmp_path / "inner.json5").write_text(
+            stdlib_json.dumps({"pretask": {"name": "Inner", "exec": "prepare-inner"}})
+        )
+        (tmp_path / "outer.json5").write_text(
+            stdlib_json.dumps(
+                {
+                    "import": ["inner.json5"],
+                    "pretask": [{"name": "Outer", "exec": "prepare-outer"}],
+                }
+            )
+        )
+        _write_interface(
+            tmp_path,
+            {
+                "interface_version": 2,
+                "name": "Test",
+                "controller": [{"name": "adb", "type": "Adb"}],
+                "resource": [{"name": "main", "path": ["resource"]}],
+                "pretask": {"name": "Root", "exec": "prepare-root"},
+                "import": ["outer.json5"],
+            },
+        )
+
+        model = load_interface_model(tmp_path)
+
+        assert isinstance(model.pretask, list)
+        assert [pretask.name for pretask in model.pretask] == [
+            "Root",
+            "Inner",
+            "Outer",
+        ]
+
+    def test_imported_fragment_pretask_loads_with_valid_context_and_option(
+        self, tmp_path
+    ):
+        (tmp_path / "pretasks.json5").write_text(
+            stdlib_json.dumps(
+                {
+                    "pretask": [
+                        {
+                            "name": "Fragment pretask",
+                            "exec": "prepare-fragment",
+                            "args": ["--flag"],
+                            "resource": ["main"],
+                            "controller": ["adb"],
+                            "option": ["mode"],
+                        }
+                    ]
+                }
+            )
+        )
+        _write_interface(
+            tmp_path,
+            {
+                "interface_version": 2,
+                "name": "Test",
+                "controller": [{"name": "adb", "type": "Adb"}],
+                "resource": [{"name": "main", "path": ["resource"]}],
+                "task": [
+                    {
+                        "name": "Main task",
+                        "entry": "main",
+                        "resource": ["main"],
+                        "option": ["mode"],
+                    }
+                ],
+                "option": {
+                    "mode": {
+                        "type": "select",
+                        "cases": [{"name": "safe"}],
+                    }
+                },
+                "import": ["pretasks.json5"],
+            },
+        )
+
+        model = load_interface_model(tmp_path)
+
+        assert isinstance(model.pretask, list)
+        assert len(model.pretask) == 1
+        pretask = model.pretask[0]
+        assert pretask.name == "Fragment pretask"
+        assert pretask.exec == "prepare-fragment"
+        assert pretask.args == ["--flag"]
+        assert pretask.resource == ["main"]
+        assert pretask.controller == ["adb"]
+        assert pretask.option == ["mode"]
+
     def test_cyclic_import_raises(self, tmp_path):
         (tmp_path / "a.json5").write_text('{import: ["b.json5"]}')
         (tmp_path / "b.json5").write_text('{import: ["a.json5"]}')
@@ -502,6 +610,123 @@ class TestLoadInterfaceModel:
             },
         )
         with pytest.raises(InterfaceLoadError, match="引用了不存在的 controller"):
+            load_interface_model(tmp_path)
+
+    def test_pretask_whitespace_exec_is_rejected(self, tmp_path):
+        _write_interface(
+            tmp_path,
+            {
+                "interface_version": 2,
+                "name": "Test",
+                "controller": [{"name": "adb", "type": "Adb"}],
+                "resource": [{"name": "main", "path": ["resource"]}],
+                "pretask": [{"exec": "   \t  "}],
+            },
+        )
+
+        with pytest.raises(
+            InterfaceLoadError,
+            match=r"pretask\[0\]\.exec 必须是非空字符串",
+        ):
+            load_interface_model(tmp_path)
+
+    def test_pretask_nonexistent_resource(self, tmp_path):
+        _write_interface(
+            tmp_path,
+            {
+                "interface_version": 2,
+                "name": "Test",
+                "controller": [{"name": "adb", "type": "Adb"}],
+                "resource": [{"name": "main", "path": ["resource"]}],
+                "pretask": [{"exec": "prepare", "resource": ["missing"]}],
+            },
+        )
+
+        with pytest.raises(
+            InterfaceLoadError,
+            match=r"pretask\[0\] 引用了不存在的 resource: missing",
+        ):
+            load_interface_model(tmp_path)
+
+    def test_pretask_nonexistent_controller(self, tmp_path):
+        _write_interface(
+            tmp_path,
+            {
+                "interface_version": 2,
+                "name": "Test",
+                "controller": [{"name": "adb", "type": "Adb"}],
+                "resource": [{"name": "main", "path": ["resource"]}],
+                "pretask": [{"exec": "prepare", "controller": ["missing"]}],
+            },
+        )
+
+        with pytest.raises(
+            InterfaceLoadError,
+            match=r"pretask\[0\] 引用了不存在的 controller: missing",
+        ):
+            load_interface_model(tmp_path)
+
+    def test_pretask_nonexistent_option(self, tmp_path):
+        _write_interface(
+            tmp_path,
+            {
+                "interface_version": 2,
+                "name": "Test",
+                "controller": [{"name": "adb", "type": "Adb"}],
+                "resource": [{"name": "main", "path": ["resource"]}],
+                "pretask": [{"exec": "prepare", "option": ["missing"]}],
+            },
+        )
+
+        with pytest.raises(
+            InterfaceLoadError,
+            match=r"pretask\[0\]\.option 引用了不存在的选项: missing",
+        ):
+            load_interface_model(tmp_path)
+
+    def test_pretask_option_must_be_reachable_from_resource_task(self, tmp_path):
+        _write_interface(
+            tmp_path,
+            {
+                "interface_version": 2,
+                "name": "Test",
+                "controller": [{"name": "adb", "type": "Adb"}],
+                "resource": [{"name": "main", "path": ["resource"]}],
+                "task": [
+                    {
+                        "name": "Main task",
+                        "entry": "main",
+                        "resource": ["main"],
+                        "option": ["reachable"],
+                    }
+                ],
+                "option": {
+                    "reachable": {
+                        "type": "select",
+                        "cases": [{"name": "yes"}],
+                    },
+                    "unreachable": {
+                        "type": "select",
+                        "cases": [{"name": "no"}],
+                    },
+                },
+                "pretask": [
+                    {
+                        "exec": "prepare",
+                        "resource": ["main"],
+                        "option": ["unreachable"],
+                    }
+                ],
+            },
+        )
+
+        with pytest.raises(
+            InterfaceLoadError,
+            match=(
+                r"pretask\[0\]\.option\[unreachable\]"
+                r" 无法从资源包 main 的任何任务到达"
+            ),
+        ):
             load_interface_model(tmp_path)
 
     def test_scan_select_expansion(self, tmp_path):

@@ -13,6 +13,7 @@ from maa_worker.agent_service import AgentService
 from maa_worker.device_service import DeviceService
 from maa_worker.event_service import EventService
 from maa_worker.pipeline_override import PipelineOverrideService
+from maa_worker.pretask_service import PretaskService
 from maa_worker.sink_service import SinkHandler, SinkService
 from maa_worker.task_service import TaskService
 from models.interface import InterfaceModel
@@ -50,6 +51,7 @@ class MaaWorker:
         self.device = DeviceService(self)
         self.pipeline = PipelineOverrideService(self)
         self.agents = AgentService(self)
+        self.pretasks = PretaskService(self)
         self.tasks = TaskService(self)
 
         self._sink_handler = SinkHandler(self)
@@ -86,6 +88,11 @@ class MaaWorker:
     def shutdown(self):
         if self.task_state.running:
             self.tasks.stop()
+        else:
+            # 前置任务阶段 running 尚未置位：兜底置停止标志并终止正在运行的前置进程，
+            # 避免关闭/更新时用户前置命令一直阻塞到超时。
+            self.task_state.stop_flag = True
+            self.pretasks.stop_current()
         self.sinks.unregister_all(
             self.resource,
             self.tasker,

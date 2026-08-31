@@ -1,6 +1,4 @@
 import copy
-import subprocess
-import sys
 import threading
 import time
 import traceback
@@ -131,6 +129,9 @@ class TaskService:
         try:
             if state.running:
                 return False
+            if state.stop_flag:
+                # 前置阶段已收到停止请求：保持标志，不启动任务线程
+                return False
             state.stop_flag = False
             state.running = True
             state.last_status = "running"
@@ -152,162 +153,10 @@ class TaskService:
 
     def stop(self) -> bool:
         state = self.worker.task_state
-        if not state.running:
-            return False
         state.stop_flag = True
-        proc = state.current_pre_task_process
-        if proc is not None and proc.poll() is None:
-            self._terminate_process(proc)
+        self.worker.pretasks.stop_current()
         while self.worker.tasker.running:
             time.sleep(0.5)
-        return True
-
-    def _terminate_process(self, proc: subprocess.Popen):
-        try:
-            proc.terminate()
-        except Exception:
-            pass
-        try:
-            proc.wait(timeout=2)
-        except Exception:
-            if sys.platform == "win32":
-                try:
-                    subprocess.run(
-                        ["taskkill", "/T", "/F", "/PID", str(proc.pid)],
-                        check=False,
-                    )
-                except Exception:
-                    pass
-            else:
-                try:
-                    proc.kill()
-                except Exception:
-                    pass
-
-    def _run_pre_tasks(self, pre_tasks: list[PreTaskCommand]) -> bool:
-        state = self.worker.task_state
-        enabled = [
-            t
-            for t in pre_tasks
-            if getattr(t, "enabled", False) and t.command.strip() != ""
-        ]
-        if not enabled:
-            return True
-
-        for task in enabled:
-            command = task.command
-            timeout = task.timeout
-            if state.stop_flag:
-                self.worker.events.send_log("前置程序已停止")
-                state.last_status = "failed"
-                state.last_error = "前置程序已停止"
-                return False
-
-            self.worker.events.send_log(f"执行前置程序: {command}")
-            creationflags = 0
-            if sys.platform == "win32":
-                creationflags = subprocess.CREATE_NEW_PROCESS_GROUP
-
-            try:
-                process = subprocess.Popen(
-                    command,
-                    shell=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    creationflags=creationflags,
-                )
-            except Exception as exc:
-                print(f"前置程序启动失败: {command}\n{exc}")
-                self.worker.events.send_log(f"前置程序执行失败: {command}")
-                self.worker.events.send_notification(
-                    "前置程序执行失败",
-                    f"命令: {command}\n启动异常: {exc}",
-                    notify=["notification"],
-                )
-                state.last_status = "failed"
-                state.last_error = f"前置程序执行失败: {command}"
-                return False
-
-            state.current_pre_task_process = process
-            output_lines: list[str] = []
-            stdout = process.stdout
-
-            def _reader():
-                if stdout is None:
-                    return
-                try:
-                    for line in stdout:
-                        output_lines.append(line)
-                except Exception:
-                    pass
-
-            reader_thread = threading.Thread(target=_reader, daemon=True)
-            reader_thread.start()
-
-            start_time = time.time()
-            timed_out = False
-            stopped = False
-            while True:
-                if process.poll() is not None:
-                    break
-                if state.stop_flag:
-                    stopped = True
-                    break
-                if time.time() - start_time > timeout:
-                    timed_out = True
-                    break
-                time.sleep(0.1)
-
-            if stopped or timed_out:
-                self._terminate_process(process)
-
-            reader_thread.join(timeout=2)
-            state.current_pre_task_process = None
-
-            full_output = "".join(output_lines)
-            if len(output_lines) > 1000:
-                output_lines = output_lines[-1000:]
-
-            if stopped:
-                self.worker.events.send_log("前置程序已停止")
-                state.last_status = "failed"
-                state.last_error = f"前置程序已停止: {command}"
-                return False
-
-            return_code = process.returncode
-            if timed_out or return_code != 0:
-                try:
-                    print(full_output)
-                except UnicodeEncodeError:
-                    sys.stdout.buffer.write(
-                        full_output.encode("utf-8", errors="replace")
-                    )
-                    sys.stdout.buffer.write(b"\n")
-                    sys.stdout.flush()
-                if timed_out:
-                    self.worker.events.send_log(f"前置程序执行超时: {command}")
-                    self.worker.events.send_notification(
-                        "前置程序执行超时",
-                        f"命令: {command}\n超时时间: {timeout}s",
-                        notify=["notification"],
-                    )
-                    state.last_error = f"前置程序执行超时: {command}"
-                else:
-                    self.worker.events.send_log(f"前置程序执行失败: {command}")
-                    self.worker.events.send_notification(
-                        "前置程序执行失败",
-                        f"命令: {command}\n退出码: {return_code}",
-                        notify=["notification"],
-                    )
-                    state.last_error = f"前置程序执行失败: {command}"
-                state.last_status = "failed"
-                return False
-
-            self.worker.events.send_log(f"前置程序执行成功: {command}")
-
         return True
 
     def run_process(
@@ -320,15 +169,6 @@ class TaskService:
         state.pre_tasks = pre_tasks or []
         try:
             self.worker.events.emit_task_started(task_list)
-            if pre_tasks and not self._run_pre_tasks(pre_tasks):
-                if not state.last_error:
-                    state.last_error = "前置程序执行失败"
-                if state.last_status not in ("failed", "stopped"):
-                    state.last_status = "failed"
-                self.worker.events.emit_task_failed(
-                    task_list, state.last_error or "前置程序执行失败"
-                )
-                return
             for task in task_list:
                 if state.stop_flag:
                     self.worker.tasker.post_stop().wait()
