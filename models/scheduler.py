@@ -306,13 +306,3 @@ class TaskExecution(BaseModel):
     finished_at: datetime | None = Field(None, description="结束时间")
     status: ExecutionStatus = Field(..., description="执行状态")
     error_message: str | None = Field(None, description="错误信息")
-
-
-class TaskExecutionCreate(BaseModel):
-    """创建执行记录请求"""
-
-    task_id: str | None = None
-    task_name: str
-    origin: ExecutionOrigin = "in_app"
-    status: ExecutionStatus
-    error_message: str | None = None

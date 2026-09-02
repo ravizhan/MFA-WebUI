@@ -111,6 +111,17 @@ describe("useTaskConfigStore", () => {
     expect(store.preTasks).toEqual([])
   })
 
+  it("按任务列表顺序派生已勾选任务 ID", () => {
+    const store = useTaskConfigStore()
+    store.taskList = [
+      { id: "first", name: "First", order: 0, checked: true },
+      { id: "middle", name: "Middle", order: 1, checked: false },
+      { id: "last", name: "Last", order: 2, checked: true },
+    ]
+
+    expect(store.selectedTaskIds).toEqual(["first", "last"])
+  })
+
   describe("buildDefaultTaskList", () => {
     it("returns tasks from interface with checked=false", () => {
       const store = useTaskConfigStore()

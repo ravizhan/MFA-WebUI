@@ -64,8 +64,6 @@ export const triggerConfigSchema = z.discriminatedUnion("type", [
   intervalTriggerSchema,
 ])
 
-export type TriggerConfigOutput = z.output<typeof triggerConfigSchema>
-
 const preTaskCommandSchema = z.object({
   id: z.string().optional(),
   command: z.string(),
@@ -113,5 +111,3 @@ export const schedulerTaskFormSchema = z.object({
   device: deviceConfigSchema.nullable().optional(),
   resource_name: z.string().nullable().optional(),
 })
-
-export type SchedulerTaskFormOutput = z.output<typeof schedulerTaskFormSchema>

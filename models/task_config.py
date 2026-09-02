@@ -348,9 +348,7 @@ def _normalize_raw_snapshot(snapshot: Any) -> dict[str, Any]:
         "taskOrder": raw_task_order,
         "taskChecked": raw_task_checked,
         "taskOptions": _normalize_raw_task_options(snapshot.get("taskOptions")),
-        "preTasks": _normalize_raw_pre_tasks(
-            snapshot.get("preTasks") or snapshot.get("pre_tasks")
-        ),
+        "preTasks": _normalize_raw_pre_tasks(snapshot.get("preTasks")),
     }
 
 

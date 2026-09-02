@@ -23,7 +23,7 @@ from pydantic import BaseModel
 
 import json_utils as json
 import settings_io
-from app_state import AppState, LogBroadcaster, normalize_event
+from app_state import AppState, LogBroadcaster
 from maa_utils import MaaWorker
 from maa_worker import execution
 from models.api import CustomDeviceCreate, DeviceModel
@@ -193,7 +193,7 @@ def delegate_native_dispatch(task_id: str) -> int:
 async def log_monitor():
     while not app_state.is_shutting_down:
         while not app_state.message_conn.empty():
-            message = normalize_event(app_state.message_conn.get_nowait())
+            message = app_state.message_conn.get_nowait()
             app_state.history_message.append(message)
             if app_state.broadcaster:
                 await app_state.broadcaster.broadcast(message)
@@ -483,6 +483,11 @@ def get_device_state():
 def get_resource(controller_type: str | None = Query(default=None)):
     if app_state.worker is None:
         return {"status": "failed", "message": "Worker未初始化"}
+    controller_names = (
+        {c.name for c in interface.controller if c.type == controller_type}
+        if controller_type
+        else None
+    )
     resources = [
         {
             "name": r.name,
@@ -490,14 +495,10 @@ def get_resource(controller_type: str | None = Query(default=None)):
             "controller": r.controller,
         }
         for r in interface.resource
+        if controller_names is None
+        or not r.controller
+        or not controller_names.isdisjoint(r.controller)
     ]
-    if controller_type:
-        try:
-            from maa_worker.resource_utils import filter_resources_by_controller_type
-
-            resources = filter_resources_by_controller_type(resources, controller_type)
-        except ImportError:
-            pass
     return {"status": "success", "resource": resources}
 
 

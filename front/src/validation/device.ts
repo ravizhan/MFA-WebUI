@@ -37,8 +37,6 @@ export const hostPortSchema = z
     return `${hostResult.data}:${portResult.data}`
   })
 
-export type HostPort = z.output<typeof hostPortSchema>
-
 const win32AddressSchema = positiveIntegerSchema
 
 const gamepadAddressSchema = z
@@ -85,8 +83,6 @@ export const customDeviceAddressSchema = z.discriminatedUnion("type", [
   }),
 ])
 
-export type CustomDeviceAddress = z.output<typeof customDeviceAddressSchema>
-
 /** Runtime (scanned) device address: Adb allows USB serials. */
 export const runtimeDeviceAddressSchema = z.discriminatedUnion("type", [
   z.object({
@@ -111,9 +107,5 @@ export const runtimeDeviceAddressSchema = z.discriminatedUnion("type", [
   }),
 ])
 
-export type RuntimeDeviceAddress = z.output<typeof runtimeDeviceAddressSchema>
-
 /** PlayCover address schema for connection store. */
 export const playCoverAddressSchema = hostPortSchema
-
-export type PlayCoverAddress = z.output<typeof playCoverAddressSchema>

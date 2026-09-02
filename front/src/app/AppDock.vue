@@ -15,7 +15,7 @@
         :focusable="false"
         :type="activeKey === item.key ? 'primary' : 'default'"
         style="padding: 2px 4px; --n-color-hover: rgba(46, 51, 56, 0.2); margin: 2px"
-        @click="emit('select', item)"
+        @click="emit('select', item.key)"
       >
         <div class="flex flex-col items-center gap-0.5 min-w-11">
           <NIcon size="20"><component :is="item.iconComponent" /></NIcon>
@@ -29,7 +29,7 @@
 <script setup lang="ts">
 import type { Component } from "vue"
 
-export interface DockItem {
+interface DockItem {
   key: string
   label: string
   iconComponent: Component
@@ -41,6 +41,6 @@ defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: "select", item: DockItem): void
+  (e: "select", key: string): void
 }>()
 </script>

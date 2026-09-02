@@ -23,7 +23,6 @@ import { useInterfaceStore } from "@/stores/interface/interface"
 import { useSettingsStore } from "@/stores/settings/settings"
 import { useTaskConfigStore } from "@/stores/task-config/taskConfig"
 import type { ManualStartPayload, StartConflict } from "@/types/schedulerModel"
-import type { TaskListItem } from "@/types/taskConfigModel"
 import type { PanelLastConnectedDevice } from "@/types/settingsModel"
 import {
   buildDeviceFingerprint,
@@ -175,38 +174,12 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
       }
       return getStoredDeviceFingerprint(savedDevice) === this.currentSelectionFingerprint
     },
-
-    selectedTaskIds(): string[] {
-      const configStore = useTaskConfigStore()
-      return configStore.taskList.filter((task) => task.checked).map((task) => task.id)
-    },
   },
 
   // ---------------------------------------------------------------------------
   // Actions
   // ---------------------------------------------------------------------------
   actions: {
-    // --- Task config persistence ---
-    handleTasksUpdate(tasks: TaskListItem[]) {
-      const configStore = useTaskConfigStore()
-      configStore.taskList = tasks
-    },
-
-    handleSelectedTasksUpdate(selectedIds: string[]) {
-      const configStore = useTaskConfigStore()
-      configStore.taskList = configStore.taskList.map((task) => ({
-        ...task,
-        checked: selectedIds.includes(task.id),
-      }))
-    },
-
-    saveTaskConfig() {
-      const configStore = useTaskConfigStore()
-      if (configStore.configLoaded) {
-        configStore.debouncedSave()
-      }
-    },
-
     // --- Device selection persistence & restore ---
     async persistLastConnectedDevice(deviceInfo: ConnectableDevice, controllerName: string) {
       const settingsStore = useSettingsStore()
@@ -671,11 +644,12 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
       const isTaskCompatibleInCurrentContext = (taskId: string) =>
         interfaceStore.isTaskCompatibleByEntry(taskId, this.selectedControllerName, this.resource)
 
+      const selectedTaskIds = configStore.selectedTaskIds
       const allCompatibleTaskIds = configStore.taskList
         .map((task) => task.id)
         .filter((taskId) => isTaskCompatibleInCurrentContext(taskId))
 
-      const compatibleTaskIds = this.selectedTaskIds.filter((taskId) =>
+      const compatibleTaskIds = selectedTaskIds.filter((taskId) =>
         isTaskCompatibleInCurrentContext(taskId),
       )
 
@@ -846,6 +820,12 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
       const configStore = useTaskConfigStore()
       const settingsStore = useSettingsStore()
 
+      const scheduleTaskConfigSave = () => {
+        if (configStore.configLoaded) {
+          configStore.debouncedSave()
+        }
+      }
+
       // Sync device state
       void this.syncDeviceRuntimeState()
 
@@ -881,28 +861,13 @@ export const useDeviceConnectionStore = defineStore("deviceConnection", {
         { immediate: true },
       )
 
-      const stop2 = watch(
-        () => configStore.taskList,
-        () => this.saveTaskConfig(),
-        { deep: true },
-      )
+      const stop2 = watch(() => configStore.taskList, scheduleTaskConfigSave, { deep: true })
 
-      const stop3 = watch(
-        () => configStore.options,
-        () => this.saveTaskConfig(),
-        { deep: true },
-      )
+      const stop3 = watch(() => configStore.options, scheduleTaskConfigSave, { deep: true })
 
-      const stop4 = watch(
-        () => configStore.preTasks,
-        () => this.saveTaskConfig(),
-        { deep: true },
-      )
+      const stop4 = watch(() => configStore.preTasks, scheduleTaskConfigSave, { deep: true })
 
-      const stop5 = watch(
-        () => configStore.selectedPresetName,
-        () => this.saveTaskConfig(),
-      )
+      const stop5 = watch(() => configStore.selectedPresetName, scheduleTaskConfigSave)
 
       const stop6 = watch(
         () => indexStore.Connected,

@@ -106,20 +106,6 @@ def build_log_event(msg: str, level: RealtimeEventLevel = "info") -> RealtimeEve
     )
 
 
-def normalize_event(payload: RealtimeEvent | dict[str, Any] | str) -> RealtimeEvent:
-    if isinstance(payload, RealtimeEvent):
-        return payload
-    if isinstance(payload, dict):
-        return RealtimeEvent(**payload)
-    return RealtimeEvent(
-        event="log",
-        level="info",
-        message=payload,
-        time="",
-        notify=[],
-    )
-
-
 class AppState:
     worker: "MaaWorker | None"
     broadcaster: LogBroadcaster | None
@@ -128,19 +114,16 @@ class AppState:
     system_scheduler: "SystemScheduler | None"
 
     def __init__(self):
-        self.message_conn = SimpleQueue()
+        self.message_conn: SimpleQueue[RealtimeEvent] = SimpleQueue()
         self.worker = None
         self.is_shutting_down = False
         self.history_message: deque[RealtimeEvent] = deque(maxlen=_HISTORY_MAXLEN)
-        self.current_status = None
         self.broadcaster = None
         self.scheduler_manager = None
         self.settings = None
-        self.subprocess_pipe: subprocess.Popen | None = None
         self.update_status: dict | None = None
         self.update_info: dict | None = None
         # 运行时状态（合并自 maa_worker/runtime.py）
-        self.context: WorkerContext | None = None
         self.device = DeviceRuntimeState()
         self.task = TaskRuntimeState()
         self.agent = AgentRuntimeState()
@@ -154,11 +137,8 @@ class AppState:
         self.system_scheduler = None
         self.scheduler_db_path = Path("config") / "scheduler.sqlite"
 
-    def send_event(self, event: RealtimeEvent):
-        self.message_conn.put(event)
-
     def send_log(self, msg: str):
-        self.send_event(build_log_event(msg))
+        self.message_conn.put(build_log_event(msg))
 
     def set_update_in_progress(self) -> None:
         self.update_in_progress = True

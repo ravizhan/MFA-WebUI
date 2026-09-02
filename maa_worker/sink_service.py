@@ -14,7 +14,7 @@ from maa_worker.focus_processor import FocusEventProcessor
 from maa_worker.focus_protocol import UnifiedFocusResolver
 
 if TYPE_CHECKING:
-    from maa_utils import MaaWorker
+    from maa_worker.event_service import EventService
 
 
 # ---------------------------------------------------------------------------
@@ -57,10 +57,9 @@ class MWUContextSink(_SinkBase):
 class SinkHandler:
     """将 MAA 底层回调通过 UnifiedFocusResolver → FocusEventProcessor 统一处理。"""
 
-    def __init__(self, worker: "MaaWorker"):
-        self.worker = worker
+    def __init__(self, events: "EventService"):
         self._resolver = UnifiedFocusResolver()
-        self._processor = FocusEventProcessor(worker.events)
+        self._processor = FocusEventProcessor(events)
 
     def on_event(self, msg: str, details: dict) -> None:
         """统一的 sink 事件入口。
@@ -82,7 +81,6 @@ class SinkService:
     """统一管理 Resource / Controller / Tasker / Context 四类 sink 的注册和清理。"""
 
     def __init__(self, handler: SinkHandler):
-        self._handler = handler
         self._resource_sink = MWUResourceSink(handler)
         self._controller_sink = MWUControllerSink(handler)
         self._tasker_sink = MWUTaskerSink(handler)

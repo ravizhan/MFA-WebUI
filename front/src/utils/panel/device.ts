@@ -44,15 +44,11 @@ export function getStoredDeviceIdentity(stored: PanelLastConnectedDevice): strin
   return `${stored.hWnd}|${stored.gamepad_type}`
 }
 
-/** Prefer controller_name when present; fall back to type for legacy snapshots. */
 export function storedDeviceMatchesController(
   stored: PanelLastConnectedDevice,
-  capability: Pick<DeviceControllerCapability, "name" | "type">,
+  capability: Pick<DeviceControllerCapability, "name">,
 ): boolean {
-  if (stored.controller_name) {
-    return stored.controller_name === capability.name
-  }
-  return stored.type === capability.type
+  return stored.controller_name === capability.name
 }
 
 /** Match by identity first, then fingerprint (scan may enrich a saved custom device). */

@@ -24,7 +24,7 @@
       />
       <TaskSelectList
         :tasks="configStore.taskList"
-        :selected-tasks="selectedTaskIds"
+        :selected-tasks="configStore.selectedTaskIds"
         :controller-name="deviceStore.selectedControllerName"
         :resource-name="deviceStore.resource"
         :hide-incompatible="true"
@@ -173,10 +173,6 @@ onUnmounted(() => {
   resizeObserver?.disconnect()
   resizeObserver = null
 })
-
-const selectedTaskIds = computed(() =>
-  configStore.taskList.filter((task) => task.checked).map((task) => task.id),
-)
 
 function handleTasksUpdate(tasks: TaskListItem[]) {
   configStore.taskList = tasks

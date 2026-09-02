@@ -1,11 +1,5 @@
-"""Tests for scheduler_manager.py（重写后契约）— 唤醒先行 CRUD 顺序与触发器 round-trip。
+"""SchedulerManager CRUD、原生唤醒顺序与触发器往返测试。"""
 
-构造签名按冻结契约：``SchedulerManager(state, db_path, system_scheduler=None)``、
-``initialize(paused=True)``。若文件尚未完成重写（旧版签名），本模块整体跳过，
-由外部运行方决定重试或仅运行其余测试文件。
-"""
-
-import inspect
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -14,21 +8,14 @@ from apscheduler.triggers.cron import CronTrigger
 from pydantic import ValidationError
 
 from app_state import AppState
-from models.scheduler import CronTriggerConfig, ScheduledTaskCreate, ScheduledTaskUpdate
-from scheduler_manager import SchedulerManager
+from models.scheduler import (
+    CronTriggerConfig,
+    PreTaskCommand,
+    ScheduledTaskCreate,
+    ScheduledTaskUpdate,
+)
+from scheduler_manager import SchedulerManager, _build_task_from_kwargs
 from services.system_scheduler import ConvergeReport
-
-# 契约守卫：scheduler_manager.py 完成重写前（旧版无参构造函数/initialize 无 paused
-# 参数）不运行本文件，避免 TypeError 污染其余测试结果。
-if (
-    "system_scheduler" not in inspect.signature(SchedulerManager.__init__).parameters
-    or "paused" not in inspect.signature(SchedulerManager.initialize).parameters
-):
-    pytest.skip(
-        "scheduler_manager.py 尚未按新契约重写（缺少 system_scheduler 构造参数/"
-        "initialize(paused=...)），本文件暂不运行",
-        allow_module_level=True,
-    )
 
 
 def make_create(
@@ -138,10 +125,17 @@ class TestTriggerRoundTrip:
         dow_field = next(f for f in trigger.fields if f.name == "day_of_week")
         assert str(dow_field) == "0"
 
-        trigger_type, decoded = mgr._build_trigger_config(trigger)
-        assert trigger_type == "cron"
+        decoded = mgr._build_trigger_config(trigger)
         assert isinstance(decoded, CronTriggerConfig)
         assert decoded.cron == "0 9 * * 1"
+
+    @pytest.mark.parametrize("day_of_week", ["0-4", "0,2", "*/2", "mon-fri"])
+    async def test_legacy_composite_dow_decode_rejected(self, manager_env, day_of_week):
+        mgr, _state, _system_scheduler = manager_env
+        trigger = CronTrigger(minute=0, hour=9, day_of_week=day_of_week)
+
+        with pytest.raises(ValueError):
+            mgr._build_trigger_config(trigger)
 
     def test_composite_dow_rejected_by_unified_subset(self):
         # 统一子集下复合 DOW（范围/列表/步进）不再合法，创建时即拒绝
@@ -151,6 +145,66 @@ class TestTriggerRoundTrip:
             CronTriggerConfig(cron="0 9 * * 1,3,5")
         with pytest.raises(ValidationError):
             CronTriggerConfig(cron="0 9 * * */2")
+
+
+class TestLegacyPayloadCutover:
+    def test_build_task_ignores_legacy_pre_tasks_key(self):
+        trigger_config = CronTriggerConfig(cron="0 9 * * *")
+
+        legacy = _build_task_from_kwargs(
+            "legacy",
+            {"task_name": "Legacy", "preTasks": [{"command": "echo legacy"}]},
+            trigger_config,
+        )
+        canonical = _build_task_from_kwargs(
+            "canonical",
+            {"task_name": "Canonical", "pre_tasks": [{"command": "echo ok"}]},
+            trigger_config,
+        )
+
+        assert legacy.preTasks == []
+        assert len(canonical.preTasks) == 1
+        assert isinstance(canonical.preTasks[0], PreTaskCommand)
+        assert canonical.preTasks[0].command == "echo ok"
+
+    async def test_update_ignores_legacy_pre_tasks_kwargs(self, manager_env):
+        mgr, _state, _system_scheduler = manager_env
+        task = await mgr.create_task(make_create("旧前置任务"))
+        job = mgr.scheduler.get_job(task.id)
+        assert job is not None
+        legacy_kwargs = dict(job.kwargs)
+        legacy_kwargs.pop("pre_tasks")
+        legacy_kwargs["preTasks"] = [{"command": "echo legacy"}]
+        mgr.scheduler.modify_job(task.id, kwargs=legacy_kwargs)
+
+        updated = await mgr.update_task(
+            task.id, ScheduledTaskUpdate(description="已更新")
+        )
+
+        assert updated is not None
+        assert updated.preTasks == []
+        updated_job = mgr.scheduler.get_job(task.id)
+        assert updated_job is not None
+        assert updated_job.kwargs["pre_tasks"] == []
+        assert "preTasks" not in updated_job.kwargs
+
+    async def test_update_rejects_legacy_trigger_without_mutation(self, manager_env):
+        mgr, _state, _system_scheduler = manager_env
+        task = await mgr.create_task(make_create("旧触发器"))
+        legacy_trigger = CronTrigger(minute=0, hour=9, day_of_week="mon-fri")
+        mgr.scheduler.modify_job(task.id, trigger=legacy_trigger)
+        job = mgr.scheduler.get_job(task.id)
+        assert job is not None
+        original_trigger = str(job.trigger)
+        original_kwargs = dict(job.kwargs)
+
+        with pytest.raises(ValueError):
+            await mgr.update_task(task.id, ScheduledTaskUpdate(description="不得写入"))
+
+        unchanged_job = mgr.scheduler.get_job(task.id)
+        assert unchanged_job is not None
+        assert str(unchanged_job.trigger) == original_trigger
+        assert unchanged_job.kwargs == original_kwargs
 
 
 class TestUpdateTaskWakeup:
