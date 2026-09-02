@@ -125,7 +125,7 @@ jobs:
           cache-dependency-path: "updater/go.sum"
 
       - name: Install Dependencies
-        run: uv sync --build
+        run: uv sync --group build
 
       - name: Setup Environment Variables
         shell: bash
