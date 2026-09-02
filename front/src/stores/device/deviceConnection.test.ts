@@ -1194,15 +1194,70 @@ describe("useDeviceConnectionStore", () => {
       setIntervalSpy.mockRestore()
     })
 
-    it("cleanup clears timer and resets initialized", () => {
+    it("schedules task config saves only after config loading", async () => {
       const store = useDeviceConnectionStore()
       const settingsStore = useSettingsStore()
+      const configStore = useTaskConfigStore()
       settingsStore.initialized = true
+      configStore.configLoaded = true
+      const saveSpy = vi.spyOn(configStore, "debouncedSave").mockImplementation(() => {})
+
+      store.init()
+      configStore.taskList = [{ id: "task1", name: "Task 1", order: 0, checked: true }]
+      await nextTick()
+      expect(saveSpy).toHaveBeenCalledTimes(1)
+
+      configStore.options = { task1: { mode: "safe" } }
+      await nextTick()
+      expect(saveSpy).toHaveBeenCalledTimes(2)
+
+      configStore.preTasks = [{ id: "pre1", command: "echo hi", enabled: true, timeout: 30 }]
+      await nextTick()
+      expect(saveSpy).toHaveBeenCalledTimes(3)
+
+      configStore.selectedPresetName = "preset1"
+      await nextTick()
+      expect(saveSpy).toHaveBeenCalledTimes(4)
+
+      configStore.configLoaded = false
+      configStore.options = { task1: { mode: "fast" } }
+      await nextTick()
+      expect(saveSpy).toHaveBeenCalledTimes(4)
+    })
+
+    it("cleanup stops timers and all six watchers", async () => {
+      const store = useDeviceConnectionStore()
+      const settingsStore = useSettingsStore()
+      const indexStore = useIndexStore()
+      const configStore = useTaskConfigStore()
+      settingsStore.initialized = true
+      configStore.configLoaded = true
+      configStore.taskList = [{ id: "initial", name: "Initial", order: 0, checked: true }]
+      indexStore.Connected = true
+      store.isDeviceResourceLocked = true
+      const saveSpy = vi.spyOn(configStore, "debouncedSave").mockImplementation(() => {})
+
       store.init()
       expect(store.deviceStatePollTimer).not.toBeNull()
       store.cleanup()
+      saveSpy.mockClear()
+      indexStore.SelectTask("sentinel")
+
+      configStore.taskList = [
+        { id: "first", name: "First", order: 0, checked: true },
+        { id: "second", name: "Second", order: 1, checked: false },
+      ]
+      configStore.options = { first: { mode: "safe" } }
+      configStore.preTasks = [{ id: "pre1", command: "echo hi", enabled: true, timeout: 30 }]
+      configStore.selectedPresetName = "preset1"
+      indexStore.Connected = false
+      await nextTick()
+
       expect(store.deviceStatePollTimer).toBeNull()
       expect(store.initialized).toBe(false)
+      expect(saveSpy).not.toHaveBeenCalled()
+      expect(indexStore.SelectedTaskID).toBe("sentinel")
+      expect(store.isDeviceResourceLocked).toBe(true)
     })
   })
 

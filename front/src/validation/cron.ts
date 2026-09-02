@@ -79,8 +79,6 @@ export const cronExpressionSchema = z
     { message: "cron does not meet strict scheduling requirements" },
   )
 
-export type CronExpression = z.output<typeof cronExpressionSchema>
-
 const FULL_MINUTE = new Set(Array.from({ length: 60 }, (_, i) => i))
 const FULL_HOUR = new Set(Array.from({ length: 24 }, (_, i) => i))
 const FULL_DAY = new Set(Array.from({ length: 31 }, (_, i) => i + 1))

@@ -158,17 +158,9 @@ class TestNormalizeRawSnapshot:
         assert result["taskOrder"] == ["a", "b"]
         assert result["taskChecked"]["a"] is True
 
-    def test_pre_tasks_fallback(self):
-        """pre_tasks (with underscore) is used as fallback."""
+    def test_legacy_pre_tasks_key_is_ignored(self):
         result = _normalize_raw_snapshot({"pre_tasks": [{"command": "echo hi"}]})
-        assert len(result["preTasks"]) == 1
-        # id is a generated UUID (not empty string)
-        assert (
-            isinstance(result["preTasks"][0]["id"], str)
-            and len(result["preTasks"][0]["id"]) > 0
-        )
-        assert result["preTasks"][0]["command"] == "echo hi"
-        assert result["preTasks"][0]["enabled"] is True
+        assert result["preTasks"] == []
 
 
 # ---------------------------------------------------------------------------

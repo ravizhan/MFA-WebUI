@@ -5,6 +5,7 @@
 """
 
 from dataclasses import dataclass
+from typing import cast
 
 from pydantic import TypeAdapter
 
@@ -65,21 +66,9 @@ def parse_native_cron(cron: str) -> NativeCron:
     day = _scalar_or_none(day_set, full_day, "day")
     month = _scalar_or_none(month_set, full_month, "month")
     dow = _scalar_or_none(dow_set, full_dow, "dow")
-
-    if minute is None:
-        raise ValueError("minute field must be a single value, not *")
-    if day is not None and dow is not None:
-        raise ValueError("day and day-of-week cannot both be restricted")
-    if hour is None and (day is not None or month is not None or dow is not None):
-        raise ValueError("when hour is *, day/month/dow must all be *")
-    if month is not None and day is None:
-        raise ValueError("when month is restricted, day must also be restricted")
-    if month is not None and day is not None:
-        max_day = (31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31)
-        if day > max_day[month - 1]:
-            raise ValueError(f"month {month} has no day {day}")
-
-    return NativeCron(minute=minute, hour=hour, day=day, month=month, dow=dow)
+    return NativeCron(
+        minute=cast(int, minute), hour=hour, day=day, month=month, dow=dow
+    )
 
 
 def _scalar_or_none(field_set: set[int], full_set: set[int], name: str) -> int | None:

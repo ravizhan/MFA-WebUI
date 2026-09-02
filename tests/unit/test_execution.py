@@ -277,7 +277,7 @@ def _column_names(db_path: Path) -> set[str]:
 
 
 class TestSqlitePersistence:
-    def test_init_db_creates_table_with_new_columns(self, tmp_path: Path):
+    def test_init_db_creates_live_columns(self, tmp_path: Path):
         db_path = tmp_path / "executions.sqlite"
 
         init_db(db_path)
@@ -287,10 +287,10 @@ class TestSqlitePersistence:
         for column in (
             "origin",
             "occurrence_id",
-            "blocker_run_id",
             "blocker_task_name",
         ):
             assert column in columns
+        assert "blocker_run_id" not in columns
 
     def test_init_db_is_idempotent(self, tmp_path: Path):
         db_path = tmp_path / "executions.sqlite"

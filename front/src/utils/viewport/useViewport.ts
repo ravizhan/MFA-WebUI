@@ -49,11 +49,9 @@ export function useViewport() {
   })
 
   const isMobile = computed(() => viewportWidth.value < MOBILE_BREAKPOINT)
-  const isDesktop = computed(() => viewportWidth.value >= DESKTOP_BREAKPOINT)
 
   return {
     width: readonly(viewportWidth),
     isMobile,
-    isDesktop,
   }
 }

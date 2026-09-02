@@ -168,10 +168,12 @@ describe("SSEClient", () => {
       client.close()
     })
 
-    it("normalizes legacy payload format (type instead of event)", () => {
+    it("ignores legacy type when event is absent", () => {
       const client = new SSEClient("/api/logs")
-      const listener = vi.fn<() => void>()
-      client.addEventListener("custom", listener)
+      const customListener = vi.fn<() => void>()
+      const logListener = vi.fn<() => void>()
+      client.addEventListener("custom", customListener)
+      client.addEventListener("log", logListener)
 
       const instance = getESInstance()
       instance.onmessage?.({
@@ -183,9 +185,10 @@ describe("SSEClient", () => {
         }),
       })
 
-      expect(listener).toHaveBeenCalledWith(
+      expect(customListener).not.toHaveBeenCalled()
+      expect(logListener).toHaveBeenCalledWith(
         expect.objectContaining({
-          event: "custom",
+          event: "log",
           level: "success",
           message: "legacy format",
         }),

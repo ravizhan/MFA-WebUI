@@ -31,7 +31,7 @@ function extractStringArray(data: unknown, key: string): string[] {
 
 function extractEventType(data: unknown): RealtimeEventName {
   if (!isRecord(data)) return "log"
-  const raw = ("event" in data ? data.event : data.type) ?? "log"
+  const raw = data.event
   return isRealtimeEventName(raw) ? raw : "log"
 }
 

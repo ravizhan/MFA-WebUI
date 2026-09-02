@@ -63,7 +63,6 @@ def init_db(path: Path) -> None:
                 origin TEXT NOT NULL DEFAULT 'in_app',
                 occurrence_id TEXT,
                 status TEXT NOT NULL,
-                blocker_run_id TEXT,
                 blocker_task_name TEXT,
                 error_message TEXT,
                 started_at TEXT NOT NULL,
@@ -114,9 +113,9 @@ def add_execution(path: Path, execution: TaskExecution) -> None:
             """
             INSERT INTO scheduler_executions
             (id, task_id, task_name, origin, occurrence_id,
-             status, blocker_run_id, blocker_task_name, error_message,
+             status, blocker_task_name, error_message,
              started_at, finished_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 execution.id,
@@ -125,7 +124,6 @@ def add_execution(path: Path, execution: TaskExecution) -> None:
                 execution.origin,
                 execution.occurrence_id,
                 execution.status,
-                None,
                 execution.blocker_task_name,
                 execution.error_message,
                 _to_iso(execution.started_at),

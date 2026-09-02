@@ -184,18 +184,18 @@ describe("storedDeviceMatchesController", () => {
       type: "Adb",
       controller_name: "adb",
     } as PanelLastConnectedDevice
-    expect(storedDeviceMatchesController(stored, { name: "adb", type: "Adb" })).toBe(true)
-    expect(storedDeviceMatchesController(stored, { name: "other", type: "Adb" })).toBe(false)
+    expect(storedDeviceMatchesController(stored, { name: "adb" })).toBe(true)
+    expect(storedDeviceMatchesController(stored, { name: "other" })).toBe(false)
   })
 
-  it("falls back to type when controller_name is empty", () => {
+  it("does not match by type when controller_name is empty", () => {
     // eslint-disable-next-line @typescript-eslint/consistent-type-assertions
     const stored = {
       type: "Win32",
       controller_name: "",
     } as PanelLastConnectedDevice
-    expect(storedDeviceMatchesController(stored, { name: "win32", type: "Win32" })).toBe(true)
-    expect(storedDeviceMatchesController(stored, { name: "adb", type: "Adb" })).toBe(false)
+    expect(storedDeviceMatchesController(stored, { name: "win32" })).toBe(false)
+    expect(storedDeviceMatchesController(stored, { name: "adb" })).toBe(false)
   })
 })
 

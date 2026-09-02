@@ -8,7 +8,7 @@ import asyncio
 import logging
 import uuid
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -62,46 +62,6 @@ def _decode_trigger_config(raw: Any) -> TriggerConfig:
     return _TriggerConfigAdapter.validate_python(raw)
 
 
-def _map_dow_components(dow: str, mapper: Any) -> str:
-    """将星期复合表达式中的数值端点经 mapper 逐组件映射。
-
-    按 ``,`` 拆分独立组件，依次处理单个数值、范围 ``a-b``、步进 ``*/n`` /
-    ``a-b/n``（步进部分原样保留）；名称（mon-fri 等）原样透传。
-    用于 Unix 星期（0/7=周日）↔ APS 星期（0=周一）的双向对称换算。
-    """
-    parts = dow.split(",")
-    mapped = []
-    for part in parts:
-        if "/" in part:
-            head, step = part.split("/", 1)
-        else:
-            head, step = part, None
-        if head == "*":
-            body = "*"
-        elif head.isdigit():
-            body = str(mapper(int(head)))
-        elif "-" in head and all(ch.isdigit() for ch in head.split("-")):
-            a, b = head.split("-", 1)
-            body = f"{mapper(int(a))}-{mapper(int(b))}"
-        else:
-            body = head  # 名称（mon-fri 等），原样透传
-        mapped.append(f"{body}/{step}" if step is not None else body)
-    return ",".join(mapped)
-
-
-def _aps_to_unix_day_of_week(dow: str) -> str:
-    """Convert APS weekday values back to Unix values.
-
-    New triggers contain only numeric values or ``*``. The component mapper is
-    retained for reading older persisted jobs containing ranges, lists, or steps.
-    """
-    if dow.isdigit():
-        return str(aps_dow_to_unix(int(dow)))
-    if dow == "*":
-        return dow
-    return _map_dow_components(dow, aps_dow_to_unix)
-
-
 def _build_task_from_kwargs(
     job_id: str, kwargs: dict, trigger_config: TriggerConfig
 ) -> ScheduledTask:
@@ -121,7 +81,7 @@ def _build_task_from_kwargs(
         trigger_config=trigger_config,
         task_list=kwargs.get("task_list", []) or [],
         task_options=kwargs.get("task_options", {}) or {},
-        preTasks=kwargs.get("pre_tasks") or kwargs.get("preTasks") or [],
+        preTasks=kwargs.get("pre_tasks", []) or [],
         controller_name=kwargs.get("controller_name"),
         device=device,
         resource_name=kwargs.get("resource_name"),
@@ -266,14 +226,12 @@ class SchedulerManager:
         else:
             raise ValueError(f"未知的触发器类型: {type(trigger_config)}")
 
-    def _build_trigger_config(
-        self, trigger
-    ) -> tuple[Literal["cron", "date", "interval"], TriggerConfig]:
-        """从 APScheduler trigger 重建触发器类型与配置"""
+    def _build_trigger_config(self, trigger) -> TriggerConfig:
+        """从 APScheduler trigger 重建触发器配置"""
         if isinstance(trigger, CronTrigger):
             field_map = {field.name: str(field) for field in trigger.fields}
             aps_dow = field_map.get("day_of_week", "*")
-            unix_dow = _aps_to_unix_day_of_week(aps_dow)
+            unix_dow = aps_dow if aps_dow == "*" else str(aps_dow_to_unix(int(aps_dow)))
             cron_text = " ".join(
                 [
                     field_map.get("minute", "*"),
@@ -284,13 +242,13 @@ class SchedulerManager:
                 ]
             )
             # 统一校验（PortableCronStr 严格子集）在模型层执行，roundtrip 恒等
-            return "cron", CronTriggerConfig(cron=cron_text)
+            return CronTriggerConfig(cron=cron_text)
 
         if isinstance(trigger, DateTrigger):
             run_date = getattr(trigger, "run_date", None)
             if run_date is None:
                 raise ValueError("DateTrigger 缺少 run_date")
-            return "date", DateTriggerConfig(run_date=run_date)
+            return DateTriggerConfig(run_date=run_date)
 
         if isinstance(trigger, IntervalTrigger):
             interval = getattr(trigger, "interval", None)
@@ -304,7 +262,7 @@ class SchedulerManager:
             hours, remainder = divmod(remainder, 60 * 60)
             minutes, seconds = divmod(remainder, 60)
 
-            return "interval", IntervalTriggerConfig(
+            return IntervalTriggerConfig(
                 weeks=weeks or None,
                 days=days or None,
                 hours=hours or None,
@@ -442,7 +400,7 @@ class SchedulerManager:
             return None
 
         try:
-            _, trigger_config = self._build_trigger_config(job.trigger)
+            trigger_config = self._build_trigger_config(job.trigger)
             task = _build_task_from_kwargs(job.id, job.kwargs or {}, trigger_config)
             task.enabled = job.next_run_time is not None
             task.next_run_time = job.next_run_time
@@ -468,7 +426,7 @@ class SchedulerManager:
 
         for job in jobs:
             try:
-                _, trigger_config = self._build_trigger_config(job.trigger)
+                trigger_config = self._build_trigger_config(job.trigger)
                 task = _build_task_from_kwargs(job.id, job.kwargs or {}, trigger_config)
                 task.enabled = job.next_run_time is not None
                 task.next_run_time = job.next_run_time
@@ -521,13 +479,7 @@ class SchedulerManager:
             # 获取当前任务信息
             current_kwargs = job.kwargs or {}
 
-            try:
-                _, current_trigger_config = self._build_trigger_config(job.trigger)
-            except Exception as e:
-                logger.warning(
-                    f"重建任务 {task_id} 的当前触发器配置失败，使用默认 cron 配置: {e}"
-                )
-                current_trigger_config = CronTriggerConfig(cron="* * * * *")
+            current_trigger_config = self._build_trigger_config(job.trigger)
 
             # 合并更新数据
             new_name = (
@@ -553,8 +505,7 @@ class SchedulerManager:
             new_pre_tasks = (
                 task_update.preTasks
                 if task_update.preTasks is not None
-                else current_kwargs.get("preTasks", [])
-                or current_kwargs.get("pre_tasks", [])
+                else current_kwargs.get("pre_tasks", [])
             )
             # Use model_fields_set to distinguish "field omitted" (keep current)
             # from "field set to None/false" (explicitly clear).

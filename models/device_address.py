@@ -117,15 +117,6 @@ def canonicalize_runtime_device_address(device_type: str, address: str) -> str:
     raise ValueError(f"unsupported device type: {device_type}")
 
 
-def try_canonicalize_custom_device_address(
-    device_type: str, address: str
-) -> str | None:
-    try:
-        return canonicalize_custom_device_address(device_type, address)
-    except (ValueError, TypeError):
-        return None
-
-
 def try_canonicalize_runtime_device_address(
     device_type: str, address: str
 ) -> str | None:

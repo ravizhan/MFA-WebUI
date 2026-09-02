@@ -31,7 +31,7 @@
           </main>
 
           <!-- Dock nav (mobile) -->
-          <AppDock :items="navItems" :active-key="menuValue" @select="onDockSelect" />
+          <AppDock :items="navItems" :active-key="menuValue" @select="onMenuSelect" />
 
           <!-- Update dialog -->
           <UpdateDialog v-model:show="showUpdateDialog" :update-info="updateInfo" />
@@ -57,7 +57,7 @@ import {
 import markdownAutoHref from "github-markdown-css/github-markdown.css?url"
 import markdownDarkHref from "github-markdown-css/github-markdown-dark.css?url"
 import markdownLightHref from "github-markdown-css/github-markdown-light.css?url"
-import AppDock, { type DockItem } from "@/app/AppDock.vue"
+import AppDock from "@/app/AppDock.vue"
 import AppMain from "@/app/AppMain.vue"
 import AppNavbar from "@/app/AppNavbar.vue"
 import UpdateDialog from "@/components/settings/dialogs/UpdateDialog.vue"
@@ -78,25 +78,22 @@ const name = computed(() => interfaceStore.interface?.name || "MWU")
 const { theme, themeOverrides, locale, dateLocale } = useNaiveTheme()
 
 const navItems = computed(() => [
-  { key: "home", label: t("nav.home"), iconComponent: HomeOutline, to: { name: "home" } },
-  { key: "tasks", label: t("nav.tasks"), iconComponent: ListOutline, to: { name: "tasks" } },
+  { key: "home", label: t("nav.home"), iconComponent: HomeOutline },
+  { key: "tasks", label: t("nav.tasks"), iconComponent: ListOutline },
   {
     key: "logs",
     label: t("nav.logs"),
     iconComponent: DocumentTextOutline,
-    to: { name: "logs" },
   },
   {
     key: "routines",
     label: t("nav.routines"),
     iconComponent: TimeOutline,
-    to: { name: "routines" },
   },
   {
     key: "settings",
     label: t("nav.settings"),
     iconComponent: SettingsOutline,
-    to: { name: "settings" },
   },
 ])
 
@@ -112,10 +109,6 @@ const menuOptions = computed<MenuOption[]>(() =>
 
 function onMenuSelect(key: string) {
   void router.push({ name: key })
-}
-
-function onDockSelect(item: DockItem) {
-  void router.push({ name: item.key })
 }
 
 function toggleDarkMode() {

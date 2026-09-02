@@ -5,7 +5,7 @@ import { customDeviceAddressSchema } from "@/validation/device"
 import { resolveInterfaceText } from "@/utils/interface/content"
 import { getDevices, getResource, postCustomDevice } from "@/services/api"
 import type { ConnectableDevice, DeviceControllerType, ResourceInfo } from "@/services/api"
-import { buildDeviceLabel } from "@/utils/panel/device"
+import { buildDeviceLabel, getDeviceIdentity, getStoredDeviceIdentity } from "@/utils/panel/device"
 import { showGlobalMessage } from "@/services/feedback/message"
 import { tryCatch } from "@/utils/tryCatch"
 import type { PanelLastConnectedDevice } from "@/types/settingsModel"
@@ -33,32 +33,6 @@ function isDeviceControllerType(type: string): type is DeviceControllerType {
     type === "PlayCover" ||
     type === "WlRoots"
   )
-}
-
-function getDeviceAddressValue(device: ConnectableDevice): string {
-  if (device.type === "Adb") {
-    return device.address
-  }
-  if (device.type === "Win32") {
-    return String(device.hWnd)
-  }
-  if (device.type === "Gamepad") {
-    return `${device.hWnd}|${device.gamepad_type}`
-  }
-  return device.address
-}
-
-function getStoredDeviceAddress(device: PanelLastConnectedDevice): string {
-  if (device.type === "Adb") {
-    return device.address
-  }
-  if (device.type === "Win32") {
-    return String(device.hWnd)
-  }
-  if (device.type === "Gamepad") {
-    return `${device.hWnd}|${device.gamepad_type}`
-  }
-  return device.address
 }
 
 function buildStoredDeviceLabel(device: PanelLastConnectedDevice): string {
@@ -117,7 +91,7 @@ export function useTaskEnvironment(
 
     const options = new Map<string, { label: string; value: string }>()
     for (const device of availableDevices.value) {
-      const value = getDeviceAddressValue(device)
+      const value = getDeviceIdentity(device)
       options.set(value, { label: buildDeviceLabel(device), value })
     }
 
@@ -126,7 +100,7 @@ export function useTaskEnvironment(
       if (device.controller_name !== formData.value.controller_name) {
         continue
       }
-      const value = getStoredDeviceAddress(device)
+      const value = getStoredDeviceIdentity(device)
       if (options.has(value)) {
         continue
       }

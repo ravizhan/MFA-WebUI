@@ -4,19 +4,10 @@ import {
   darkModeSchema,
   localeSchema,
   makeRuntimeNumberSchema,
-  notificationMethodSchema,
   updateChannelSchema,
 } from "./settings"
 
 describe("enum schemas", () => {
-  it("notificationMethodSchema accepts valid", () => {
-    expect(notificationMethodSchema.safeParse("all").success).toBe(true)
-  })
-
-  it("notificationMethodSchema rejects invalid", () => {
-    expect(notificationMethodSchema.safeParse("invalid").success).toBe(false)
-  })
-
   it("updateChannelSchema accepts stable", () => {
     expect(updateChannelSchema.safeParse("stable").success).toBe(true)
   })

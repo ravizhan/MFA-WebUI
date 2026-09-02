@@ -193,6 +193,11 @@ export const useTaskConfigStore = defineStore("taskConfig", {
     saveTimer: null,
     preTasks: [],
   }),
+  getters: {
+    selectedTaskIds(state): string[] {
+      return state.taskList.filter((task) => task.checked).map((task) => task.id)
+    },
+  },
   actions: {
     normalizeTaskIds(taskIds: string[]): string[] {
       const interfaceStore = useInterfaceStore()

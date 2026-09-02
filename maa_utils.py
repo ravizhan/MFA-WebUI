@@ -38,9 +38,7 @@ class MaaWorker:
         self.tasker = Tasker()
         self.http_client = httpx.Client(timeout=30)
 
-        # 运行时状态并入 AppState（单例）
-        state.context = WorkerContext(interface_base_dir=self._resolve_app_root())
-        self.context = state.context
+        self.context = WorkerContext(interface_base_dir=self._resolve_app_root())
         self.device_state = state.device
         self.task_state = state.task
         self.agent_state = state.agent
@@ -54,8 +52,7 @@ class MaaWorker:
         self.pretasks = PretaskService(self)
         self.tasks = TaskService(self)
 
-        self._sink_handler = SinkHandler(self)
-        self.sinks = SinkService(self._sink_handler)
+        self.sinks = SinkService(SinkHandler(self.events))
         self.sinks.register_all(self.resource, self.tasker)
 
         self.events.send_log("MAA初始化成功")

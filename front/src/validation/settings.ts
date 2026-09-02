@@ -1,11 +1,5 @@
 import { z } from "zod"
 
-export const notificationMethodSchema = z.enum(["all", "error", "none"])
-export type NotificationMethod = z.output<typeof notificationMethodSchema>
-
-export const notificationContentTypeSchema = z.enum(["all", "error", "none"])
-export type NotificationContentType = z.output<typeof notificationContentTypeSchema>
-
 export const updateChannelSchema = z.enum(["stable", "beta"])
 export type UpdateChannel = z.output<typeof updateChannelSchema>
 
