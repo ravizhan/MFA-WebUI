@@ -58,6 +58,7 @@ class TaskService:
         options: TaskOptionsByTask,
         task_name: str | None = None,
         pre_tasks: list[PreTaskCommand] | None = None,
+        global_options: dict[str, TaskOptionValue] | None = None,
     ) -> bool:
         self.worker.task_state.last_error = None
         if not self.worker.device_state.connected:
@@ -143,6 +144,7 @@ class TaskService:
                     filtered_task_list,
                     copy.deepcopy(cleaned_options),
                     pre_tasks or [],
+                    copy.deepcopy(global_options or {}),
                 ),
                 daemon=True,
             )
@@ -164,6 +166,7 @@ class TaskService:
         task_list: list[str],
         options: TaskOptionsByTask,
         pre_tasks: list[PreTaskCommand] | None = None,
+        global_options: dict[str, TaskOptionValue] | None = None,
     ):
         state = self.worker.task_state
         state.pre_tasks = pre_tasks or []
@@ -181,6 +184,7 @@ class TaskService:
                 pipeline_override = self.worker.pipeline.build_task_pipeline_override(
                     task,
                     options.get(task, {}),
+                    global_options or {},
                 )
                 if pipeline_override:
                     task_result = self.worker.tasker.post_task(task, pipeline_override)

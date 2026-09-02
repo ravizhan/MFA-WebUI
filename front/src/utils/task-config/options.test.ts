@@ -111,6 +111,20 @@ describe("buildDefaultsFromOptionMap", () => {
     })
   })
 
+  it("builds object defaults for hotkey types", () => {
+    const optionMap: Record<string, Option> = {
+      shortcuts: {
+        type: "hotkey",
+        hotkeys: [{ name: "start", default: "Ctrl+S" }, { name: "stop" }],
+      },
+    }
+
+    const result = buildDefaultsFromOptionMap(optionMap)
+    expect(result).toEqual({
+      shortcuts: { start: "Ctrl+S", stop: "" },
+    })
+  })
+
   it("builds defaults for switch types", () => {
     const optionMap: Record<string, Option> = {
       toggle: {

@@ -2,14 +2,14 @@
 
 Single source of truth for device address validation and normalization.
 Custom (user-entered) addresses are strict; runtime (scanned) addresses
-are lenient for Adb (USB serials) but strict for PlayCover/Win32/Gamepad.
+are lenient for Adb (USB serials) but strict for PlayCover/Win32/Gamepad/WlRoots.
 """
 
 import re
 from ipaddress import IPv4Address
 from typing import Literal
 
-DeviceType = Literal["Adb", "Win32", "Gamepad", "PlayCover"]
+DeviceType = Literal["Adb", "Win32", "Gamepad", "PlayCover", "WlRoots"]
 
 _IPV4_PORT_PATTERN = re.compile(r"^([^:]+):(\d+)$")
 
@@ -46,12 +46,17 @@ def canonicalize_custom_device_address(device_type: str, address: str) -> str:
     """Validate and canonicalize a custom (user-entered) device address.
 
     Adb/PlayCover: must be IPv4:port.
+    WlRoots: non-empty Wayland socket path.
     Win32: positive integer hWnd.
     Gamepad: hWnd|type where type is 0 or 1.
     """
     text = str(address).strip()
     if device_type in ("Adb", "PlayCover"):
         return canonicalize_ipv4_port(text)
+    if device_type == "WlRoots":
+        if not text:
+            raise ValueError("WlRoots socket path must not be empty")
+        return text
     if device_type == "Win32":
         if not text.isdigit() or int(text) <= 0:
             raise ValueError("Win32 address must be a positive integer hWnd")
@@ -79,6 +84,7 @@ def canonicalize_runtime_device_address(device_type: str, address: str) -> str:
     PlayCover: must be IPv4:port.
     Win32: positive integer hWnd.
     Gamepad: hWnd|type where type is 0 or 1.
+    WlRoots: non-empty Wayland socket path.
     """
     text = str(address).strip()
     if device_type == "Adb":
@@ -87,6 +93,10 @@ def canonicalize_runtime_device_address(device_type: str, address: str) -> str:
         return text
     if device_type == "PlayCover":
         return canonicalize_ipv4_port(text)
+    if device_type == "WlRoots":
+        if not text:
+            raise ValueError("WlRoots socket path must not be empty")
+        return text
     if device_type == "Win32":
         if not text.isdigit() or int(text) <= 0:
             raise ValueError("Win32 address must be a positive integer hWnd")

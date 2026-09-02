@@ -3,7 +3,14 @@ import {
   getInterface,
   rescanScanSelectOption as requestRescanScanSelectOption,
 } from "@/services/api"
-import type { InterfaceModel, Option, Preset, Pretask, Task } from "@/types/interfaceModel"
+import type {
+  InterfaceModel,
+  Option,
+  Preset,
+  Pretask,
+  SettingSection,
+  Task,
+} from "@/types/interfaceModel"
 import type { TaskListItem } from "@/types/taskConfigModel"
 
 export const useInterfaceStore = defineStore("interface", {
@@ -21,6 +28,7 @@ export const useInterfaceStore = defineStore("interface", {
     },
     getPresetList: (state): Preset[] => state.interface?.preset || [],
     getPretasks: (state): Pretask[] => state.interface?.pretask || [],
+    getSettingSections: (state): SettingSection[] => state.interface?.setting || [],
   },
   actions: {
     async setInterface() {

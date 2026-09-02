@@ -1,4 +1,5 @@
 import type {
+  HotkeyOption,
   InputOption,
   Option,
   ScanSelectOption,
@@ -39,6 +40,14 @@ function buildInputDefault(option: InputOption): Record<string, string> {
   return inputDefaults
 }
 
+function buildHotkeyDefault(option: HotkeyOption): Record<string, string> {
+  const hotkeyDefaults: Record<string, string> = {}
+  for (const hotkey of option.hotkeys) {
+    hotkeyDefaults[hotkey.name] = hotkey.default ?? ""
+  }
+  return hotkeyDefaults
+}
+
 function buildSwitchDefault(option: SwitchOption): string {
   const defaultValue = option.default_case ?? option.cases[0]?.name ?? ""
   return typeof defaultValue === "string" ? defaultValue : ""
@@ -59,6 +68,11 @@ export function buildDefaultsFromOptionMap(
 
     if (option.type === "input") {
       options[key] = buildInputDefault(option)
+      continue
+    }
+
+    if (option.type === "hotkey") {
+      options[key] = buildHotkeyDefault(option)
       continue
     }
 

@@ -40,6 +40,7 @@
     "networkError": "网络错误，请稍后重试",
     "anchor": {
       "update": "更新设置",
+      "taskSettings": "任务设置",
       "runtime": "运行设置",
       "scheduler": "定时任务",
       "ui": "界面设置",
@@ -79,6 +80,9 @@
         "mirrorchyan": "Mirror酱",
         "github": "GitHub"
       }
+    },
+    "taskSettings": {
+      "empty": "暂无可配置项"
     },
     "runtime": {
       "title": "运行设置",
@@ -268,6 +272,11 @@
       "resetSuccess": "设置已重置为默认值",
       "githubIssues": "GitHub Issues"
     }
+  },
+  "option": {
+    "hotkeyCapturing": "请按下快捷键…",
+    "hotkeyMetaUnsupported": "不支持 Meta、Command 或 Win 组合键",
+    "hotkeyTooManyModifiers": "快捷键最多支持两个修饰键"
   },
   "panel": {
     "device": "设备连接",

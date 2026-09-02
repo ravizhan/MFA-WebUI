@@ -26,7 +26,13 @@ export interface TaskEnvironment {
 }
 
 function isDeviceControllerType(type: string): type is DeviceControllerType {
-  return type === "Adb" || type === "Win32" || type === "Gamepad" || type === "PlayCover"
+  return (
+    type === "Adb" ||
+    type === "Win32" ||
+    type === "Gamepad" ||
+    type === "PlayCover" ||
+    type === "WlRoots"
+  )
 }
 
 function getDeviceAddressValue(device: ConnectableDevice): string {

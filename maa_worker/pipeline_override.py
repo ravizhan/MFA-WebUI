@@ -2,6 +2,7 @@ import copy
 from typing import TYPE_CHECKING, cast
 
 import json_utils as json
+from maa_worker.hotkey import hotkey_value_to_codes
 from models.interface import PipelineOverride
 from models.scheduler import TaskOptionValue
 
@@ -221,6 +222,43 @@ class PipelineOverrideService:
             ),
         )
 
+    def _build_hotkey_override(
+        self,
+        option_name: str,
+        option,
+        options: dict[str, TaskOptionValue],
+        controller_type: str | None,
+    ) -> PipelineOverride:
+        if not option.pipeline_override or not option.hotkeys:
+            return {}
+
+        typed_replacements: dict[str, object] = {}
+        raw_option_value = options.get(option_name)
+        for field in option.hotkeys:
+            raw_text = field.default or ""
+            if isinstance(raw_option_value, dict):
+                field_value = raw_option_value.get(field.name)
+                if isinstance(field_value, str):
+                    raw_text = field_value
+
+            primary_code, modifier1_code, modifier2_code = hotkey_value_to_codes(
+                raw_text,
+                controller_type,
+            )
+            typed_replacements[f"{{{field.name}}}"] = primary_code
+            typed_replacements[f"{{{field.name}.primary}}"] = primary_code
+            typed_replacements[f"{{{field.name}.modifier1}}"] = modifier1_code
+            typed_replacements[f"{{{field.name}.modifier2}}"] = modifier2_code
+
+        return cast(
+            PipelineOverride,
+            self._substitute_placeholders(
+                option.pipeline_override,
+                typed_replacements,
+                {},
+            ),
+        )
+
     def _build_scan_select_override(
         self,
         option_name: str,
@@ -263,6 +301,30 @@ class PipelineOverrideService:
         next_lineage = {*lineage, option_name}
 
         merged: PipelineOverride = {}
+        if option.type == "hotkey":
+            controller_definitions = (
+                self.worker.device.get_active_controller_definitions()
+            )
+            controller_type = (
+                controller_definitions[0].type if controller_definitions else None
+            )
+            if (
+                controller_definitions
+                and controller_type == "WlRoots"
+                and controller_definitions[0].wlroots
+                and controller_definitions[0].wlroots.use_win32_vk_code
+            ):
+                controller_type = "Win32"
+            return self._deep_merge(
+                merged,
+                self._build_hotkey_override(
+                    option_name,
+                    option,
+                    options,
+                    controller_type,
+                ),
+            )
+
         if option.type == "input":
             return self._deep_merge(
                 merged,
@@ -344,6 +406,7 @@ class PipelineOverrideService:
         self,
         task_name: str,
         options: dict[str, TaskOptionValue],
+        global_options: dict[str, TaskOptionValue] | None = None,
     ) -> PipelineOverride:
         task_definition = self._get_current_task_definition(task_name)
         if task_definition is None:
@@ -357,8 +420,15 @@ class PipelineOverrideService:
                 controller_option_names.extend(controller.option)
 
         merged = copy.deepcopy(task_definition.pipeline_override) or {}
+        merged = self._deep_merge(
+            merged,
+            self._build_option_group_override(
+                self.worker.interface.global_option or [],
+                global_options or {},
+                controller_names,
+            ),
+        )
         option_groups = [
-            self.worker.interface.global_option or [],
             resource_definition.option
             if resource_definition and resource_definition.option
             else [],

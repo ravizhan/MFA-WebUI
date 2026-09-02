@@ -1,7 +1,14 @@
 <template>
   <div class="flex w-full max-w-xs items-center gap-2">
     <NSelect v-model:value="value" size="small" class="flex-1" :options="options" />
-    <NButton quaternary circle size="small" :disabled="refreshing" @click="emit('rescan')">
+    <NButton
+      v-if="showRescan"
+      quaternary
+      circle
+      size="small"
+      :disabled="refreshing"
+      @click="emit('rescan')"
+    >
       <template #icon>
         <NIcon size="16" :class="{ 'animate-spin': refreshing }">
           <RefreshOutline />
@@ -15,12 +22,17 @@
 import type { SelectOption } from "naive-ui"
 import { RefreshOutline } from "@vicons/ionicons5"
 
-defineProps<{
+const {
+  options,
+  refreshing = false,
+  showRescan = false,
+} = defineProps<{
   options: SelectOption[]
-  refreshing: boolean
+  refreshing?: boolean
+  showRescan?: boolean
 }>()
 
-const value = defineModel<string | null>("value")
+const value = defineModel<string | null>("value", { required: true })
 
 const emit = defineEmits<{
   (event: "rescan"): void

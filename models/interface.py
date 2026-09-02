@@ -13,6 +13,7 @@ from pydantic import (
 DocumentContent = str | list[str]
 PipelineOverride = dict[str, Any]
 PresetOptionValue = str | list[str] | dict[str, str]
+_UNSUPPORTED_HOTKEY_KEYS = {"META", "SUPER", "WIN", "CMD", "COMMAND"}
 
 
 def validate_regex(v: Any, info: ValidationInfo) -> Any:
@@ -159,6 +160,12 @@ class MacOSController(BaseModel):
         return validate_regex(v, info)
 
 
+class WlRootsController(BaseModel):
+    """WlRoots 控制器配置（仅 Linux）"""
+
+    use_win32_vk_code: bool | None = False
+
+
 class GamepadController(BaseModel):
     """虚拟游戏手柄控制器配置（仅 Windows）"""
 
@@ -211,7 +218,7 @@ class Controller(BaseModel):
     label: str | None = None
     description: str | None = None
     icon: str | None = None
-    type: Literal["Adb", "Win32", "MacOS", "PlayCover", "Gamepad"]
+    type: Literal["Adb", "Win32", "MacOS", "PlayCover", "WlRoots", "Gamepad"]
     display_short_side: int | None = 720
     display_long_side: int | None = None
     display_raw: bool | None = False
@@ -222,6 +229,7 @@ class Controller(BaseModel):
     win32: Win32Controller | None = None
     macos: MacOSController | None = None
     playcover: PlayCoverController | None = None
+    wlroots: WlRootsController | None = None
     gamepad: GamepadController | None = None
 
     @model_validator(mode="after")
@@ -295,6 +303,15 @@ class Group(BaseModel):
     default_expand: bool | None = True
 
 
+class SettingSection(BaseModel):
+    name: str
+    label: str | None = None
+    description: str | None = None
+    icon: str | None = None
+    option: list[str] | None = None
+    default_expand: bool | None = True
+
+
 class OptionCase(BaseModel):
     name: str
     label: str | None = None
@@ -314,8 +331,27 @@ class InputCase(BaseModel):
     pattern_msg: str | None = None
 
 
+class HotkeyCase(BaseModel):
+    name: str
+    label: str | None = None
+    description: str | None = None
+    default: str | None = None
+
+    @field_validator("default")
+    @classmethod
+    def check_modifier_count(cls, value: str | None):
+        parts = [part.strip() for part in (value or "").split("+") if part.strip()]
+        if len(parts) > 3:
+            raise ValueError("快捷键最多支持两个修饰键")
+        if any(part.upper() in _UNSUPPORTED_HOTKEY_KEYS for part in parts):
+            raise ValueError("快捷键不支持 Meta/Command/Win 键")
+        return value
+
+
 class Option(BaseModel):
-    type: Literal["select", "input", "checkbox", "switch", "scan_select"] = "select"
+    type: Literal["select", "input", "checkbox", "switch", "scan_select", "hotkey"] = (
+        "select"
+    )
     label: str | None = None
     description: str | None = None
     icon: str | None = None
@@ -323,6 +359,7 @@ class Option(BaseModel):
     resource: list[str] | None = None
     cases: list[OptionCase] | None = None
     inputs: list[InputCase] | None = None
+    hotkeys: list[HotkeyCase] | None = None
     scan_dir: str | None = None
     scan_filter: str | None = None
     pipeline_override: PipelineOverride | None = None
@@ -348,6 +385,8 @@ class Option(BaseModel):
                 )
         if self.type == "input" and not self.inputs:
             raise ValueError("当 type 为 input 时，inputs 不能为空")
+        if self.type == "hotkey" and not self.hotkeys:
+            raise ValueError("当 type 为 hotkey 时，hotkeys 不能为空")
         if self.type == "scan_select":
             if not self.scan_dir:
                 raise ValueError("当 type 为 scan_select 时，scan_dir 不能为空")
@@ -407,6 +446,7 @@ class InterfaceModel(BaseModel):
     pretask: Pretask | list[Pretask] | None = None
     option: dict[str, Option] | None = None
     global_option: list[str] | None = None
+    setting: list[SettingSection] | None = None
     import_: list[str] | None = Field(None, alias="import")
     preset: list[Preset] | None = None
 

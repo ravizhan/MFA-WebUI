@@ -48,7 +48,7 @@ export interface TaskExecutionPayload {
 
 export interface ScheduledTaskDeviceConfig {
   controller_name: string
-  device_type: "Adb" | "Win32" | "Gamepad" | "PlayCover"
+  device_type: "Adb" | "Win32" | "Gamepad" | "PlayCover" | "WlRoots"
   device_address: string
 }
 

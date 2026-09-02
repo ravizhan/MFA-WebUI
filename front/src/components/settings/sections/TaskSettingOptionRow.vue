@@ -46,12 +46,11 @@
     </div>
 
     <template v-if="nestedOptions.length > 0">
-      <OptionItem
+      <TaskSettingOptionRow
         v-for="childName in nestedOptions"
         :key="childName"
         :name="childName"
         :level="(level || 0) + 1"
-        :task-options="taskOptions"
       />
     </template>
   </template>
@@ -61,15 +60,16 @@
 import { computed, ref, watch } from "vue"
 import { useI18n } from "vue-i18n"
 import { showGlobalMessage } from "@/services/feedback/message"
-import { useInterfaceStore } from "@/stores"
+import { useInterfaceStore, useSettingsStore } from "@/stores"
 import type {
   CheckboxOption,
   ScanSelectOption,
   SelectOption,
   SwitchOption,
 } from "@/types/interfaceModel"
-import type { NullableTaskOptionValue } from "@/types/schedulerModel"
+import type { TaskOptionValue } from "@/types/schedulerModel"
 import { resolveInterfaceText } from "@/utils/interface/content"
+import { buildDefaultsFromOptionMap } from "@/utils/task-config/options"
 import { tryCatch } from "@/utils/tryCatch"
 import OptionCheckboxControl from "@/components/common/controls/OptionCheckboxControl.vue"
 import OptionHotkeyControl from "@/components/common/controls/OptionHotkeyControl.vue"
@@ -77,27 +77,38 @@ import OptionInputControl from "@/components/common/controls/OptionInputControl.
 import OptionSelectControl from "@/components/common/controls/OptionSelectControl.vue"
 import OptionSwitchControl from "@/components/common/controls/OptionSwitchControl.vue"
 
-const {
-  name,
-  level,
-  taskOptions: rawTaskOptions,
-} = defineProps<{
+const { name, level } = defineProps<{
   name: string
   level?: number
-  taskOptions: Record<string, NullableTaskOptionValue>
 }>()
 
 const { locale } = useI18n()
 const interfaceStore = useInterfaceStore()
-const taskOptions = computed(() => rawTaskOptions)
-const option = computed(() => interfaceStore.interface?.option?.[name])
+const settingsStore = useSettingsStore()
 const scanSelectRefreshing = ref(false)
+const option = computed(() => interfaceStore.interface?.option?.[name])
 
 const resolvedLabel = computed(() =>
   resolveInterfaceText(interfaceStore.interface, locale.value, option.value?.label, name),
 )
 
-function normalizeObjectValue(value: NullableTaskOptionValue | undefined): Record<string, string> {
+const defaultValue = computed<TaskOptionValue>(() => {
+  const currentOption = option.value
+  if (!currentOption) return ""
+  return buildDefaultsFromOptionMap({ [name]: currentOption })[name] ?? ""
+})
+
+const rawValue = computed<TaskOptionValue>(() =>
+  settingsStore.settings.globalOptionValues[name] === undefined
+    ? defaultValue.value
+    : settingsStore.settings.globalOptionValues[name],
+)
+
+function updateValue(value: TaskOptionValue): void {
+  void settingsStore.updateGlobalOptionValue(name, value)
+}
+
+function normalizeObjectValue(value: TaskOptionValue): Record<string, string> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {}
   return Object.fromEntries(
     Object.entries(value).filter(
@@ -107,53 +118,31 @@ function normalizeObjectValue(value: NullableTaskOptionValue | undefined): Recor
 }
 
 const switchValue = computed<string>({
-  get() {
-    const value = taskOptions.value[name]
-    return typeof value === "string" ? value : ""
-  },
-  set(value) {
-    taskOptions.value[name] = value
-  },
+  get: () => (typeof rawValue.value === "string" ? rawValue.value : ""),
+  set: updateValue,
 })
 
 const selectValue = computed<string | null>({
-  get() {
-    const value = taskOptions.value[name]
-    return typeof value === "string" ? value : null
-  },
-  set(value) {
-    taskOptions.value[name] = value
-  },
+  get: () => (typeof rawValue.value === "string" ? rawValue.value : null),
+  set: (value) => updateValue(value ?? ""),
 })
 
 const inputValue = computed<Record<string, string>>({
-  get() {
-    return normalizeObjectValue(taskOptions.value[name])
-  },
-  set(value) {
-    taskOptions.value[name] = value
-  },
+  get: () => normalizeObjectValue(rawValue.value),
+  set: updateValue,
 })
 
 const hotkeyValue = computed<Record<string, string>>({
-  get() {
-    return normalizeObjectValue(taskOptions.value[name])
-  },
-  set(value) {
-    taskOptions.value[name] = value
-  },
+  get: () => normalizeObjectValue(rawValue.value),
+  set: updateValue,
 })
 
 const checkboxValue = computed<string[]>({
-  get() {
-    const value = taskOptions.value[name]
-    return Array.isArray(value)
-      ? value.filter((item): item is string => typeof item === "string")
-      : []
-  },
-  set(value) {
-    taskOptions.value[name] = value
-  },
+  get: () =>
+    Array.isArray(rawValue.value)
+      ? rawValue.value.filter((item): item is string => typeof item === "string")
+      : [],
+  set: updateValue,
 })
 
 function resolveCaseLabel(label: string | undefined, fallback: string): string {
@@ -169,18 +158,24 @@ const selectOptions = computed(() => {
   }))
 })
 
+const fallbackSelectValue = computed(() => {
+  const currentOption = option.value
+  if (currentOption?.type !== "select" && currentOption?.type !== "scan_select") return ""
+  return currentOption.default_case ?? currentOption.cases[0]?.name ?? ""
+})
+
 const isSelectValueInvalid = computed(() => {
   const currentOption = option.value
   if (currentOption?.type !== "select" && currentOption?.type !== "scan_select") return false
-  const currentValue = taskOptions.value[name]
-  if (currentValue == null || typeof currentValue !== "string") return false
-  return !selectOptions.value.some((item) => item.value === currentValue)
+  return typeof rawValue.value === "string"
+    ? !selectOptions.value.some((item) => item.value === rawValue.value)
+    : true
 })
 
 watch(
   () => isSelectValueInvalid.value,
   (invalid) => {
-    if (invalid) taskOptions.value[name] = null
+    if (invalid) updateValue(fallbackSelectValue.value)
   },
   { immediate: true },
 )
@@ -189,28 +184,19 @@ async function handleRescanScanSelect(): Promise<void> {
   const currentOption = option.value
   if (!currentOption || currentOption.type !== "scan_select") return
 
-  const previousValue = taskOptions.value[name]
   scanSelectRefreshing.value = true
-  taskOptions.value[name] = null
   const [, err] = await tryCatch(() => interfaceStore.rescanScanSelectOption(name))
-  if (err) {
-    taskOptions.value[name] = previousValue
-    if (err.message) showGlobalMessage("error", err.message)
-  }
+  if (err?.message) showGlobalMessage("error", err.message)
   scanSelectRefreshing.value = false
 }
 
 function getSwitchNestedOptions(currentOption: SwitchOption): string[] {
-  const activeCase = currentOption.cases.find(
-    (caseItem) => caseItem.name === taskOptions.value[name],
-  )
+  const activeCase = currentOption.cases.find((caseItem) => caseItem.name === rawValue.value)
   return activeCase?.option || []
 }
 
 function getSelectNestedOptions(currentOption: SelectOption | ScanSelectOption): string[] {
-  const activeCase = currentOption.cases.find(
-    (caseItem) => caseItem.name === taskOptions.value[name],
-  )
+  const activeCase = currentOption.cases.find((caseItem) => caseItem.name === rawValue.value)
   return activeCase?.option || []
 }
 

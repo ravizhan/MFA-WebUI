@@ -35,6 +35,7 @@ class PretaskService:
         resource_name: str,
         task_options: TaskOptionsByTask,
         user_pre_tasks: list[PreTaskCommand],
+        global_options: dict[str, TaskOptionValue] | None = None,
     ) -> None:
         """Run matching PI pretasks first, then enabled user shell commands."""
         raw_pretasks = self.worker.interface.pretask
@@ -54,7 +55,11 @@ class PretaskService:
             display_name = pretask.label or pretask.name or pretask.exec
             argv = [pretask.exec, *(pretask.args or [])]
             if pretask.option:
-                option_values = self._resolve_option_values(pretask, task_options)
+                option_values = self._resolve_option_values(
+                    pretask,
+                    task_options,
+                    global_options or {},
+                )
                 argv.append(
                     json.dumps(
                         option_values,
@@ -83,6 +88,7 @@ class PretaskService:
         self,
         pretask: Pretask,
         task_options: TaskOptionsByTask,
+        global_options: dict[str, TaskOptionValue],
     ) -> dict[str, TaskOptionValue]:
         option_map = self.worker.interface.option or {}
         values: dict[str, TaskOptionValue] = {}
@@ -90,6 +96,10 @@ class PretaskService:
             resolved_value = self._find_option_value(task_options, option_name)
             if resolved_value is not None:
                 values[option_name] = resolved_value
+                continue
+            global_value = global_options.get(option_name)
+            if global_value is not None:
+                values[option_name] = global_value
                 continue
             option = option_map.get(option_name)
             values[option_name] = (

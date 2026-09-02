@@ -32,6 +32,19 @@
         <UpdateSettingsSection @show-update="handleShowUpdate" />
       </NCard>
 
+      <!-- PI task settings -->
+      <NCard v-if="activeSection === 'taskSettings'">
+        <template #header>
+          <h2 class="flex items-center gap-2 text-lg font-semibold">
+            <NIcon size="20" style="color: var(--primary-color)">
+              <ConstructOutline />
+            </NIcon>
+            {{ t("settings.anchor.taskSettings") }}
+          </h2>
+        </template>
+        <TaskSettingsSection />
+      </NCard>
+
       <!-- Runtime -->
       <NCard v-if="activeSection === 'runtime'">
         <template #header>
@@ -97,6 +110,7 @@ import type { MenuOption } from "naive-ui"
 import {
   ArrowUpCircleOutline,
   ColorPaletteOutline,
+  ConstructOutline,
   InformationCircleOutline,
   NotificationsOutline,
   SettingsOutline,
@@ -105,11 +119,13 @@ import UpdateDialog from "@/components/settings/dialogs/UpdateDialog.vue"
 import AboutSettingsSection from "@/components/settings/sections/AboutSettingsSection.vue"
 import NotificationSettingsSection from "@/components/settings/sections/NotificationSettingsSection.vue"
 import RuntimeSettingsSection from "@/components/settings/sections/RuntimeSettingsSection.vue"
+import TaskSettingsSection from "@/components/settings/sections/TaskSettingsSection.vue"
 import UISettingsSection from "@/components/settings/sections/UISettingsSection.vue"
 import UpdateSettingsSection from "@/components/settings/sections/UpdateSettingsSection.vue"
 import type { UpdateInfo } from "@/services/api"
+import { useInterfaceStore } from "@/stores"
 
-type SettingsSectionKey = "update" | "runtime" | "ui" | "notification" | "about"
+type SettingsSectionKey = "update" | "taskSettings" | "runtime" | "ui" | "notification" | "about"
 
 interface SettingsSection {
   id: SettingsSectionKey
@@ -118,17 +134,34 @@ interface SettingsSection {
 }
 
 const { t } = useI18n()
+const interfaceStore = useInterfaceStore()
 const activeSection = ref<SettingsSectionKey>("update")
 const showUpdateDialog = ref(false)
 const updateInfo = ref<UpdateInfo | null>(null)
 
-const sections = computed<SettingsSection[]>(() => [
-  { id: "update", label: t("settings.anchor.update"), icon: ArrowUpCircleOutline },
-  { id: "runtime", label: t("settings.anchor.runtime"), icon: SettingsOutline },
-  { id: "ui", label: t("settings.anchor.ui"), icon: ColorPaletteOutline },
-  { id: "notification", label: t("settings.anchor.notification"), icon: NotificationsOutline },
-  { id: "about", label: t("settings.anchor.about"), icon: InformationCircleOutline },
-])
+const sections = computed<SettingsSection[]>(() => {
+  const values: SettingsSection[] = [
+    { id: "update", label: t("settings.anchor.update"), icon: ArrowUpCircleOutline },
+  ]
+  if (interfaceStore.getSettingSections.length > 0) {
+    values.push({
+      id: "taskSettings",
+      label: t("settings.anchor.taskSettings"),
+      icon: ConstructOutline,
+    })
+  }
+  values.push(
+    { id: "runtime", label: t("settings.anchor.runtime"), icon: SettingsOutline },
+    { id: "ui", label: t("settings.anchor.ui"), icon: ColorPaletteOutline },
+    {
+      id: "notification",
+      label: t("settings.anchor.notification"),
+      icon: NotificationsOutline,
+    },
+    { id: "about", label: t("settings.anchor.about"), icon: InformationCircleOutline },
+  )
+  return values
+})
 
 const menuOptions = computed<MenuOption[]>(() =>
   sections.value.map((section) => ({

@@ -10,18 +10,27 @@ from unittest.mock import patch
 
 import pytest
 from pydantic import ValidationError
+from maa.toolkit import Toolkit
 
 from app_state import WorkerContext
 from maa_worker.device_service import (
     DeviceService,
     custom_record_to_device,
+    is_controller_supported,
 )
 from models.api import CustomDeviceCreate
 from models.device_address import canonicalize_custom_device_address
 
 
 def _controller(name: str, type_: str) -> SimpleNamespace:
-    return SimpleNamespace(name=name, type=type_, label=name, win32=None, gamepad=None)
+    return SimpleNamespace(
+        name=name,
+        type=type_,
+        label=name,
+        win32=None,
+        gamepad=None,
+        wlroots=None,
+    )
 
 
 class _FakeWorker:
@@ -83,6 +92,14 @@ class TestCanonicalizeCustomAddress:
             canonicalize_custom_device_address("PlayCover", " 127.0.0.1:1717 ")
             == "127.0.0.1:1717"
         )
+
+    def test_wlroots_socket_path_trimmed(self):
+        assert (
+            canonicalize_custom_device_address("WlRoots", " /run/user/1000/wayland-1 ")
+            == "/run/user/1000/wayland-1"
+        )
+        with pytest.raises(ValueError):
+            canonicalize_custom_device_address("WlRoots", "   ")
 
     def test_adb_empty_rejected(self):
         with pytest.raises(ValueError):
@@ -164,6 +181,124 @@ class TestCustomRecordToDevice:
             }
         )
         assert device == {"type": "PlayCover", "address": "127.0.0.1:1717"}
+
+    def test_wlroots_address(self):
+        device = custom_record_to_device(
+            {
+                "controller_name": "WlRootsController",
+                "type": "WlRoots",
+                "address": "/run/user/1000/wayland-1",
+            }
+        )
+        assert device == {
+            "type": "WlRoots",
+            "address": "/run/user/1000/wayland-1",
+        }
+
+
+class TestWlRootsSupport:
+    def test_platform_capability(self):
+        controller = _controller("WlRootsController", "WlRoots")
+        with patch("maa_worker.device_service.sys.platform", "linux"):
+            assert is_controller_supported(controller) == (True, "")
+        with patch("maa_worker.device_service.sys.platform", "win32"):
+            assert is_controller_supported(controller) == (
+                False,
+                "platform_not_supported",
+            )
+
+    def test_scans_wayland_socket_paths(self, app_root: Path):
+        controller = _controller("WlRootsController", "WlRoots")
+        service = DeviceService(_FakeWorker(app_root, [controller]))  # type: ignore[arg-type]
+        scanned = [
+            SimpleNamespace(
+                class_name="/run/user/1000/wayland-1",
+                window_name="Wayland compositor",
+            ),
+            SimpleNamespace(
+                class_name="/run/user/1000/wayland-1",
+                window_name="duplicate",
+            ),
+        ]
+
+        with (
+            patch("maa_worker.device_service.sys.platform", "linux"),
+            patch.object(Toolkit, "find_desktop_windows", return_value=scanned),
+        ):
+            devices = service._find_devices_for_controller(controller)
+
+        assert devices == [
+            {
+                "type": "WlRoots",
+                "name": "Wayland compositor",
+                "address": "/run/user/1000/wayland-1",
+            }
+        ]
+
+    def test_builds_wlroots_device_model(self):
+        model = DeviceService.build_device_model_from_config(
+            "WlRootsController",
+            "WlRoots",
+            "/run/user/1000/wayland-1",
+        )
+
+        assert model.type == "WlRoots"
+        assert model.address == "/run/user/1000/wayland-1"
+
+    def test_connect_uses_socket_path_and_keycode_mode(self, app_root: Path):
+        captured: dict[str, Any] = {}
+
+        class _FakeWlRootsController:
+            connected = True
+
+            def __init__(self, **kwargs):
+                captured.update(kwargs)
+
+            @staticmethod
+            def post_connection():
+                return SimpleNamespace(
+                    wait=lambda: SimpleNamespace(succeeded=True),
+                )
+
+        controller = _controller("WlRootsController", "WlRoots")
+        controller.wlroots = SimpleNamespace(use_win32_vk_code=True)
+        worker = _FakeWorker(app_root, [controller])
+        worker.device_state = SimpleNamespace(
+            configuration_locked=False,
+            connected=False,
+            controller=None,
+            controller_name=None,
+            controller_type=None,
+            current_resource_name=None,
+            last_device_error=None,
+        )
+        worker.events = SimpleNamespace(
+            send_log=lambda _message: None,
+            show_system_notification=lambda _title, _message: None,
+        )
+        worker.tasker = SimpleNamespace(bind=lambda _resource, _controller: True)
+        worker.resource = object()
+        worker.interface.title = "MWU"
+
+        model = DeviceService.build_device_model_from_config(
+            "WlRootsController",
+            "WlRoots",
+            "/run/user/1000/wayland-1",
+        )
+        with (
+            patch(
+                "maa_worker.device_service.WlRootsController",
+                _FakeWlRootsController,
+            ),
+            patch("maa_worker.device_service.time.sleep"),
+        ):
+            connected = DeviceService(worker).connect(model)  # type: ignore[arg-type]
+
+        assert connected is True
+        assert captured == {
+            "wlr_socket_path": "/run/user/1000/wayland-1",
+            "use_win32_vk_code": True,
+        }
 
 
 class TestCustomDevicePersistence:

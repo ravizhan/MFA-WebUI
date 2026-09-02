@@ -23,6 +23,7 @@ from maa_worker.execution import (
     submit_scheduled,
 )
 from maa_worker.pretask_service import PretaskError, PretaskStopped
+from models.interface import Option, OptionCase
 from models.scheduler import (
     CronTriggerConfig,
     ManualStartPayload,
@@ -31,6 +32,7 @@ from models.scheduler import (
     ScheduledTaskDeviceConfig,
     TaskExecution,
 )
+from models.settings import SettingsModel
 
 
 def make_payload(task_name: str = "Startup") -> ManualStartPayload:
@@ -84,6 +86,7 @@ class _FakeInterface:
     def __init__(self, entries: list[str]):
         self.task = [SimpleNamespace(entry=e, option=[]) for e in entries]
         self.option = {}
+        self.global_option = []
         self.pretask = []
 
 
@@ -93,9 +96,18 @@ class _FakeTaskService:
         self.called = False
         self.block: threading.Event | None = None
         self._task_state = task_state
+        self.global_options = {}
 
-    def start(self, task_list, options, task_name=None, pre_tasks=None):
+    def start(
+        self,
+        task_list,
+        options,
+        task_name=None,
+        pre_tasks=None,
+        global_options=None,
+    ):
         self.called = True
+        self.global_options = global_options or {}
         if self.block is not None:
             # 阻塞至测试放行，模拟任务长时间占槽
             self.block.wait(timeout=5)
@@ -109,8 +121,16 @@ class _FakeTaskService:
 
 
 class _FakeSuccessfulTaskService(_FakeTaskService):
-    def start(self, task_list, options, task_name=None, pre_tasks=None):
+    def start(
+        self,
+        task_list,
+        options,
+        task_name=None,
+        pre_tasks=None,
+        global_options=None,
+    ):
         self.called = True
+        self.global_options = global_options or {}
         if self._task_state is not None:
             self._task_state.running = True
             self._task_state.last_status = "success"
@@ -124,16 +144,29 @@ class _FakePretaskService:
         task_state: "_FakeTaskState | None" = None,
         ordering: list[str] | None = None,
     ):
-        self.calls: list[tuple[str, str, dict, list]] = []
+        self.calls: list[tuple[str, str, dict, list, dict]] = []
         self.stop_flags: list[bool] = []
         self.error: PretaskError | None = None
         self.set_stop_flag_on_error = False
         self._task_state = task_state
         self._ordering = ordering
 
-    def run_all(self, controller_name, resource_name, task_options, user_pre_tasks):
+    def run_all(
+        self,
+        controller_name,
+        resource_name,
+        task_options,
+        user_pre_tasks,
+        global_options=None,
+    ):
         self.calls.append(
-            (controller_name, resource_name, task_options, user_pre_tasks)
+            (
+                controller_name,
+                resource_name,
+                task_options,
+                user_pre_tasks,
+                global_options or {},
+            )
         )
         self.stop_flags.append(
             self._task_state.stop_flag if self._task_state is not None else False
@@ -376,8 +409,16 @@ class TestSubmitManual:
         worker = _FakeWorker(start_result=True, ready=True)
 
         class _SuccessTaskService(_FakeTaskService):
-            def start(self, task_list, options, task_name=None, pre_tasks=None):
+            def start(
+                self,
+                task_list,
+                options,
+                task_name=None,
+                pre_tasks=None,
+                global_options=None,
+            ):
                 self.called = True
+                self.global_options = global_options or {}
                 # 模拟一次成功的手动运行：start 内部完成整个生命周期
                 self._task_state.running = True
                 self._task_state.last_status = "success"
@@ -549,7 +590,9 @@ class TestPretaskAdmission:
         assert admission.accepted is True
         await _await_active_task(state)
 
-        assert worker.pretasks.calls == [("AdbController", "main", {"Startup": {}}, [])]
+        assert worker.pretasks.calls == [
+            ("AdbController", "main", {"Startup": {}}, [], {})
+        ]
         assert worker.tasks.called is False
         row = list_executions(state.scheduler_db_path)[0]
         assert row.id == admission.run_id
@@ -618,10 +661,48 @@ class TestPretaskAdmission:
         assert admission.accepted is True
         await _await_active_task(state)
 
-        controller, resource, options, pre_tasks = worker.pretasks.calls[0]
+        controller, resource, options, pre_tasks, global_options = (
+            worker.pretasks.calls[0]
+        )
         assert (controller, resource) == ("AdbController", "main")
         assert list(options) == ["Startup"]
         assert [p.command for p in pre_tasks] == ["echo ok"]
+        assert global_options == {}
+
+    async def test_global_option_values_reach_pretask_and_task_pipeline_separately(
+        self, state: AppState
+    ):
+        worker = _FakeWorker(start_result=True, ready=True)
+        worker.tasks = _FakeSuccessfulTaskService(
+            result=True, task_state=worker.task_state
+        )
+        worker.interface.task = [
+            SimpleNamespace(entry="Startup", option=[]),
+            SimpleNamespace(entry="Second", option=[]),
+        ]
+        worker.interface.option = {
+            "global_setting": Option(
+                type="select",
+                cases=[OptionCase(name="default"), OptionCase(name="from-settings")],
+                default_case="default",
+            )
+        }
+        worker.interface.global_option = ["global_setting"]
+        state.settings = SettingsModel(
+            globalOptionValues={"global_setting": "from-settings"}
+        )
+        state.worker = worker
+
+        payload = make_payload()
+        payload.task_list = ["Startup", "Second"]
+        admission = await submit_manual(state, payload)
+        assert admission.accepted is True
+        await _await_active_task(state)
+
+        assert len(worker.pretasks.calls) == 1
+        assert worker.pretasks.calls[0][2] == {"Startup": {}, "Second": {}}
+        assert worker.pretasks.calls[0][4] == {"global_setting": "from-settings"}
+        assert worker.tasks.global_options == {"global_setting": "from-settings"}
 
     async def test_pretask_runs_before_device_connection(
         self, state: AppState, monkeypatch
@@ -641,7 +722,9 @@ class TestPretaskAdmission:
         assert admission.accepted is True
         await _await_active_task(state)
 
-        assert worker.pretasks.calls == [("AdbController", "main", {"Startup": {}}, [])]
+        assert worker.pretasks.calls == [
+            ("AdbController", "main", {"Startup": {}}, [], {})
+        ]
         assert ordering == ["pretask", "connect"]
         row = list_executions(state.scheduler_db_path)[0]
         assert row.id == admission.run_id

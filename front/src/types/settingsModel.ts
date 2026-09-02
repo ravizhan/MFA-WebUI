@@ -1,3 +1,5 @@
+import type { TaskOptionValue } from "@/types/schedulerModel"
+
 // 更新设置
 export interface UpdateSettings {
   autoUpdate: boolean
@@ -49,7 +51,7 @@ export interface AboutInfo {
 
 // 面板持久化设备信息
 export interface PanelLastConnectedDevice {
-  type: "Adb" | "Win32" | "Gamepad" | "PlayCover"
+  type: "Adb" | "Win32" | "Gamepad" | "PlayCover" | "WlRoots"
   controller_name: string
   fingerprint: string
   adb_path: string
@@ -84,4 +86,5 @@ export interface SettingsModel {
   runtime: RuntimeSettings
   about: AboutInfo
   panel: PanelSettings
+  globalOptionValues: Record<string, TaskOptionValue>
 }

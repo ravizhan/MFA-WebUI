@@ -8,12 +8,15 @@ from pydantic import ValidationError
 from models.interface import (
     Controller,
     GamepadController,
+    HotkeyCase,
     InterfaceModel,
     MacOSController,
     Option,
     OptionCase,
     Resource,
+    SettingSection,
     Win32Controller,
+    WlRootsController,
     _pipeline_override_contains_attach_option,
     validate_regex,
 )
@@ -119,7 +122,16 @@ class TestMacOSController:
 
     def test_invalid_input_raises(self):
         with pytest.raises(ValidationError):
-            MacOSController.model_validate({"input": "InvalidInput"})
+            MacOSController.model_validate({"input": "Invalid"})
+
+
+class TestWlRootsController:
+    def test_win32_keycode_mode(self):
+        config = WlRootsController(use_win32_vk_code=True)
+        controller = Controller(name="wayland", type="WlRoots", wlroots=config)
+
+        assert controller.wlroots is not None
+        assert controller.wlroots.use_win32_vk_code is True
 
 
 # ---------------------------------------------------------------------------
@@ -221,6 +233,29 @@ class TestOption:
         with pytest.raises(ValidationError, match="inputs 不能为空"):
             Option(type="input")
 
+    def test_hotkey_requires_hotkeys(self):
+        with pytest.raises(
+            ValidationError,
+            match="当 type 为 hotkey 时，hotkeys 不能为空",
+        ):
+            Option(type="hotkey")
+
+    def test_hotkey_accepts_hotkey_cases(self):
+        option = Option(
+            type="hotkey",
+            hotkeys=[
+                HotkeyCase(
+                    name="attack",
+                    label="Attack",
+                    description="Attack shortcut",
+                    default="Alt+A",
+                )
+            ],
+        )
+        assert option.hotkeys is not None
+        assert option.hotkeys[0].name == "attack"
+        assert option.hotkeys[0].default == "Alt+A"
+
     def test_scan_select_requires_scan_dir(self):
         with pytest.raises(ValidationError, match="scan_dir 不能为空"):
             Option(type="scan_select")
@@ -244,6 +279,41 @@ class TestOption:
                 cases=[OptionCase(name="a"), OptionCase(name="b")],
                 default_case=["a"],
             )
+
+
+class TestHotkeyCase:
+    def test_parses_metadata_and_optional_default(self):
+        case = HotkeyCase(
+            name="toggle",
+            label="Toggle",
+            description="Toggle feature",
+            default="Ctrl+T",
+        )
+        assert case.name == "toggle"
+        assert case.label == "Toggle"
+        assert case.description == "Toggle feature"
+        assert case.default == "Ctrl+T"
+
+
+class TestSettingSection:
+    def test_parses_metadata_and_options(self):
+        section = SettingSection(
+            name="general",
+            label="General",
+            description="General settings",
+            icon="settings",
+            option=["language", "shortcut"],
+            default_expand=False,
+        )
+        assert section.name == "general"
+        assert section.label == "General"
+        assert section.description == "General settings"
+        assert section.icon == "settings"
+        assert section.option == ["language", "shortcut"]
+        assert section.default_expand is False
+
+    def test_default_expand_is_true(self):
+        assert SettingSection(name="general").default_expand is True
 
 
 # ---------------------------------------------------------------------------
@@ -330,4 +400,36 @@ class TestInterfaceModel:
             },
         }
         with pytest.raises(ValidationError, match="至少包含一次键"):
+            InterfaceModel.model_validate(data)
+
+    def test_hotkey_default_rejects_more_than_two_modifiers(self, _base_iface_data):
+        data = {
+            **_base_iface_data,
+            "option": {
+                "shortcut": {
+                    "type": "hotkey",
+                    "hotkeys": [
+                        {"name": "run", "default": "Ctrl+Alt+Shift+A"},
+                    ],
+                }
+            },
+        }
+
+        with pytest.raises(ValidationError, match="最多支持两个修饰键"):
+            InterfaceModel.model_validate(data)
+
+    def test_hotkey_default_rejects_meta(self, _base_iface_data):
+        data = {
+            **_base_iface_data,
+            "option": {
+                "shortcut": {
+                    "type": "hotkey",
+                    "hotkeys": [
+                        {"name": "run", "default": "Meta+A"},
+                    ],
+                }
+            },
+        }
+
+        with pytest.raises(ValidationError, match="不支持 Meta/Command/Win"):
             InterfaceModel.model_validate(data)
