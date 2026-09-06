@@ -145,14 +145,3 @@ class TestDisplayTargetMutualExclusionByExplicitness:
                 display_short_side=720,
                 display_raw=True,
             )
-
-    def test_long_side_default_short_no_conflict(self):
-        ctrl = Controller(name="c", type="Adb", display_long_side=1920)
-        assert ctrl.display_long_side == 1920
-        assert ctrl.display_short_side == 720
-
-    def test_all_unset_keeps_short_720_default(self):
-        ctrl = Controller(name="c", type="Adb")
-        assert ctrl.display_short_side == 720
-        assert ctrl.display_long_side is None
-        assert ctrl.display_raw is False

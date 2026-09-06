@@ -11,12 +11,6 @@
     @negative-click="onCancel"
   >
     <div class="whitespace-pre-wrap">{{ current?.content }}</div>
-    <template #footer>
-      <div class="flex justify-end gap-2">
-        <NButton size="small" @click="onCancel">停止任务</NButton>
-        <NButton size="small" type="primary" @click="onAcknowledge">继续</NButton>
-      </div>
-    </template>
   </NModal>
 </template>
 

@@ -2,13 +2,12 @@ import { computed, ref, watch } from "vue"
 import type { Ref } from "vue"
 import { useInterfaceStore } from "@/stores"
 import { resolveInterfaceText, resolveInterfaceAssetUrl } from "@/utils/interface/content"
-import { hashString } from "@/utils/hash"
 
 /**
  * PI 元数据（title / welcome / icon）的解析与展示驱动。
  *
  * - title：interface.title（翻译展开），回退 interface.name → "MWU"；
- * - welcome：interface.welcome（翻译展开），指纹 = SHA-256(name + locale + content)，
+ * - welcome：interface.welcome（翻译展开），指纹 = name + locale + content 拼接，
  *   指纹变化（内容或语言变化）时再次展示；
  * - icon：interface.icon 资源 URL（翻译展开）。
  */
@@ -40,8 +39,7 @@ export function useInterfaceMetadata(locale: Ref<string>) {
 
   const welcomeFingerprint = computed(() => {
     const model = interfaceStore.interface
-    const raw = `${model?.name || ""}::${locale.value}::${resolvedWelcome.value}`
-    return hashString(raw)
+    return `${model?.name || ""}::${locale.value}::${resolvedWelcome.value}`
   })
 
   const lastShownWelcomeFingerprint = ref("")

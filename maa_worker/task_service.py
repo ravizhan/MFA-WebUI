@@ -241,14 +241,6 @@ class TaskService:
                     )
                 else:
                     task_result = self.worker.tasker.post_task(task_definition.entry)
-                if telemetry is not None:
-                    try:
-                        telemetry.bind_task_job(
-                            current_telemetry_task,
-                            getattr(task_result, "job_id", None),
-                        )
-                    except Exception:
-                        pass
                 self.worker.events.send_log("正在运行任务: " + task_name)
                 while not task_result.done:
                     time.sleep(0.5)

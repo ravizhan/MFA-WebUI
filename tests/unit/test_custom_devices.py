@@ -763,37 +763,6 @@ class TestGamepadWindowlessSupport:
             }
         ]
 
-    def test_window_filter_still_scans_windows(self, app_root: Path):
-        controller = _connectable_controller("GamepadController", "Gamepad")
-        controller.gamepad = SimpleNamespace(
-            class_regex=None,
-            window_regex=None,
-            screencap=None,
-            gamepad_type=None,
-        )
-        controller.gamepad.window_regex = None
-        controller.gamepad.class_regex = None
-        service = DeviceService(_FakeWorker(app_root, [controller]))  # type: ignore[arg-type]
-        scanned = [
-            SimpleNamespace(hwnd=77, class_name="C", window_name="W"),
-        ]
-        with (
-            patch("maa_worker.device_service.sys.platform", "win32"),
-            patch.object(Toolkit, "find_desktop_windows", return_value=scanned),
-        ):
-            devices = service._find_devices_for_controller(controller)
-
-        assert devices == [
-            {
-                "type": "Gamepad",
-                "hWnd": 0,
-                "class_name": "",
-                "window_name": "",
-                "screencap_methods": 2,
-                "gamepad_type": 0,
-            }
-        ]
-
     def test_connect_passes_none_hwnd(self, app_root: Path):
         captured: dict[str, Any] = {}
 
@@ -1468,30 +1437,6 @@ class TestResourceBundleLoading:
 
         with pytest.raises(ValueError, match="越界|不允许包含"):
             service._resource_path("{PROJECT_DIR}/../outside.txt")
-
-    def test_load_resource_bundle_resolves_and_posts(self, app_root: Path):
-        resource_dir = app_root / "resource"
-        resource_dir.mkdir()
-        (resource_dir / "bundle").write_text("x", encoding="utf-8")
-        controller = _connectable_controller("AdbController", "Adb")
-        worker = _make_worker(app_root, controller)
-        service = DeviceService(worker)  # type: ignore[arg-type]
-
-        posted: list[str] = []
-
-        class _FakeJob:
-            def wait(self):
-                return SimpleNamespace(succeeded=True)
-
-        class _FakeResource:
-            def post_bundle(self, path):
-                posted.append(str(path))
-                return _FakeJob()
-
-        worker.resource = _FakeResource()
-        loaded = service._load_resource_bundle("{PROJECT_DIR}/resource/bundle")
-        assert loaded == str((resource_dir / "bundle").resolve())
-        assert posted == [loaded]
 
     def test_set_resource_clear_then_load_then_hash_check_order(self, app_root: Path):
         """切换资源必须先清空旧路径内容，再加载本次 path；

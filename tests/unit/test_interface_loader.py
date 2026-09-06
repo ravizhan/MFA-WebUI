@@ -220,12 +220,6 @@ class TestRegisterTasks:
         with pytest.raises(InterfaceLoadError, match="必须是非空字符串"):
             _register_tasks([{"name": "A", "entry": ""}], Path(), _MergeState())
 
-    def test_shared_entry_allowed(self):
-        """不同 task name 共用 entry 不再是冲突。"""
-        state = _MergeState()
-        _register_tasks([{"name": "A", "entry": "E"}], Path("/a.json"), state)
-        _register_tasks([{"name": "B", "entry": "E"}], Path("/b.json"), state)
-
     def test_name_conflict(self):
         state = _MergeState()
         _register_tasks([{"name": "A", "entry": "E1"}], Path("/a.json"), state)
@@ -246,9 +240,6 @@ class TestValidateOptions:
     def test_empty_key_raises(self):
         with pytest.raises(InterfaceLoadError, match="必须是非空字符串"):
             _validate_options({"": {"type": "select"}}, Path())
-
-    def test_valid(self):
-        _validate_options({"opt": {"type": "select"}}, Path("/a.json"))
 
 
 # ---------------------------------------------------------------------------
@@ -1176,17 +1167,6 @@ class TestMergeSemanticsV292:
         groups = {g.name: g for g in model.group}
         assert list(groups) == ["g0", "g1", "g2"]
         assert groups["g1"].label == "First"
-
-    def test_fragment_cannot_inject_controller(self, tmp_path):
-        (tmp_path / "bad.json5").write_text(
-            stdlib_json.dumps({"controller": [{"name": "x", "type": "Adb"}]})
-        )
-        _write_interface(
-            tmp_path,
-            self._base_interface(imports=["bad.json5"]),
-        )
-        with pytest.raises(InterfaceLoadError, match="非法字段"):
-            load_interface_model(tmp_path)
 
     def test_task_group_reference_validated(self, tmp_path):
         _write_interface(

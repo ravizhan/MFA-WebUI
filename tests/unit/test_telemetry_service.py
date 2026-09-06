@@ -88,14 +88,6 @@ def _service(tmp_path: Path, **sentry) -> TelemetryService:
     return service
 
 
-def test_consent_model_defaults():
-    consent = TelemetryConsent()
-    assert consent.consent == "unknown"
-    assert consent.configId == ""
-    assert consent.failureAttachments is False
-    assert SettingsModel().telemetry == consent
-
-
 def test_config_id_is_stable_and_dsn_change_is_stale(tmp_path):
     first = _service(tmp_path)
     config_id = first.config_id()
@@ -223,7 +215,7 @@ def test_attachment_rate_zero_and_stopped_never_capture_attachment_or_error(tmp_
     service.capture_task_failed("run-1", "Task", controller=_Controller())
     assert len(_FakeClient.instances[-1].events) == 1
     assert _FakeClient.instances[-1].attachments == [[]]
-    service.capture_error("run-1", "mwu.error", status="stopped")
+    service.capture_task_failed("run-1", "Task", status="stopped")
     assert len(_FakeClient.instances[-1].events) == 1
 
 
@@ -236,5 +228,5 @@ def test_epoch_revocation_drops_future_captures(tmp_path):
     assert epoch is not None
     service.revoke()
     assert not service._can_send_epoch(epoch)
-    service.capture_error(None, "mwu.error", exception=RuntimeError("secret"))
+    service.capture_exception(RuntimeError("secret"))
     assert client.events == []

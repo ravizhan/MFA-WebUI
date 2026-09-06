@@ -149,7 +149,7 @@ class _FakePretaskService:
         task_state: "_FakeTaskState | None" = None,
         ordering: list[str] | None = None,
     ):
-        self.calls: list[tuple[str, str, dict, list, dict]] = []
+        self.calls: list[tuple[str, str, list, dict]] = []
         self.stop_flags: list[bool] = []
         self.error: PretaskError | None = None
         self.set_stop_flag_on_error = False
@@ -160,7 +160,6 @@ class _FakePretaskService:
         self,
         controller_name,
         resource_name,
-        task_options,
         user_pre_tasks,
         global_options=None,
     ):
@@ -168,7 +167,6 @@ class _FakePretaskService:
             (
                 controller_name,
                 resource_name,
-                task_options,
                 user_pre_tasks,
                 global_options or {},
             )
@@ -231,7 +229,6 @@ class _FakeDevice:
         resource_name,
         global_options,
         user_pre_tasks,
-        task_options=None,
     ):
         self.prepare_called = True
         # 与真实服务一致：先执行 pretask 阶段（fake pretasks 内部抛错/记录）
@@ -239,7 +236,6 @@ class _FakeDevice:
             self._pretasks.run_all(
                 device_config.controller_name,
                 resource_name,
-                task_options or {},
                 user_pre_tasks,
                 global_options=global_options,
             )
@@ -620,9 +616,7 @@ class TestPretaskAdmission:
         assert admission.accepted is True
         await _await_active_task(state)
 
-        assert worker.pretasks.calls == [
-            ("AdbController", "main", {"Startup": {}}, [], {})
-        ]
+        assert worker.pretasks.calls == [("AdbController", "main", [], {})]
         assert worker.tasks.called is False
         row = list_executions(state.scheduler_db_path)[0]
         assert row.id == admission.run_id
@@ -668,11 +662,8 @@ class TestPretaskAdmission:
         assert state.active_run is None
         assert list_executions(state.scheduler_db_path) == []
 
-    async def test_pretask_receives_normalized_options_and_pre_tasks(
-        self, state: AppState
-    ):
-        # pretask 使用规范化后的选项/前置命令（按规范化任务列表过滤、
-        # 剔除禁用与空命令）。
+    async def test_pretask_receives_normalized_pre_tasks(self, state: AppState):
+        # pretask 使用规范化后的前置命令（剔除禁用与空命令）。
         worker = _FakeWorker(start_result=True, ready=True)
         worker.tasks = _FakeSuccessfulTaskService(
             result=True, task_state=worker.task_state
@@ -680,7 +671,6 @@ class TestPretaskAdmission:
         state.worker = worker
 
         payload = make_payload()
-        payload.task_options = {"Startup": {"mode": "safe"}, "Ghost": {"x": "y"}}
         payload.preTasks = [
             PreTaskCommand(command="echo ok"),
             PreTaskCommand(command="disabled", enabled=False),
@@ -689,11 +679,8 @@ class TestPretaskAdmission:
         assert admission.accepted is True
         await _await_active_task(state)
 
-        controller, resource, options, pre_tasks, global_options = (
-            worker.pretasks.calls[0]
-        )
+        controller, resource, pre_tasks, global_options = worker.pretasks.calls[0]
         assert (controller, resource) == ("AdbController", "main")
-        assert list(options) == ["Startup"]
         assert [p.command for p in pre_tasks] == ["echo ok"]
         assert global_options == {}
 
@@ -728,8 +715,7 @@ class TestPretaskAdmission:
         await _await_active_task(state)
 
         assert len(worker.pretasks.calls) == 1
-        assert worker.pretasks.calls[0][2] == {"Startup": {}, "Second": {}}
-        assert worker.pretasks.calls[0][4] == {"global_setting": "from-settings"}
+        assert worker.pretasks.calls[0][3] == {"global_setting": "from-settings"}
         assert worker.tasks.global_options == {"global_setting": "from-settings"}
 
     async def test_pretask_runs_before_device_connection(
@@ -750,9 +736,7 @@ class TestPretaskAdmission:
         assert admission.accepted is True
         await _await_active_task(state)
 
-        assert worker.pretasks.calls == [
-            ("AdbController", "main", {"Startup": {}}, [], {})
-        ]
+        assert worker.pretasks.calls == [("AdbController", "main", [], {})]
         assert ordering == ["pretask", "connect"]
         row = list_executions(state.scheduler_db_path)[0]
         assert row.id == admission.run_id

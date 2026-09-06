@@ -6,7 +6,7 @@ import time
 from typing import TYPE_CHECKING
 
 from models.interface import Option, Pretask, is_option_applicable
-from models.scheduler import PreTaskCommand, TaskOptionsByTask, TaskOptionValue
+from models.scheduler import PreTaskCommand, TaskOptionValue
 
 if TYPE_CHECKING:
     from maa_utils import MaaWorker
@@ -33,7 +33,6 @@ class PretaskService:
         self,
         controller_name: str,
         resource_name: str,
-        task_options: TaskOptionsByTask,
         user_pre_tasks: list[PreTaskCommand],
         global_options: dict[str, TaskOptionValue] | None = None,
     ) -> None:

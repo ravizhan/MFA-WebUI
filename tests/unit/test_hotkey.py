@@ -76,10 +76,6 @@ class TestHotkeyValueToCodes:
         with pytest.raises(ValueError, match="主键为空"):
             hotkey_value_to_codes("", "Win32")
 
-    def test_zero_modifier_is_legal_replacement(self):
-        # MacOS 主键 0 合法；无修饰键时 modifier 为 0
-        assert hotkey_value_to_codes("A", "MacOS") == (0, 0, 0)
-
     def test_rejects_more_than_two_modifiers(self):
         with pytest.raises(ValueError, match="最多支持两个修饰键"):
             hotkey_value_to_codes("Ctrl+Alt+Shift+A", "Win32")

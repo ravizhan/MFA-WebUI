@@ -487,10 +487,6 @@ def rescan_scan_select(payload: ScanSelectRescanRequest):
     }
 
 
-def _interface_content_service() -> InterfaceContentService:
-    return InterfaceContentService(interface, APP_ROOT_DIR, interface_translations)
-
-
 @app.post("/api/interface/document")
 def resolve_interface_document(payload: InterfaceDocumentRequest):
     """解析当前已加载 PI 中的文档内容。
@@ -498,7 +494,7 @@ def resolve_interface_document(payload: InterfaceDocumentRequest):
     仅接受 PI 文档字段及其翻译值组成的来源集合；
     不开放任意 URL 代理或任意路径读取。
     """
-    service = _interface_content_service()
+    service = InterfaceContentService(interface, APP_ROOT_DIR, interface_translations)
     allowed = service.collect_document_sources()
     source = payload.source.strip()
     if not source or source not in allowed:

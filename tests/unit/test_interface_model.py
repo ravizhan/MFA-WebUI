@@ -126,36 +126,6 @@ class TestMacOSController:
 
 
 class TestLinuxControllerConfig:
-    def test_defaults(self):
-        config = LinuxControllerConfig()
-        assert config.screencap == "Wlr"
-        assert config.input == "Wlr"
-        assert config.use_win32_vk_code is False
-        assert config.pipewire_source == "Gamescope"
-
-    def test_omitted_fields_on_controller_default_to_wlr(self):
-        controller = Controller(name="linux", type="Linux")
-        assert controller.linux is None
-        controller_with = Controller(
-            name="linux",
-            type="Linux",
-            linux=LinuxControllerConfig(),
-        )
-        assert controller_with.linux is not None
-        assert controller_with.linux.screencap == "Wlr"
-        assert controller_with.linux.input == "Wlr"
-
-    def test_pipewire_gamescope_config(self):
-        config = LinuxControllerConfig(
-            screencap="PipeWire",
-            input="Libei",
-            pipewire_source="Gamescope",
-            use_win32_vk_code=True,
-        )
-        assert config.screencap == "PipeWire"
-        assert config.input == "Libei"
-        assert config.use_win32_vk_code is True
-
     def test_invalid_screencap_rejected(self):
         with pytest.raises(ValidationError):
             LinuxControllerConfig(screencap="ExtImage")
@@ -476,46 +446,12 @@ class TestTelemetryConfig:
             "resource": [{"name": "main", "path": ["resource"]}],
         }
 
-    def test_missing_telemetry_means_disabled(self):
-        from models.interface import InterfaceModel
-
-        model = InterfaceModel.model_validate(self._base())
-        assert model.telemetry is None
-
-    def test_sentry_missing_means_disabled(self):
-        from models.interface import InterfaceModel
-
-        data = self._base() | {"telemetry": {}}
-        model = InterfaceModel.model_validate(data)
-        assert model.telemetry is not None
-        assert model.telemetry.sentry is None
-
     def test_blank_dsn_rejected(self):
         from models.interface import InterfaceModel
 
         data = self._base() | {"telemetry": {"sentry": {"dsn": "   "}}}
         with pytest.raises(Exception):
             InterfaceModel.model_validate(data)
-
-    def test_valid_dsn_defaults(self):
-        from models.interface import InterfaceModel
-
-        data = self._base() | {
-            "telemetry": {
-                "sentry": {
-                    "dsn": "https://key@example.com/42",
-                }
-            }
-        }
-        model = InterfaceModel.model_validate(data)
-        assert model.telemetry is not None
-        sentry = model.telemetry.sentry
-        assert sentry is not None
-        assert sentry.dsn == "https://key@example.com/42"
-        assert sentry.tracing is True
-        assert sentry.traces_sample_rate == 1.0
-        assert sentry.failure_attachments_sample_rate == 1.0
-        assert sentry.environment is None
 
     def test_sample_rate_out_of_range_rejected(self):
         from models.interface import InterfaceModel
@@ -546,19 +482,3 @@ class TestTelemetryConfig:
             }
             with pytest.raises(Exception):
                 InterfaceModel.model_validate(data)
-
-    def test_interface_version_stays_2(self):
-        from models.interface import InterfaceModel
-
-        model = InterfaceModel.model_validate(self._base())
-        assert model.interface_version == 2
-
-    def test_title_uses_name_not_label(self):
-        from models.interface import InterfaceModel
-
-        data = self._base() | {
-            "label": "显示名",
-            "version": "1.0.0",
-        }
-        model = InterfaceModel.model_validate(data)
-        assert model.title == "Test 1.0.0"

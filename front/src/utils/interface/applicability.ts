@@ -1,4 +1,4 @@
-import type { InterfaceModel, Option } from "@/types/interfaceModel"
+import type { Option } from "@/types/interfaceModel"
 
 /**
  * option 是否适用于给定控制器/资源上下文。
@@ -26,12 +26,4 @@ export function isOptionApplicable(
     }
   }
   return true
-}
-
-/** 从 interface.option 表中查找 option 定义（缺失视为适用）。 */
-export function lookupOptionApplicability(
-  model: Partial<InterfaceModel> | null | undefined,
-  optionName: string,
-): Pick<Option, "controller" | "resource"> | undefined {
-  return model?.option?.[optionName]
 }

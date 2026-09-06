@@ -16,11 +16,6 @@ DeviceType = Literal["Adb", "Win32", "MacOS", "Gamepad", "PlayCover", "Linux"]
 
 _IPV4_PORT_PATTERN = re.compile(r"^([^:]+):(\d+)$")
 
-_SCREEN_WIDTH_MAX = 32768
-_SCREEN_HEIGHT_MAX = 32768
-_SCREEN_WIDTH_MIN = 1
-_SCREEN_HEIGHT_MIN = 1
-
 
 class LinuxDeviceAddress(BaseModel):
     """Linux 控制器持久化设备地址（runtime fd/node id 不入库）。
@@ -133,23 +128,6 @@ def canonicalize_ipv4_port(address: str) -> str:
     if not 1 <= port <= 65535:
         raise ValueError(f"port out of range: {port} (must be 1-65535)")
     return f"{ip.compressed}:{port}"
-
-
-def _validate_uinput_fields(data: dict, extra: str = "") -> None:
-    width_raw = data.get("uinput_screen_width")
-    height_raw = data.get("uinput_screen_height")
-    uinput_path = data.get("uinput_path")
-    uinput_path = uinput_path.strip() if isinstance(uinput_path, str) else ""
-    if not uinput_path:
-        data["uinput_path"] = "/dev/uinput"
-    elif isinstance(data.get("uinput_path"), str):
-        data["uinput_path"] = uinput_path
-    if not isinstance(width_raw, int) or isinstance(width_raw, bool):
-        raise ValueError(f"UInput 输入必须提供正整数屏幕宽高{extra}")
-    if not isinstance(height_raw, int) or isinstance(height_raw, bool):
-        raise ValueError(f"UInput 输入必须提供正整数屏幕宽高{extra}")
-    if width_raw < 1 or height_raw < 1:
-        raise ValueError(f"UInput 屏幕宽高必须为正整数{extra}")
 
 
 def canonicalize_custom_device_address(device_type: str, address: str) -> str:

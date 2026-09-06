@@ -31,13 +31,11 @@ def is_elevated() -> bool:
     return os.geteuid() == 0 if hasattr(os, "geteuid") else False
 
 
-def build_restart_command(app_root: Path) -> list[str] | None:
+def build_restart_command(app_root: Path) -> list[str]:
     """构造当前程序的重启命令（服务端控制，不含客户端输入）。
 
     Nuitka 打包：直接运行当前可执行文件；
     源码运行：以当前解释器运行 main.py。
-    固定参数：--scheduled-task（若有）之外不带任何动态参数；
-    由调用方在需要时追加既有的启动参数（当前仅支持冷启动任务 id）。
     """
     if (
         getattr(sys, "frozen", False)
@@ -48,7 +46,7 @@ def build_restart_command(app_root: Path) -> list[str] | None:
     return [sys.executable, str(app_root / "main.py")]
 
 
-def request_elevation(app_root: Path, extra_args: list[str] | None = None) -> bool:
+def request_elevation(app_root: Path) -> bool:
     """请求以管理员权限重启当前程序。
 
     返回 True 表示提权请求已提交（新进程已启动，调用方应退出当前进程）；
@@ -56,10 +54,7 @@ def request_elevation(app_root: Path, extra_args: list[str] | None = None) -> bo
 
     提权后继续监听 0.0.0.0:5566（用户明确选择保留局域网访问）。
     """
-    command = build_restart_command(app_root)
-    if command is None:
-        return False
-    args = [*command, *(extra_args or [])]
+    args = build_restart_command(app_root)
 
     if sys.platform == "win32":
         # ShellExecuteW "runas"：标准 UAC 提示，不构造 shell 字符串

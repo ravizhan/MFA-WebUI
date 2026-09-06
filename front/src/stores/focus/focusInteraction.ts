@@ -5,16 +5,10 @@ import {
   acknowledgeFocusInteraction,
   cancelFocusInteraction,
 } from "@/services/api/modules/focus"
+import type { FocusInteractionPayload } from "@/services/api/modules/focus"
 
-/** 后端 focus 交互（dialog / modal）的前端状态。 */
-export interface FocusInteraction {
-  id: string
-  run_id: string
-  mode: "dialog" | "modal"
-  state: "pending" | "acknowledged" | "cancelled"
-  content: string
-  created_at: number
-}
+/** 后端 focus 交互（dialog / modal）的前端状态（API 契约别名）。 */
+export type FocusInteraction = FocusInteractionPayload
 
 /** store 公开契约（供 dispatcher 等消费方引用，避免 ReturnType 推导）。 */
 export interface FocusInteractionStoreContract {
@@ -32,7 +26,6 @@ export interface FocusInteractionStoreContract {
   hydrate: () => Promise<void>
   acknowledge: (id: string) => Promise<void>
   cancel: (id: string) => Promise<void>
-  clearAll: () => void
 }
 
 /**
@@ -129,10 +122,6 @@ export const useFocusInteractionStore = defineStore("focusInteraction", () => {
     }
   }
 
-  function clearAll(): void {
-    pending.value = []
-  }
-
   return {
     pending,
     hydrated,
@@ -142,6 +131,5 @@ export const useFocusInteractionStore = defineStore("focusInteraction", () => {
     hydrate,
     acknowledge,
     cancel,
-    clearAll,
   }
 })

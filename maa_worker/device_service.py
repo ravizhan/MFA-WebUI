@@ -1147,7 +1147,6 @@ class DeviceService:
         resource_name: str,
         global_options: dict[str, TaskOptionValue],
         user_pre_tasks: list[PreTaskCommand],
-        task_options: dict | None = None,
     ) -> bool:
         """准备临界区内的连接前准备：权限 → 释放旧连接 → 适用 PI pretask →
         用户命令 → 低层 connect。不加载 resource；调用者随后在同一临界区
@@ -1175,7 +1174,6 @@ class DeviceService:
         self.worker.pretasks.run_all(
             effective_controller,
             resource_name,
-            task_options or {},
             user_pre_tasks,
             global_options=global_options,
         )

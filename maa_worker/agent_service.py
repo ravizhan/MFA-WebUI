@@ -8,6 +8,7 @@ from maa_worker.agent_loader import load_agents
 if TYPE_CHECKING:
     from maa_utils import MaaWorker
 
+from services.i18n_lookup import lookup_i18n_value
 from services.runtime_info import mwu_version, normalize_language
 
 
@@ -66,19 +67,7 @@ class AgentService:
         if not normalized_key:
             return None
 
-        current: Any = mapping
-        for part in normalized_key.split("."):
-            if not isinstance(current, dict) or part not in current:
-                current = None
-                break
-            current = current[part]
-        if isinstance(current, str):
-            return current
-
-        flat_value = mapping.get(normalized_key)
-        if isinstance(flat_value, str):
-            return flat_value
-        return None
+        return lookup_i18n_value(mapping, normalized_key)
 
     def _resolve_i18n_payload(self, payload: Any):
         if isinstance(payload, dict):

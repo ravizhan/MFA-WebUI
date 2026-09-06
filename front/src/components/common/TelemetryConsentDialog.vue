@@ -1,6 +1,6 @@
 <template>
   <NModal
-    v-model:show="visible"
+    v-model:show="telemetryConsentVisible"
     :mask-closable="false"
     :close-on-esc="false"
     preset="card"
@@ -32,7 +32,6 @@
           <NCheckbox
             class="shrink-0"
             :checked="failureAttachments"
-            :disabled="consentChoice !== 'granted'"
             @update:checked="failureAttachments = $event"
           />
           <div class="min-w-0">
@@ -51,8 +50,8 @@
 
     <template #footer>
       <div class="flex justify-end gap-2">
-        <NButton size="small" @click="handleDeny">{{ t("telemetry.consent.deny") }}</NButton>
-        <NButton size="small" type="primary" :loading="submitting" @click="handleGrant">
+        <NButton size="small" @click="submit('denied')">{{ t("telemetry.consent.deny") }}</NButton>
+        <NButton size="small" type="primary" :loading="submitting" @click="submit('granted')">
           {{ t("telemetry.consent.grant") }}
         </NButton>
       </div>
@@ -61,7 +60,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue"
+import { computed, onMounted, ref } from "vue"
 import { telemetryConsentVisible } from "@/services/telemetry/consentState"
 import { useI18n } from "vue-i18n"
 import { getTelemetryStatus, postTelemetryConsent, type TelemetryStatus } from "@/services/api"
@@ -73,11 +72,9 @@ import { showGlobalMessage } from "@/services/feedback/message"
  * 附件开关默认关闭，与主开关分别授权。
  */
 const { t } = useI18n()
-const visible = ref(false)
 const submitting = ref(false)
 const status = ref<TelemetryStatus | null>(null)
 const failureAttachments = ref(false)
-const consentChoice = ref<"granted" | "denied" | null>(null)
 
 const shouldShow = computed(() => {
   const current = status.value
@@ -90,12 +87,8 @@ onMounted(async () => {
   const fetched = await getTelemetryStatus().catch(() => null)
   status.value = fetched
   if (fetched !== null && shouldShow.value) {
-    visible.value = true
+    telemetryConsentVisible.value = true
   }
-})
-
-watch(visible, (value) => {
-  telemetryConsentVisible.value = value
 })
 
 async function submit(consent: "granted" | "denied"): Promise<void> {
@@ -111,7 +104,7 @@ async function submit(consent: "granted" | "denied"): Promise<void> {
   submitting.value = false
   if (result.success) {
     status.value = result.status
-    visible.value = false
+    telemetryConsentVisible.value = false
     showGlobalMessage("success", result.message)
     return
   }
@@ -126,15 +119,5 @@ async function submit(consent: "granted" | "denied"): Promise<void> {
     return
   }
   showGlobalMessage("error", result.message)
-}
-
-function handleGrant(): void {
-  consentChoice.value = "granted"
-  void submit("granted")
-}
-
-function handleDeny(): void {
-  consentChoice.value = "denied"
-  void submit("denied")
 }
 </script>

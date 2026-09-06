@@ -196,7 +196,6 @@ const expandedGroups = ref(new Set<string>())
 
 const groupedView = computed<GroupView[]>(() => {
   const groups = interfaceStore.interface?.group ?? []
-  const visibleIds = new Set(visibleTasks.value.map((task) => task.id))
   const result: GroupView[] = []
   const assigned = new Set<string>()
 
@@ -204,7 +203,7 @@ const groupedView = computed<GroupView[]>(() => {
     const members: TaskListItem[] = []
     for (const task of visibleTasks.value) {
       const interfaceTask = interfaceStore.getTaskByName(task.id)
-      if (visibleIds.has(task.id) && interfaceTask?.group?.includes(group.name)) {
+      if (interfaceTask?.group?.includes(group.name)) {
         members.push(task)
         assigned.add(task.id)
       }

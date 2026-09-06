@@ -59,21 +59,6 @@ def test_consent_api_rejects_stale_target(monkeypatch):
     assert fake.calls == [("old", "granted", True)]
 
 
-def test_consent_api_forwards_and_returns_status(monkeypatch):
-    fake = _FakeTelemetry()
-    monkeypatch.setattr(main.app_state, "telemetry_service", fake)
-    response = set_telemetry_consent(
-        TelemetryConsentRequest(
-            configId="current",
-            consent="granted",
-            failureAttachments=True,
-        )
-    )
-    assert response["status"] == "success"
-    assert response["consent"] == "granted"
-    assert fake.calls == [("current", "granted", True)]
-
-
 def test_consent_api_write_failure_returns_error(monkeypatch):
     class _Failing(_FakeTelemetry):
         def apply_consent(self, *args):

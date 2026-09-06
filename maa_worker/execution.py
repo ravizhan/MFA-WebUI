@@ -610,7 +610,6 @@ async def _complete_run(
                         payload.resource_name,
                         normalized_global_options,
                         normalized_pre_tasks,
-                        normalized_task_options,
                     )
                 )
             except PretaskStopped:

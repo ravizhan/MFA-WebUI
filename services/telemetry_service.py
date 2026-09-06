@@ -529,7 +529,6 @@ class _TaskHandle:
     span: Span | None = None
     scope: Scope | None = None
     started_at: float = field(default_factory=time.monotonic)
-    job_id: str | None = None
     finished: bool = False
 
 
@@ -1332,13 +1331,6 @@ class TelemetryService:
             run.tasks[task.task_name] = task
             return task
 
-    def bind_task_job(self, handle: _TaskHandle | None, job_id: Any) -> None:
-        if handle is None:
-            return
-        value = _safe_string(job_id, max_length=128)
-        if value:
-            handle.job_id = value
-
     def finish_task(
         self, handle: _TaskHandle | None, status: str, error_code: str | None = None
     ) -> None:
@@ -1403,20 +1395,10 @@ class TelemetryService:
         self,
         run_id: str,
         task_name: str | None = None,
-        job_id: Any = None,
         message_type: str | None = None,
         details: dict[str, Any] | None = None,
         trace_allowed: bool = False,
-        **kwargs: Any,
     ) -> _NodeHandle | None:
-        # SinkHandler may pass the resolved FocusDisplayEvent as ``event``.
-        event = kwargs.get("event")
-        if event is None and hasattr(message_type, "trace_allowed"):
-            event = message_type
-            message_type = None
-        if event is not None:
-            trace_allowed = bool(getattr(event, "trace_allowed", trace_allowed))
-            message_type = message_type or getattr(event, "raw_msg", None)
         sentry_config = getattr(
             getattr(self.interface, "telemetry", None), "sentry", None
         )
@@ -1430,11 +1412,6 @@ class TelemetryService:
             if run is None:
                 return None
             task_handle = run.tasks.get(task_name or "")
-            if task_handle is None and job_id is not None:
-                job = _safe_string(job_id, max_length=128)
-                task_handle = next(
-                    (h for h in run.tasks.values() if h.job_id == job), None
-                )
             parent = task_handle.span if task_handle is not None else run.transaction
             span = None
             if parent is not None:
@@ -1826,28 +1803,6 @@ class TelemetryService:
             task_name=task_name,
             controller=controller,
             attach=True,
-        )
-
-    def capture_error(
-        self,
-        run_id: str | None = None,
-        error_code: str = "mwu.error",
-        exception: BaseException | None = None,
-        *,
-        status: str | None = None,
-        task_name: str | None = None,
-        controller: Any | None = None,
-        attach: bool = False,
-    ) -> None:
-        if status in {"stopped", "cancelled"}:
-            return
-        self._capture_error(
-            run_id,
-            error_code=error_code,
-            exception=exception,
-            task_name=task_name,
-            controller=controller,
-            attach=attach,
         )
 
     def _clear_run_buffers_locked(self) -> None:

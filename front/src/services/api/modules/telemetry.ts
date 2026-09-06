@@ -18,15 +18,8 @@ export interface TelemetryStatus {
   failureAttachments: boolean
 }
 
-interface TelemetryStatusResponse extends ApiResponse {
+interface TelemetryStatusResponse extends TelemetryStatus, ApiResponse {
   status: "success"
-  configured: boolean
-  buildAllowed: boolean
-  active: boolean
-  configId: string
-  recipient: TelemetryRecipient | null
-  consent: "unknown" | "granted" | "denied"
-  failureAttachments: boolean
 }
 
 interface TelemetryConsentRequest {

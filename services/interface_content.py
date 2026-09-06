@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 from models.interface_loader import resolve_interface_relative_path
+from services.i18n_lookup import lookup_i18n_value
 
 if TYPE_CHECKING:
     from models.interface import InterfaceModel
@@ -53,25 +54,6 @@ def _candidate_locale_keys(locale: str) -> list[str]:
     if normalized == "zh_cn":
         add("zh-CN")
     return keys
-
-
-def _lookup_i18n_value(mapping: dict[str, Any], ref: str) -> str | None:
-    """嵌套路径查找，再查完整键（与 AgentService._lookup_i18n_text 同语义）。"""
-    if not isinstance(mapping, dict) or not mapping:
-        return None
-    if ref in mapping:
-        value = mapping[ref]
-        if isinstance(value, str) and value:
-            return value
-    current: Any = mapping
-    for part in ref.split("."):
-        if not isinstance(current, dict) or part not in current:
-            current = None
-            break
-        current = current[part]
-    if isinstance(current, str) and current:
-        return current
-    return None
 
 
 def _is_i18n_reference(value: str) -> bool:
@@ -110,7 +92,7 @@ class InterfaceContentService:
             mapping = self._translations.get(locale_key)
             if not isinstance(mapping, dict):
                 continue
-            resolved = _lookup_i18n_value(mapping, ref)
+            resolved = lookup_i18n_value(mapping, ref)
             if resolved is not None:
                 return resolved
         return None

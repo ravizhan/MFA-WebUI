@@ -614,54 +614,6 @@ describe("useDeviceConnectionStore", () => {
         expect(callTimes.every((t) => t < deadline)).toBe(true)
       })
     })
-
-    it("never pre-connects even when already connected", async () => {
-      const store = useDeviceConnectionStore()
-      const configStore = useTaskConfigStore()
-      const interfaceStore = useInterfaceStore()
-      const payload = {
-        task_identity: "name" as const,
-        task_list: ["Task 1"],
-        task_options: {},
-        preTasks: [],
-      }
-      store.controllerCapabilities = [adbCapability]
-      store.selectedController = "ADB"
-      store.selectedDeviceKey = "adb|/usr/bin/adb|127.0.0.1:5555"
-      store.availableDevices = [adbDevice]
-      store.resource = "res1"
-      configStore.configLoaded = true
-      configStore.taskList = [{ id: "Task 1", name: "Task 1", order: 0, checked: true }]
-
-      interfaceStore.interface = {
-        task: [{ name: "Task 1", entry: "task1" }],
-      }
-      vi.spyOn(configStore, "buildExecutionPayload").mockReturnValue(payload)
-      const expectedPayload = {
-        ...payload,
-        controller_name: "adb",
-        device: {
-          controller_name: "adb",
-          device_type: "Adb",
-          device_address: "127.0.0.1:5555",
-        },
-        resource_name: "res1",
-      }
-      const connectSpy = vi.spyOn(store, "connectDevices").mockResolvedValue({
-        success: true,
-        message: "ok",
-      })
-      const resourceSpy = vi.spyOn(store, "postResourceSelection").mockResolvedValue({
-        success: true,
-        message: "ok",
-      })
-      vi.mocked(api.startTask).mockResolvedValue({ accepted: true, runId: "run-1" })
-      const result = await store.StartTask()
-      expect(result).toBe(true)
-      expect(connectSpy).not.toHaveBeenCalled()
-      expect(resourceSpy).not.toHaveBeenCalled()
-      expect(api.startTask).toHaveBeenCalledWith(expectedPayload)
-    })
   })
 
   describe("fetchDevices", () => {

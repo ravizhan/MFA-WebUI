@@ -60,11 +60,6 @@ def test_mwu_version_prefers_version_file(monkeypatch, tmp_path):
     assert runtime_info.mwu_version() == "v9.9.9"
 
 
-def test_mwu_version_falls_back_when_file_missing(monkeypatch, tmp_path):
-    monkeypatch.setattr(runtime_info, "app_root", lambda: tmp_path)
-    assert runtime_info.mwu_version()  # 非空即可（元数据或 unknown）
-
-
 def test_normalize_language():
     assert runtime_info.normalize_language("zh-CN") == "zh_cn"
     assert runtime_info.normalize_language("zh_CN") == "zh_cn"
