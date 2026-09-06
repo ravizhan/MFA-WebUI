@@ -10,13 +10,13 @@ from models.interface import (
     GamepadController,
     HotkeyCase,
     InterfaceModel,
+    LinuxControllerConfig,
     MacOSController,
     Option,
     OptionCase,
     Resource,
     SettingSection,
     Win32Controller,
-    WlRootsController,
     _pipeline_override_contains_attach_option,
     validate_regex,
 )
@@ -125,13 +125,40 @@ class TestMacOSController:
             MacOSController.model_validate({"input": "Invalid"})
 
 
-class TestWlRootsController:
-    def test_win32_keycode_mode(self):
-        config = WlRootsController(use_win32_vk_code=True)
-        controller = Controller(name="wayland", type="WlRoots", wlroots=config)
+class TestLinuxControllerConfig:
+    def test_defaults(self):
+        config = LinuxControllerConfig()
+        assert config.screencap == "Wlr"
+        assert config.input == "Wlr"
+        assert config.use_win32_vk_code is False
+        assert config.pipewire_source == "Gamescope"
 
-        assert controller.wlroots is not None
-        assert controller.wlroots.use_win32_vk_code is True
+    def test_omitted_fields_on_controller_default_to_wlr(self):
+        controller = Controller(name="linux", type="Linux")
+        assert controller.linux is None
+        controller_with = Controller(
+            name="linux",
+            type="Linux",
+            linux=LinuxControllerConfig(),
+        )
+        assert controller_with.linux is not None
+        assert controller_with.linux.screencap == "Wlr"
+        assert controller_with.linux.input == "Wlr"
+
+    def test_pipewire_gamescope_config(self):
+        config = LinuxControllerConfig(
+            screencap="PipeWire",
+            input="Libei",
+            pipewire_source="Gamescope",
+            use_win32_vk_code=True,
+        )
+        assert config.screencap == "PipeWire"
+        assert config.input == "Libei"
+        assert config.use_win32_vk_code is True
+
+    def test_invalid_screencap_rejected(self):
+        with pytest.raises(ValidationError):
+            LinuxControllerConfig(screencap="ExtImage")
 
 
 # ---------------------------------------------------------------------------
@@ -176,7 +203,7 @@ class TestGamepadController:
 
 class TestController:
     @pytest.mark.parametrize(
-        "ctrl_type", ["Adb", "Win32", "MacOS", "PlayCover", "Gamepad"]
+        "ctrl_type", ["Adb", "Win32", "MacOS", "PlayCover", "Linux", "Gamepad"]
     )
     def test_valid_types(self, ctrl_type):
         ctrl = Controller(name="c", type=ctrl_type)
@@ -336,10 +363,10 @@ class TestInterfaceModel:
         model = InterfaceModel(**_base_iface_data)
         assert model.label == "Test"
 
-    def test_title_set_when_label_and_version_present(self, _base_iface_data):
+    def test_title_set_when_name_and_version_present(self, _base_iface_data):
         data = {**_base_iface_data, "label": "My Game", "version": "1.0.0"}
         model = InterfaceModel.model_validate(data)
-        assert model.title == "My Game 1.0.0"
+        assert model.title == "Test 1.0.0"
 
     def test_import_alias(self, _base_iface_data):
         model = InterfaceModel(**_base_iface_data, **{"import": ["tasks.json5"]})
@@ -433,3 +460,105 @@ class TestInterfaceModel:
 
         with pytest.raises(ValidationError, match="不支持 Meta/Command/Win"):
             InterfaceModel.model_validate(data)
+
+
+# ---------------------------------------------------------------------------
+# telemetry 配置（PI v2.9.2）
+# ---------------------------------------------------------------------------
+
+
+class TestTelemetryConfig:
+    def _base(self) -> dict:
+        return {
+            "interface_version": 2,
+            "name": "Test",
+            "controller": [{"name": "adb", "type": "Adb"}],
+            "resource": [{"name": "main", "path": ["resource"]}],
+        }
+
+    def test_missing_telemetry_means_disabled(self):
+        from models.interface import InterfaceModel
+
+        model = InterfaceModel.model_validate(self._base())
+        assert model.telemetry is None
+
+    def test_sentry_missing_means_disabled(self):
+        from models.interface import InterfaceModel
+
+        data = self._base() | {"telemetry": {}}
+        model = InterfaceModel.model_validate(data)
+        assert model.telemetry is not None
+        assert model.telemetry.sentry is None
+
+    def test_blank_dsn_rejected(self):
+        from models.interface import InterfaceModel
+
+        data = self._base() | {"telemetry": {"sentry": {"dsn": "   "}}}
+        with pytest.raises(Exception):
+            InterfaceModel.model_validate(data)
+
+    def test_valid_dsn_defaults(self):
+        from models.interface import InterfaceModel
+
+        data = self._base() | {
+            "telemetry": {
+                "sentry": {
+                    "dsn": "https://key@example.com/42",
+                }
+            }
+        }
+        model = InterfaceModel.model_validate(data)
+        assert model.telemetry is not None
+        sentry = model.telemetry.sentry
+        assert sentry is not None
+        assert sentry.dsn == "https://key@example.com/42"
+        assert sentry.tracing is True
+        assert sentry.traces_sample_rate == 1.0
+        assert sentry.failure_attachments_sample_rate == 1.0
+        assert sentry.environment is None
+
+    def test_sample_rate_out_of_range_rejected(self):
+        from models.interface import InterfaceModel
+
+        for bad in (1.5, -0.1):
+            data = self._base() | {
+                "telemetry": {
+                    "sentry": {
+                        "dsn": "https://key@example.com/42",
+                        "traces_sample_rate": bad,
+                    }
+                }
+            }
+            with pytest.raises(Exception):
+                InterfaceModel.model_validate(data)
+
+    def test_sample_rate_nan_infinite_rejected(self):
+        from models.interface import InterfaceModel
+
+        for bad in (float("nan"), float("inf")):
+            data = self._base() | {
+                "telemetry": {
+                    "sentry": {
+                        "dsn": "https://key@example.com/42",
+                        "failure_attachments_sample_rate": bad,
+                    }
+                }
+            }
+            with pytest.raises(Exception):
+                InterfaceModel.model_validate(data)
+
+    def test_interface_version_stays_2(self):
+        from models.interface import InterfaceModel
+
+        model = InterfaceModel.model_validate(self._base())
+        assert model.interface_version == 2
+
+    def test_title_uses_name_not_label(self):
+        from models.interface import InterfaceModel
+
+        data = self._base() | {
+            "label": "显示名",
+            "version": "1.0.0",
+        }
+        model = InterfaceModel.model_validate(data)
+        assert model.title == "Test 1.0.0"

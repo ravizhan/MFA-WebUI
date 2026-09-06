@@ -37,6 +37,7 @@ from models.settings import SettingsModel
 
 def make_payload(task_name: str = "Startup") -> ManualStartPayload:
     return ManualStartPayload(
+        task_identity="name",
         task_list=[task_name],
         controller_name="AdbController",
         device=ScheduledTaskDeviceConfig(
@@ -50,6 +51,7 @@ def make_payload(task_name: str = "Startup") -> ManualStartPayload:
 
 def make_task(task_id: str = "task-1", name: str = "定时任务") -> ScheduledTask:
     return ScheduledTask(
+        task_identity="name",
         id=task_id,
         name=name,
         wakeup_enabled=True,
@@ -84,10 +86,13 @@ class _FakeEvents:
 
 class _FakeInterface:
     def __init__(self, entries: list[str]):
-        self.task = [SimpleNamespace(entry=e, option=[]) for e in entries]
+        self.task = [SimpleNamespace(name=e, entry=e, option=[]) for e in entries]
         self.option = {}
         self.global_option = []
         self.pretask = []
+        self.resource = []
+        self.controller = []
+        self.setting = []
 
 
 class _FakeTaskService:
@@ -184,6 +189,8 @@ class _FakeDeviceState:
     configuration_locked = False
     controller_name = ""
     current_resource_name = ""
+    prepared_resource_name: str | None = None
+    last_device_error: str | None = None
 
 
 class _FakeDevice:
@@ -194,7 +201,9 @@ class _FakeDevice:
         if not block:
             self.release.set()
         self.connect_called = False
+        self.prepare_called = False
         self._ordering = ordering
+        self._pretasks = None
 
     def build_device_model_from_config(self, controller_name, device_type, address):
         return SimpleNamespace(
@@ -211,6 +220,30 @@ class _FakeDevice:
         return True
 
     def set_resource(self, name):
+        return True
+
+    def has_preparation_programs(self, controller_name, resource_name, user_pre_tasks):
+        return False
+
+    def prepare_connection(
+        self,
+        device_config,
+        resource_name,
+        global_options,
+        user_pre_tasks,
+        task_options=None,
+    ):
+        self.prepare_called = True
+        # 与真实服务一致：先执行 pretask 阶段（fake pretasks 内部抛错/记录）
+        if self._pretasks is not None:
+            self._pretasks.run_all(
+                device_config.controller_name,
+                resource_name,
+                task_options or {},
+                user_pre_tasks,
+                global_options=global_options,
+            )
+        # 复用判定由 _FakeDeviceState 类属性模拟：ready 连接直接复用
         return True
 
 
@@ -232,16 +265,13 @@ class _FakeWorker:
         ordering: list[str] | None = None,
     ):
         self.events = _FakeEvents()
-        self.interface = _FakeInterface(["Startup"])
+        self.interface = _FakeInterface(["Startup", "手动任务A", "手动任务B"])
         self.task_state = _FakeTaskState()
         self.pretasks = _FakePretaskService(self.task_state, ordering)
         self.tasks = _FakeTaskService(start_result, task_state=self.task_state)
         self.device_state = _FakeDeviceState()
-        self.device = (
-            _FakeDevice(ordering=ordering, block=block_connect)
-            if block_connect or ordering is not None
-            else None
-        )
+        self.device = _FakeDevice(ordering=ordering, block=block_connect)
+        self.device._pretasks = self.pretasks
         if ready:
             self.device_state.connected = True
             self.device_state.configuration_locked = True
@@ -630,15 +660,13 @@ class TestPretaskAdmission:
 
         payload = make_payload("RemovedTask")
         admission = await submit_manual(state, payload)
-        assert admission.accepted is True
-        await _await_active_task(state)
 
-        assert worker.pretasks.calls == []
-        assert worker.tasks.called is False
-        row = list_executions(state.scheduler_db_path)[0]
-        assert row.id == admission.run_id
-        assert row.status == "failed"
-        assert row.error_message == "任务列表为空"
+        # 未知任务名在准入前即被拒绝（HTTP 层映射 422），不占槽、无落库
+        assert admission.accepted is False
+        assert admission.invalid_task_names == ["RemovedTask"]
+        assert admission.run_id is None
+        assert state.active_run is None
+        assert list_executions(state.scheduler_db_path) == []
 
     async def test_pretask_receives_normalized_options_and_pre_tasks(
         self, state: AppState
@@ -677,8 +705,8 @@ class TestPretaskAdmission:
             result=True, task_state=worker.task_state
         )
         worker.interface.task = [
-            SimpleNamespace(entry="Startup", option=[]),
-            SimpleNamespace(entry="Second", option=[]),
+            SimpleNamespace(name="Startup", entry="Startup", option=[]),
+            SimpleNamespace(name="Second", entry="Second", option=[]),
         ]
         worker.interface.option = {
             "global_setting": Option(

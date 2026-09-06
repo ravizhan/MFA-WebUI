@@ -173,8 +173,9 @@ def test_pi_argv_preserves_args_and_appends_compact_option_json(monkeypatch):
     PretaskService(worker).run_all(
         "adb",
         "main",
-        {"main": {"mode": "safe", "tags": ["red"]}},
+        {},
         [],
+        global_options={"mode": "safe", "tags": ["red"]},
     )
 
     assert recorder.calls[0][0] == [
@@ -188,8 +189,7 @@ def test_pi_argv_preserves_args_and_appends_compact_option_json(monkeypatch):
 def test_option_values_aggregate_task_entry_values_and_honor_declared_defaults(
     monkeypatch,
 ):
-    """task_options 以任务条目 ID 为键；pretask 选项跨条目聚合查找用户值，
-    缺失时回退到接口声明的 default_case/inputs 默认值。"""
+    """pretask 选项从 globalOptionValues 取值；未提供的选项回退声明默认值。"""
     options = {
         "mode": Option(
             type="select",
@@ -225,8 +225,9 @@ def test_option_values_aggregate_task_entry_values_and_honor_declared_defaults(
     PretaskService(worker).run_all(
         "adb",
         "main",
-        {"selected-task": {"mode": "first"}, "fallback": {"mode": "ignored"}},
+        {"selected-task": {"mode": "ignored"}},
         [],
+        global_options={"mode": "first"},
     )
 
     assert (
@@ -262,8 +263,9 @@ def test_option_values_prefer_task_then_global_then_default():
 
     values = service._resolve_option_values(
         Pretask(exec="pi-tool", option=["mode", "tags", "fallback"]),
-        {"task": {"mode": "task"}},
-        {"mode": "global-mode", "tags": ["global"]},
+        {"mode": "task", "tags": ["global"]},
+        "adb",
+        "main",
     )
 
     assert values == {
