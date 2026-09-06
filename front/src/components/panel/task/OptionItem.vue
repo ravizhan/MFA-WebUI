@@ -95,8 +95,14 @@ const deviceStore = useDeviceConnectionStore()
 const taskOptions = computed(() => rawTaskOptions)
 const option = computed(() => interfaceStore.interface?.option?.[name])
 // 不适用的 option 隐藏子树；值保留在 taskOptions 中，切回环境即恢复
+// option.controller 存的是规范控制器名，必须用 selectedControllerName
+// （selectedController 是 UI display_label，label≠name 时会误判不适用）。
 const applicable = computed(() =>
-  isOptionApplicable(option.value, deviceStore.selectedController, deviceStore.resource || null),
+  isOptionApplicable(
+    option.value,
+    deviceStore.selectedControllerName,
+    deviceStore.resource || null,
+  ),
 )
 const scanSelectRefreshing = ref(false)
 

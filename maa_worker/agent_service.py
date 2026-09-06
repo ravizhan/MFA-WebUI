@@ -1,3 +1,4 @@
+import importlib.metadata
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -123,7 +124,7 @@ class AgentService:
             "PI_CLIENT_NAME": "MWU",
             "PI_CLIENT_VERSION": mwu_version(),
             "PI_CLIENT_LANGUAGE": client_language,
-            "PI_CLIENT_MAAFW_VERSION": "v" + metadata.version("maafw"),
+            "PI_CLIENT_MAAFW_VERSION": "v" + importlib.metadata.version("maafw"),
             "PI_VERSION": self.worker.interface.version or "",
             "PI_CONTROLLER": json.dumps(
                 controller_payload, ensure_ascii=False, separators=(",", ":")

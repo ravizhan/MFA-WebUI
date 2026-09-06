@@ -92,7 +92,11 @@ const scanSelectRefreshing = ref(false)
 const option = computed(() => interfaceStore.interface?.option?.[name])
 // 不适用的 option 隐藏行；globalOptionValues 中的已存值保留
 const applicable = computed(() =>
-  isOptionApplicable(option.value, deviceStore.selectedController, deviceStore.resource || null),
+  isOptionApplicable(
+    option.value,
+    deviceStore.selectedControllerName,
+    deviceStore.resource || null,
+  ),
 )
 
 const resolvedLabel = computed(() =>

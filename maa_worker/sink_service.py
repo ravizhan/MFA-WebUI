@@ -106,9 +106,11 @@ class SinkHandler:
                 # modal：阻塞确认。cancelled → 置 stop_flag 终止流水线
                 result = self._processor.handle_modal(event)
                 if result == "cancelled":
-                    # 不在回调线程内调用 MAA job；仅置标志，由轮询线程提交 stop
+                    # run_process 轮询分支不再提交 post_stop()；必须走统一 stop
+                    # 路径才能真正终止原生任务。TaskService.stop() 已排除
+                    # current_thread 自 join，回调线程内调用安全。
                     try:
-                        self._processor._events.worker.task_state.stop_flag = True
+                        self._processor._events.worker.tasks.stop()
                     except Exception:
                         pass
                 return

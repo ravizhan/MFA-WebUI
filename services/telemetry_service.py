@@ -744,9 +744,16 @@ class TelemetryService:
             if consent == "granted"
             else False,
         )
+        # Merge consent into the *current disk* settings snapshot, not the
+        # startup-captured self._settings.  Otherwise a consent change after
+        # any other settings save would silently revert those newer settings.
+        try:
+            current = settings_io.load_settings_model(self.settings_path)
+        except Exception:
+            current = self._settings
         # Only the dedicated consent path can supply telemetry_override.  The
         # normal settings endpoint always preserves the disk value.
-        next_settings = self._settings.model_copy(update={"telemetry": next_consent})
+        next_settings = current.model_copy(update={"telemetry": next_consent})
         written = settings_io.write_settings_preserving_protected(
             self.settings_path,
             next_settings,

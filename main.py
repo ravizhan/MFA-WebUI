@@ -255,11 +255,11 @@ def _send_modal_reminders(interactions, events):
 async def lifespan(app: FastAPI):
     app_state.is_shutting_down = False
     app_state.broadcaster = LogBroadcaster()
-    with SETTINGS_FILE.open("r", encoding="utf-8") as f:
-        config_data = json.load(f)
     with interface_lock:
-        app_state.settings = SettingsModel.model_validate(
-            config_data,
+        # 必须走 load_settings_model：它会先 _prune_illegal_device_entries，
+        # 把旧版已删除的设备类型（如 WlRoots）条目移除，避免启动即崩溃。
+        app_state.settings = settings_io.load_settings_model(
+            SETTINGS_FILE,
             context={"interface": interface},
         )
     # Consent must be loaded and gated before constructing Worker/native

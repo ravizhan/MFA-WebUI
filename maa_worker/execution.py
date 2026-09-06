@@ -639,10 +639,17 @@ async def _complete_run(
                             worker.device.connect, device_model
                         ):
                             raise RuntimeError("connect() 返回 False")
-                    if not await asyncio.to_thread(
-                        worker.device.set_resource, payload.resource_name
+                    # prepare_connection 复用 locked 上下文时 resource 已加载，
+                    # set_resource() 对 locked 状态一律拒绝，重试只会耗尽次数。
+                    # 仅当 resource 未加载（新连接）时才真正调用 set_resource()。
+                    if (
+                        worker.device_state.current_resource_name
+                        != payload.resource_name
                     ):
-                        raise RuntimeError("set_resource() 返回 False")
+                        if not await asyncio.to_thread(
+                            worker.device.set_resource, payload.resource_name
+                        ):
+                            raise RuntimeError("set_resource() 返回 False")
                     connected = True
                     break
                 except Exception as e:

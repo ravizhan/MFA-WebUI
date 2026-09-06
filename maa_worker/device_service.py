@@ -277,6 +277,7 @@ class DeviceService:
     def _resource_path(self, path: str) -> Path:
         """解析资源路径：{PROJECT_DIR} 替换为 interface 根目录并做 containment 校验。"""
         base_dir = Path(self.worker.context.interface_base_dir).resolve()
+        # resource bundle 既可能是目录（resource/）也可能是单文件，两种都合法。
         if "{PROJECT_DIR}" in path:
             prefix, remainder = path.split("{PROJECT_DIR}", 1)
             if prefix.strip().replace("\\", "/").strip("/"):
@@ -284,8 +285,12 @@ class DeviceService:
             relative = remainder.strip().replace("\\", "/").lstrip("/")
             if not relative:
                 raise ValueError("path 不能为空")
-            return resolve_interface_relative_path(base_dir, relative)
-        return resolve_interface_relative_path(base_dir, path)
+            return resolve_interface_relative_path(
+                base_dir, relative, allow_files_and_directories=True
+            )
+        return resolve_interface_relative_path(
+            base_dir, path, allow_files_and_directories=True
+        )
 
     def _load_resource_bundle(self, path: str) -> str:
         resolved_path = self._resource_path(path)

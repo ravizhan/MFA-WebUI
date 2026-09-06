@@ -294,6 +294,7 @@ def resolve_interface_relative_path(
     *,
     field_name: str = "path",
     allow_directories: bool = False,
+    allow_files_and_directories: bool = False,
 ) -> Path:
     normalized_path = _normalize_root_relative_path(raw_path, field_name=field_name)
 
@@ -302,6 +303,10 @@ def resolve_interface_relative_path(
         raise ValueError(f"{field_name} 越界，禁止访问软件根目录之外的路径: {raw_path}")
     if not resolved_path.exists():
         raise ValueError(f"{field_name} 不存在: {raw_path}")
+    if allow_files_and_directories:
+        if not (resolved_path.is_file() or resolved_path.is_dir()):
+            raise ValueError(f"{field_name} 不是文件或目录: {raw_path}")
+        return resolved_path
     if allow_directories:
         if not resolved_path.is_dir():
             raise ValueError(f"{field_name} 不是目录: {raw_path}")
