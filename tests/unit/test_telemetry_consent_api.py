@@ -1,8 +1,36 @@
+import importlib
+import sys
 from types import SimpleNamespace
 
-import main
-from main import TelemetryConsentRequest, get_telemetry, set_telemetry_consent
+import pytest
+
+from models.interface import InterfaceModel
 from services.telemetry_service import TelemetryConsentStaleError
+
+
+@pytest.fixture
+def isolated_main(monkeypatch):
+    sys.modules.pop("main", None)
+
+    interface = InterfaceModel.model_validate(
+        {
+            "interface_version": 2,
+            "name": "Test",
+            "controller": [{"name": "ADB", "label": "ADB", "type": "Adb"}],
+            "resource": [{"name": "main", "path": ["resource"]}],
+            "task": [],
+        }
+    )
+    monkeypatch.setattr(
+        "models.interface_loader.load_interface_model",
+        lambda _app_root: interface,
+    )
+
+    module = importlib.import_module("main")
+    try:
+        yield module
+    finally:
+        sys.modules.pop("main", None)
 
 
 class _FakeTelemetry:
@@ -37,19 +65,19 @@ class _FakeTelemetry:
         }
 
 
-def test_get_telemetry_without_service_is_safe(monkeypatch):
-    monkeypatch.setattr(main.app_state, "telemetry_service", None)
-    payload = get_telemetry()
+def test_get_telemetry_without_service_is_safe(isolated_main, monkeypatch):
+    monkeypatch.setattr(isolated_main.app_state, "telemetry_service", None)
+    payload = isolated_main.get_telemetry()
     assert payload["status"] == "success"
     assert payload["consent"] == "unknown"
     assert payload["active"] is False
 
 
-def test_consent_api_rejects_stale_target(monkeypatch):
+def test_consent_api_rejects_stale_target(isolated_main, monkeypatch):
     fake = _FakeTelemetry()
-    monkeypatch.setattr(main.app_state, "telemetry_service", fake)
-    response = set_telemetry_consent(
-        TelemetryConsentRequest(
+    monkeypatch.setattr(isolated_main.app_state, "telemetry_service", fake)
+    response = isolated_main.set_telemetry_consent(
+        isolated_main.TelemetryConsentRequest(
             configId="old",
             consent="granted",
             failureAttachments=True,
@@ -59,15 +87,15 @@ def test_consent_api_rejects_stale_target(monkeypatch):
     assert fake.calls == [("old", "granted", True)]
 
 
-def test_consent_api_write_failure_returns_error(monkeypatch):
+def test_consent_api_write_failure_returns_error(isolated_main, monkeypatch):
     class _Failing(_FakeTelemetry):
-        def apply_consent(self, *args):
+        def apply_consent(self, config_id, consent, failure_attachments):
             raise OSError("disk full")
 
     fake = _Failing()
-    monkeypatch.setattr(main.app_state, "telemetry_service", fake)
-    response = set_telemetry_consent(
-        TelemetryConsentRequest(configId="current", consent="granted")
+    monkeypatch.setattr(isolated_main.app_state, "telemetry_service", fake)
+    response = isolated_main.set_telemetry_consent(
+        isolated_main.TelemetryConsentRequest(configId="current", consent="granted")
     )
     assert response.status_code == 500
     assert response.body and b"disk full" in response.body
