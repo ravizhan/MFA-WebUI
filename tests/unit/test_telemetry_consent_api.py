@@ -9,8 +9,12 @@ from services.telemetry_service import TelemetryConsentStaleError
 
 
 @pytest.fixture
-def isolated_main(monkeypatch):
+def isolated_main(monkeypatch, tmp_path):
     sys.modules.pop("main", None)
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(tmp_path / "mwu.exe"))
+    (tmp_path / "page" / "assets").mkdir(parents=True)
+    (tmp_path / "resource").mkdir()
 
     interface = InterfaceModel.model_validate(
         {
